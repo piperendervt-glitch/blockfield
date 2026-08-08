@@ -73,10 +73,12 @@ namespace BlockField
             int voxels = m_VoxelField != null ? m_VoxelField.CurrentCount : 0;
             float fps = m_SmoothedDeltaTime > 0.0001f ? 1f / m_SmoothedDeltaTime : 0f;
 
+            string field = m_VoxelField != null && m_VoxelField.FieldVisible ? "ON" : "OFF";
+
             return
                 $"USE_SCENE: {perm}   Planes: {planes}   RayHit: {rayHit}\n" +
                 $"Origin: {origin}   AnchorSaved: {(anchorSaved ? "Y" : "N")}\n" +
-                $"Voxels: {voxels}   FPS: {fps:F1}\n" +
+                $"Voxels: {voxels}   Field: {field}   FPS: {fps:F1}\n" +
                 $"Last: {s_LastEvent}";
         }
     }

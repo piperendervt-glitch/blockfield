@@ -30,11 +30,15 @@ namespace BlockField
         const int k_BridgeCellY = 1; // 平原1層目 (y=0) の上に乗せて共面を避ける
 
         InputAction m_AButtonAction;
+        InputAction m_BButtonAction;
         bool m_Built;
         int m_CountIndex;
         Mesh m_CubeMesh;
         bool m_SwitchRequested;
+        bool m_ToggleRequested;
+        bool m_FieldVisible = true;
         float m_LastSwitchTime = float.NegativeInfinity;
+        float m_LastToggleTime = float.NegativeInfinity;
         readonly List<GameObject> m_Chunks = new();
         readonly List<Mesh> m_GeneratedMeshes = new();
         HashSet<Vector3Int> m_BridgeCells;
@@ -63,6 +67,9 @@ namespace BlockField
         /// <summary>現在表示中のボクセル数（デバッグパネル表示用）。</summary>
         public int CurrentCount { get; private set; }
 
+        /// <summary>平原の表示状態（M3モード時は false。デバッグパネル表示用）。</summary>
+        public bool FieldVisible => m_FieldVisible;
+
         void Awake()
         {
             m_AButtonAction = new InputAction("RightHandAButton", InputActionType.Button,
@@ -70,18 +77,41 @@ namespace BlockField
             // WasPressedThisFrame はヒッチ時に多重発火したため performed コールバックで検出する
             m_AButtonAction.performed += OnAButtonPerformed;
 
+            // Bボタン: M3モード（平原の表示/非表示トグル。赤箱と橋のみ残す）
+            m_BButtonAction = new InputAction("RightHandBButton", InputActionType.Button,
+                "<XRController>{RightHand}/secondaryButton");
+            m_BButtonAction.performed += OnBButtonPerformed;
+
             m_CubeMesh = PrimitiveMeshFactory.CreateCube();
             m_BridgeCells = BuildBridgeCells();
         }
 
-        void OnDestroy() => m_AButtonAction.performed -= OnAButtonPerformed;
+        void OnDestroy()
+        {
+            m_AButtonAction.performed -= OnAButtonPerformed;
+            m_BButtonAction.performed -= OnBButtonPerformed;
+        }
 
-        void OnEnable() => m_AButtonAction.Enable();
-        void OnDisable() => m_AButtonAction.Disable();
+        void OnEnable()
+        {
+            m_AButtonAction.Enable();
+            m_BButtonAction.Enable();
+        }
+
+        void OnDisable()
+        {
+            m_AButtonAction.Disable();
+            m_BButtonAction.Disable();
+        }
 
         void OnAButtonPerformed(InputAction.CallbackContext _)
         {
             m_SwitchRequested = true;
+        }
+
+        void OnBButtonPerformed(InputAction.CallbackContext _)
+        {
+            m_ToggleRequested = true;
         }
 
         void Update()
@@ -106,6 +136,20 @@ namespace BlockField
                 m_LastSwitchTime = Time.unscaledTime;
                 m_CountIndex = (m_CountIndex + 1) % k_Counts.Length;
                 BuildField(k_Counts[m_CountIndex]);
+            }
+
+            bool toggleRequested = m_ToggleRequested;
+            m_ToggleRequested = false;
+            if (toggleRequested && Time.unscaledTime - m_LastToggleTime >= k_SwitchCooldown)
+            {
+                m_LastToggleTime = Time.unscaledTime;
+                m_FieldVisible = !m_FieldVisible;
+                foreach (var chunk in m_Chunks)
+                {
+                    chunk.SetActive(m_FieldVisible);
+                }
+                Debug.Log($"[DummyVoxelField] 平原表示: {(m_FieldVisible ? "ON" : "OFF (M3モード: 赤箱と橋のみ)")}");
+                DebugPanel.Notify($"field {(m_FieldVisible ? "ON" : "OFF")}");
             }
         }
 
@@ -169,6 +213,7 @@ namespace BlockField
                 renderer.sharedMaterial = (m_VoxelMaterials != null && m_VoxelMaterials.Length > 0)
                     ? m_VoxelMaterials[i]
                     : null;
+                go.SetActive(m_FieldVisible); // M3モード中の再構築でも非表示を維持
                 m_Chunks.Add(go);
             }
 

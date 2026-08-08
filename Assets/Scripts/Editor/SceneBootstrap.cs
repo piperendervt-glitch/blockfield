@@ -17,6 +17,9 @@ public static class SceneBootstrap
 {
     public const string ScenePath = "Assets/Scenes/Main.unity";
 
+    /// <summary>環境深度オクルージョン対応シェーダー（オクルードさせたい全マテリアルに適用）。</summary>
+    const string k_OcclusionShader = "BlockField/OcclusionUnlit";
+
     [MenuItem("Tools/Project Setup/Create Main Scene")]
     public static void CreateMainScene()
     {
@@ -74,6 +77,13 @@ public static class SceneBootstrap
         occlusion.requestedEnvironmentDepthMode = EnvironmentDepthMode.Fastest;
         occlusion.enabled = false;
 
+        // 環境深度をグローバルシェーダープロパティへ流す (これが無いと AROcclusionManager を
+        // 有効化しても描画には一切適用されない)。オクルージョンさせたいマテリアルは
+        // BlockField/OcclusionUnlit (XR_HARD_OCCLUSION 対応) を使うこと。
+        // 本体は常時有効で問題ない: XR_HARD_OCCLUSION キーワードは AROcclusionManager が
+        // 権限取得後に有効化されて深度フレームが届いて初めて点灯する。
+        camGo.AddComponent<ARShaderOcclusion>();
+
         // USE_SCENE 権限フロー (Demo 0 T1)
         var gateGo = new GameObject("Scene Permission Gate");
         var gate = gateGo.AddComponent<BlockField.ScenePermissionGate>();
@@ -97,7 +107,7 @@ public static class SceneBootstrap
         diorama.planeManager = planeManager;
         diorama.anchorManager = anchorManager;
         diorama.trackingSpace = offsetGo.transform;
-        diorama.originMaterial = GetOrCreateMaterial("OriginRed", new Color(0.9f, 0.1f, 0.1f));
+        diorama.originMaterial = GetOrCreateMaterial("OriginRed", new Color(0.9f, 0.1f, 0.1f), k_OcclusionShader);
         // レティクルは視認性優先で Unlit の明るい緑
         diorama.reticleMaterial = GetOrCreateMaterial("ReticleWhite", new Color(0.3f, 1f, 0.4f), "Universal Render Pipeline/Unlit");
 
@@ -105,12 +115,12 @@ public static class SceneBootstrap
         voxelField.origin = diorama;
         voxelField.voxelMaterials = new[]
         {
-            GetOrCreateMaterial("Voxel0", new Color(0.35f, 0.65f, 0.30f)),
-            GetOrCreateMaterial("Voxel1", new Color(0.55f, 0.42f, 0.28f)),
-            GetOrCreateMaterial("Voxel2", new Color(0.75f, 0.70f, 0.50f)),
-            GetOrCreateMaterial("Voxel3", new Color(0.45f, 0.55f, 0.65f)),
+            GetOrCreateMaterial("Voxel0", new Color(0.35f, 0.65f, 0.30f), k_OcclusionShader),
+            GetOrCreateMaterial("Voxel1", new Color(0.55f, 0.42f, 0.28f), k_OcclusionShader),
+            GetOrCreateMaterial("Voxel2", new Color(0.75f, 0.70f, 0.50f), k_OcclusionShader),
+            GetOrCreateMaterial("Voxel3", new Color(0.45f, 0.55f, 0.65f), k_OcclusionShader),
         };
-        voxelField.bridgeMaterial = GetOrCreateMaterial("BridgeBlue", new Color(0.2f, 0.4f, 0.9f));
+        voxelField.bridgeMaterial = GetOrCreateMaterial("BridgeBlue", new Color(0.2f, 0.4f, 0.9f), k_OcclusionShader);
 
         // HMD内デバッグパネル (World Space Canvas、カメラ前下方 0.6m に固定)
         var canvasGo = new GameObject("Debug Panel");
