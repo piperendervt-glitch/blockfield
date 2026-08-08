@@ -6,6 +6,10 @@
 - シーン/プレハブの変更は Editor スクリプト経由でコード化する。
   GUI手作業の結果だけをコミットしない
 - RNGは SimCore/Rng の決定論実装のみ使用。System.Random / UnityEngine.Random 禁止
+- 設計の終着点は docs/design/stigmergy_vision.md、
+  全体計画は docs/design/roadmap.md。個別Demoの実装判断は
+  これらと矛盾しないこと（特に: 場のデータ構造の統一、
+  決定論 f(シード, イベントログ)、SimCore の Quest/PC 共用）
 
 ## テスト
 - 実行: scripts/run_tests.ps1（EditMode、batchmode）
