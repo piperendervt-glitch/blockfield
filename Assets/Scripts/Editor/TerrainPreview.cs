@@ -26,12 +26,15 @@ public class TerrainPreview : EditorWindow
     float m_ReliefScale = 24f;
     float m_MountainAmplitude = 1f;
     bool m_FaceShading = true;
+    bool m_ShowVegetation;
 
     World m_World;
     GameObject m_Root;
     GameObject m_EntityRoot;
+    GameObject m_VegetationOverlay;
     Mesh m_CubeMesh;
     Material m_TerrainMaterial;
+    Material m_VegetationMaterial;
     readonly Dictionary<EntityKind, Material> m_EntityMaterials = new Dictionary<EntityKind, Material>();
     readonly List<Object> m_Generated = new List<Object>();
 
@@ -57,6 +60,16 @@ public class TerrainPreview : EditorWindow
         m_ReliefScale = EditorGUILayout.Slider("起伏スケール", m_ReliefScale, 8f, 64f);
         m_MountainAmplitude = EditorGUILayout.Slider("山振幅", m_MountainAmplitude, 0.2f, 1f);
         m_FaceShading = EditorGUILayout.Toggle("面明度差 (D0)", m_FaceShading);
+
+        bool showVeg = EditorGUILayout.Toggle("植生場表示 (E1)", m_ShowVegetation);
+        if (showVeg != m_ShowVegetation)
+        {
+            m_ShowVegetation = showVeg;
+            if (m_World != null)
+            {
+                UpdateVegetationOverlay();
+            }
+        }
 
         EditorGUILayout.Space();
         if (GUILayout.Button("Generate"))
@@ -92,7 +105,15 @@ public class TerrainPreview : EditorWindow
         if (m_World != null)
         {
             EditorGUILayout.LabelField($"Tick: {m_World.TickCount}");
-            EditorGUILayout.LabelField($"Plants: {m_World.PlantCount} / Animals: {m_World.AnimalCount}");
+            EditorGUILayout.LabelField($"Plants: {m_World.PlantCount}  Sheep: {m_World.SheepCount}  Pigs: {m_World.PigCount}  Wolves: {m_World.WolfCount}");
+            EditorGUILayout.LabelField($"累計 — 餓死: {m_World.StarvationCount}  捕食: {m_World.PredationCount}  出生: {m_World.BirthCount}");
+
+            if (GUILayout.Button("Export CSV (Logs/population_preview.csv)"))
+            {
+                System.IO.Directory.CreateDirectory("Logs");
+                System.IO.File.WriteAllText("Logs/population_preview.csv", m_World.PopulationLog.ToCsv());
+                Debug.Log($"[TerrainPreview] CSV出力: Logs/population_preview.csv ({m_World.PopulationLog.Count}行)");
+            }
         }
     }
 
@@ -150,8 +171,25 @@ public class TerrainPreview : EditorWindow
         m_EntityRoot = new GameObject("Entities") { hideFlags = HideFlags.DontSave };
         m_EntityRoot.transform.SetParent(m_Root.transform, false);
 
+        // 植生場オーバーレイ用の透過・頂点色マテリアル
+        m_VegetationMaterial = new Material(Shader.Find("BlockField/OcclusionUnlit"))
+        {
+            name = "VegetationOverlayMat",
+            hideFlags = HideFlags.DontSave,
+            renderQueue = 3000,
+        };
+        m_VegetationMaterial.SetFloat("_UseVertexColor", 1f);
+        m_VegetationMaterial.EnableKeyword("_VERTEX_COLOR");
+        m_VegetationMaterial.SetFloat("_Surface", 1f);
+        m_VegetationMaterial.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+        m_VegetationMaterial.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+        m_VegetationMaterial.SetFloat("_ZWrite", 0f);
+        m_VegetationMaterial.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+        m_Generated.Add(m_VegetationMaterial);
+
         CreateEntityMaterials();
         UpdateEntityDisplay();
+        UpdateVegetationOverlay();
 
         float w = p.width * k_BlockSize;
         var bounds = new Bounds(new Vector3(w * 0.5f, k_MaxHeight * k_BlockSize * 0.5f, w * 0.5f),
@@ -168,7 +206,10 @@ public class TerrainPreview : EditorWindow
             Simulation.Tick(m_World, m_World.Rng);
         }
         UpdateEntityDisplay();
-        Debug.Log($"[TerrainPreview] {ticks}ティック実行 → Tick={m_World.TickCount}, 植物={m_World.PlantCount}, 動物={m_World.AnimalCount}");
+        UpdateVegetationOverlay();
+        Debug.Log($"[TerrainPreview] {ticks}ティック実行 → Tick={m_World.TickCount}, 植物={m_World.PlantCount}, " +
+            $"羊={m_World.SheepCount}, 豚={m_World.PigCount}, 狼={m_World.WolfCount}, " +
+            $"餓死={m_World.StarvationCount}, 捕食={m_World.PredationCount}, 出生={m_World.BirthCount}");
         Repaint();
     }
 
@@ -204,6 +245,80 @@ public class TerrainPreview : EditorWindow
             go.AddComponent<MeshFilter>().sharedMesh = m_CubeMesh;
             go.AddComponent<MeshRenderer>().sharedMaterial = m_EntityMaterials[e.kind];
         }
+    }
+
+    /// <summary>植生場の値を地表の半透明緑オーバーレイで可視化する（値→アルファ）。</summary>
+    void UpdateVegetationOverlay()
+    {
+        if (m_VegetationOverlay != null)
+        {
+            DestroyImmediate(m_VegetationOverlay);
+            m_VegetationOverlay = null;
+        }
+
+        if (!m_ShowVegetation || m_World == null)
+        {
+            return;
+        }
+
+        var vertices = new List<Vector3>();
+        var colors = new List<Color32>();
+        var triangles = new List<int>();
+        const float lift = 0.003f; // 地表とのZファイティング回避
+
+        for (int z = 0; z < m_World.Depth; z++)
+        {
+            for (int x = 0; x < m_World.Width; x++)
+            {
+                float v = m_World.Vegetation.Values.Get(x, z);
+                if (v < 0.02f)
+                {
+                    continue;
+                }
+
+                float y = m_World.GetSurfaceHeight(x, z) * k_BlockSize + lift;
+                float half = k_BlockSize * 0.5f;
+                float cx = x * k_BlockSize;
+                float cz = z * k_BlockSize;
+                int b = vertices.Count;
+
+                vertices.Add(new Vector3(cx - half, y, cz - half));
+                vertices.Add(new Vector3(cx - half, y, cz + half));
+                vertices.Add(new Vector3(cx + half, y, cz + half));
+                vertices.Add(new Vector3(cx + half, y, cz - half));
+
+                var color = new Color32(30, 220, 60, (byte)(Mathf.Clamp01(v) * 200f));
+                for (int i = 0; i < 4; i++)
+                {
+                    colors.Add(color);
+                }
+
+                triangles.Add(b + 0); triangles.Add(b + 1); triangles.Add(b + 2);
+                triangles.Add(b + 0); triangles.Add(b + 2); triangles.Add(b + 3);
+            }
+        }
+
+        if (vertices.Count == 0)
+        {
+            return;
+        }
+
+        var mesh = new Mesh
+        {
+            name = "VegetationOverlay",
+            indexFormat = UnityEngine.Rendering.IndexFormat.UInt32,
+            hideFlags = HideFlags.DontSave,
+        };
+        mesh.SetVertices(vertices);
+        mesh.SetColors(colors);
+        mesh.SetTriangles(triangles, 0);
+        mesh.RecalculateNormals();
+        m_Generated.Add(mesh);
+
+        m_VegetationOverlay = new GameObject("VegetationOverlay") { hideFlags = HideFlags.DontSave };
+        m_VegetationOverlay.transform.SetParent(m_Root.transform, false);
+        m_VegetationOverlay.AddComponent<MeshFilter>().sharedMesh = mesh;
+        m_VegetationOverlay.AddComponent<MeshRenderer>().sharedMaterial = m_VegetationMaterial;
     }
 
     void CreateEntityMaterials()
@@ -247,6 +362,8 @@ public class TerrainPreview : EditorWindow
         m_World = null;
         m_Root = null;
         m_EntityRoot = null;
+        m_VegetationOverlay = null;
+        m_VegetationMaterial = null;
     }
 
     void OnDisable()

@@ -13,7 +13,15 @@ namespace BlockField.SimCore.Ecology
         public Int3 cell;
         public int facing;
 
-        public bool IsAnimal => kind == EntityKind.Sheep || kind == EntityKind.Pig;
+        /// <summary>空腹度 0..1（動物のみ使用。1.0 で餓死）。ContentHash 対象。</summary>
+        public float hunger;
+
+        /// <summary>繁殖クールダウン残りティック（動物のみ使用）。ContentHash 対象。</summary>
+        public int breedCooldown;
+
+        public bool IsAnimal => kind == EntityKind.Sheep || kind == EntityKind.Pig || kind == EntityKind.Wolf;
+
+        public bool IsHerbivore => kind == EntityKind.Sheep || kind == EntityKind.Pig;
 
         public bool IsPlant => kind == EntityKind.GrassTuft || kind == EntityKind.Flower;
     }

@@ -7,5 +7,6 @@ namespace BlockField.SimCore.Ecology
         Flower = 1,
         Sheep = 2,
         Pig = 3,
+        Wolf = 4,
     }
 }
