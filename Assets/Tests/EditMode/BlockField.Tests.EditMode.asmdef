@@ -2,6 +2,7 @@
     "name": "BlockField.Tests.EditMode",
     "references": [
         "BlockField.SimCore",
+        "BlockField.Runtime",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"
     ],

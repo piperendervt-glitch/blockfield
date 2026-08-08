@@ -43,6 +43,8 @@ namespace BlockField
         }
 
         readonly Dictionary<int, Visual> m_Visuals = new();
+        readonly HashSet<int> m_LiveIds = new();
+        readonly List<int> m_RemovedIds = new();
         World m_TrackedWorld;
         GameObject m_Root;
         Mesh m_CubeMesh;
@@ -103,6 +105,21 @@ namespace BlockField
         void SyncEntities(World world)
         {
             var entities = world.Entities;
+
+            // 消滅エンティティ（摂食・捕食・餓死）の表示破棄。
+            // Demo 3 で World からの削除が導入されたため、生存 id との突合で Visual を破棄する
+            m_LiveIds.Clear();
+            for (int i = 0; i < entities.Count; i++)
+            {
+                m_LiveIds.Add(entities[i].id);
+            }
+            CollectRemovedVisualIds(m_LiveIds, m_Visuals.Keys, m_RemovedIds);
+            foreach (int id in m_RemovedIds)
+            {
+                Destroy(m_Visuals[id].root);
+                m_Visuals.Remove(id);
+            }
+
             for (int i = 0; i < entities.Count; i++)
             {
                 var e = entities[i];
@@ -133,6 +150,22 @@ namespace BlockField
                 float t = Mathf.Clamp01((Time.time - visual.moveStartTime) / k_MoveDuration);
                 visual.root.transform.localPosition = Vector3.Lerp(visual.fromPos, visual.targetPos, t);
                 visual.root.transform.localRotation = Quaternion.Slerp(visual.fromRot, visual.targetRot, t);
+            }
+        }
+
+        /// <summary>
+        /// 表示中の id のうち、生存 id 集合に含まれないもの（破棄対象）を result に集める。
+        /// EditMode テスト可能な純関数（回帰テスト対象）。
+        /// </summary>
+        public static void CollectRemovedVisualIds(HashSet<int> liveIds, IEnumerable<int> visualIds, List<int> result)
+        {
+            result.Clear();
+            foreach (int id in visualIds)
+            {
+                if (!liveIds.Contains(id))
+                {
+                    result.Add(id);
+                }
             }
         }
 
