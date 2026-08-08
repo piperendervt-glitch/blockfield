@@ -37,3 +37,17 @@
 
 ## 変更ルール
 変更前に本ファイルへ追記の形で理由を書く
+
+## 変更記録
+### 2026-08-08: M2 観測可能性のための SimParams 調整（判定基準は不変）
+- 診断（dotnetヘッドレス、300ティック×3シード）: 出生0。律速は
+  (1) 同種隣接の遭遇不足（隣接ペア存在 32-38/300ティック）
+  (2) 野生スポーンが動物上限に張り付き、出生用の枠がゼロ
+- 調整: hungerPerTick 0.02→0.01 / breedHungerMax 0.3→0.4 /
+  breedChance 0.1→0.2 / vegetationFloor 0.01→0.02 /
+  plantSpawnCandidates 8→10 / animalSpawnCandidates 1→2 /
+  animalSpawnChance 0.3→0.5 / animalCap 20→30、
+  野生スポーン停止水準 animalSpawnCap=20 を新設
+  （出生用に10の余裕を構造的に確保）
+- 検証: シード1/2/3 × 300ティックで出生 4/5/4（≥3達成）。
+  M4 クラスタ化は5シードで 0.74〜0.85 を維持

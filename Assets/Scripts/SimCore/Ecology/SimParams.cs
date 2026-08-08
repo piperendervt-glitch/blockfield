@@ -30,8 +30,15 @@ namespace BlockField.SimCore.Ecology
         /// <summary>動物: 候補セルが suitability 1.0 のとき、この確率でスポーン。</summary>
         public float animalSpawnChance;
 
-        /// <summary>動物の上限数（狼を含む総数）。</summary>
+        /// <summary>動物の上限数（狼を含む総数、出生を含むハードキャップ）。</summary>
         public int animalCap;
+
+        /// <summary>
+        /// 野生スポーンの停止水準（animalCap の内数）。
+        /// animalCap との差分が出生（繁殖）用の余裕になる — 野生スポーンがキャップに
+        /// 張り付くと繁殖の枠が無くなるため分離した（M2観測可能性の調整）。
+        /// </summary>
+        public int animalSpawnCap;
 
         /// <summary>狼の上限数（animalCap の内数）。</summary>
         public int wolfCap;
@@ -42,20 +49,33 @@ namespace BlockField.SimCore.Ecology
         /// <summary>徘徊: 毎ティックのランダム向き変更確率（移動とは独立）。</summary>
         public float turnChance;
 
+        /// <summary>空腹の毎ティック進行量（1.0 で餓死）。</summary>
+        public float hungerPerTick;
+
+        /// <summary>繁殖可能な空腹上限（双方これ未満で繁殖候補になる）。</summary>
+        public float breedHungerMax;
+
+        /// <summary>隣接ペア成立時の毎ティック繁殖確率。</summary>
+        public float breedChance;
+
         public static SimParams Default => new SimParams
         {
-            plantSpawnCandidates = 8,
+            plantSpawnCandidates = 10,
             plantCap = 200,
             vegetationDeposit = 0.3f,
             vegetationDiffuse = 0.15f,
             vegetationDecay = 0.02f,
-            vegetationFloor = 0.01f,
-            animalSpawnCandidates = 1,
-            animalSpawnChance = 0.3f,
-            animalCap = 20,
+            vegetationFloor = 0.02f,
+            animalSpawnCandidates = 2,
+            animalSpawnChance = 0.5f,
+            animalCap = 30,
+            animalSpawnCap = 20,
             wolfCap = 4,
             moveChance = 0.5f,
             turnChance = 0.2f,
+            hungerPerTick = 0.01f,
+            breedHungerMax = 0.4f,
+            breedChance = 0.2f,
         };
     }
 }

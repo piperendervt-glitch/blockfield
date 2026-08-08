@@ -21,12 +21,14 @@ namespace BlockField
         [SerializeField] Material m_FlowerMaterial;
         [SerializeField] Material m_SheepMaterial;
         [SerializeField] Material m_PigMaterial;
+        [SerializeField] Material m_WolfMaterial;
 
         public TerrainField terrainField { get => m_TerrainField; set => m_TerrainField = value; }
         public Material grassTuftMaterial { get => m_GrassTuftMaterial; set => m_GrassTuftMaterial = value; }
         public Material flowerMaterial { get => m_FlowerMaterial; set => m_FlowerMaterial = value; }
         public Material sheepMaterial { get => m_SheepMaterial; set => m_SheepMaterial = value; }
         public Material pigMaterial { get => m_PigMaterial; set => m_PigMaterial = value; }
+        public Material wolfMaterial { get => m_WolfMaterial; set => m_WolfMaterial = value; }
 
         sealed class Visual
         {
@@ -49,7 +51,8 @@ namespace BlockField
 
         void Awake()
         {
-            m_CubeMesh = PrimitiveMeshFactory.CreateCube();
+            // 面明度差 (E0) を頂点色にベイクしたキューブ（マテリアル側は _VERTEX_COLOR 有効）
+            m_CubeMesh = PrimitiveMeshFactory.CreateShadedCube();
         }
 
         void Update()
@@ -147,12 +150,28 @@ namespace BlockField
             }
             else
             {
-                // 動物: 胴＋頭のブロック組合せ (Sheep=白 / Pig=ピンク)
-                var mat = e.kind == EntityKind.Sheep ? m_SheepMaterial : m_PigMaterial;
+                // 動物: 胴＋頭のブロック組合せ (Sheep=白 / Pig=ピンク / Wolf=灰色・細長)
+                Material mat;
+                Vector3 bodyScale;
+                switch (e.kind)
+                {
+                    case EntityKind.Wolf:
+                        mat = m_WolfMaterial;
+                        bodyScale = new Vector3(k_BlockSize * 0.8f, k_BlockSize * 0.8f, k_BlockSize * 1.6f);
+                        break;
+                    case EntityKind.Sheep:
+                        mat = m_SheepMaterial;
+                        bodyScale = new Vector3(k_BlockSize * 0.9f, k_BlockSize * 0.9f, k_BlockSize * 1.4f);
+                        break;
+                    default:
+                        mat = m_PigMaterial;
+                        bodyScale = new Vector3(k_BlockSize * 0.9f, k_BlockSize * 0.9f, k_BlockSize * 1.4f);
+                        break;
+                }
+
                 root.transform.localRotation = FacingToRotation(e.facing);
-                AddCube(root.transform, new Vector3(0f, 0f, 0f),
-                    new Vector3(k_BlockSize * 0.9f, k_BlockSize * 0.9f, k_BlockSize * 1.4f), mat); // 胴
-                AddCube(root.transform, new Vector3(0f, k_BlockSize * 0.35f, k_BlockSize * 0.75f),
+                AddCube(root.transform, new Vector3(0f, 0f, 0f), bodyScale, mat); // 胴
+                AddCube(root.transform, new Vector3(0f, k_BlockSize * 0.35f, bodyScale.z * 0.55f),
                     Vector3.one * (k_BlockSize * 0.5f), mat); // 頭
             }
 

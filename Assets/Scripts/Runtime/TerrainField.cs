@@ -27,6 +27,9 @@ namespace BlockField
         /// <summary>シムティック間隔（秒）。Time.deltaTime 積算で駆動しフレームレート非依存にする。</summary>
         const float k_TickInterval = 1f;
 
+        /// <summary>PopulationLog の定期保存間隔（秒）。adb pull で回収可能にする (E7)。</summary>
+        const float k_CsvSaveInterval = 60f;
+
         [SerializeField] DioramaOrigin m_Origin;
         [SerializeField] Material m_TerrainMaterial;
 
@@ -53,6 +56,7 @@ namespace BlockField
         InputAction m_BButtonAction;
         World m_World;
         float m_TickAccumulator;
+        float m_CsvSaveTimer;
         uint[] m_Seeds;
         int m_SeedIndex;
         bool m_Built;
@@ -133,6 +137,14 @@ namespace BlockField
                     m_TickAccumulator -= k_TickInterval;
                     Simulation.Tick(m_World, m_World.Rng);
                 }
+
+                // PopulationLog の定期保存 (E7)
+                m_CsvSaveTimer += Time.deltaTime;
+                if (m_CsvSaveTimer >= k_CsvSaveInterval)
+                {
+                    m_CsvSaveTimer = 0f;
+                    SavePopulationCsv();
+                }
             }
 
             bool toggleRequested = m_ToggleRequested;
@@ -209,6 +221,34 @@ namespace BlockField
             Debug.Log($"[TerrainField] 地形生成完了: seed={p.seed}, {k_Width}x{k_Depth}x{k_MaxHeight}, " +
                 $"ブロック {blockCount} 個, チャンク {m_Chunks.Count} 個, {GenerationMs} ms");
             DebugPanel.Notify($"terrain seed={p.seed} ({GenerationMs}ms)");
+        }
+
+        void OnApplicationPause(bool paused)
+        {
+            if (paused)
+            {
+                SavePopulationCsv();
+            }
+        }
+
+        /// <summary>persistentDataPath/population.csv へ保存（adb pull で回収可能）。</summary>
+        void SavePopulationCsv()
+        {
+            if (m_World == null)
+            {
+                return;
+            }
+
+            try
+            {
+                string path = System.IO.Path.Combine(Application.persistentDataPath, "population.csv");
+                System.IO.File.WriteAllText(path, m_World.PopulationLog.ToCsv());
+                Debug.Log($"[TerrainField] population.csv 保存 ({m_World.PopulationLog.Count}行)");
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning($"[TerrainField] population.csv 保存失敗: {e.Message}");
+            }
         }
 
         void ClearChunks()

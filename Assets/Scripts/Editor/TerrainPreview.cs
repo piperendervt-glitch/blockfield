@@ -26,6 +26,7 @@ public class TerrainPreview : EditorWindow
     float m_ReliefScale = 24f;
     float m_MountainAmplitude = 1f;
     bool m_FaceShading = true;
+    bool m_AmbientOcclusion = true;
     bool m_ShowVegetation;
 
     World m_World;
@@ -60,6 +61,7 @@ public class TerrainPreview : EditorWindow
         m_ReliefScale = EditorGUILayout.Slider("起伏スケール", m_ReliefScale, 8f, 64f);
         m_MountainAmplitude = EditorGUILayout.Slider("山振幅", m_MountainAmplitude, 0.2f, 1f);
         m_FaceShading = EditorGUILayout.Toggle("面明度差 (D0)", m_FaceShading);
+        m_AmbientOcclusion = EditorGUILayout.Toggle("頂点AO (E0)", m_AmbientOcclusion);
 
         bool showVeg = EditorGUILayout.Toggle("植生場表示 (E1)", m_ShowVegetation);
         if (showVeg != m_ShowVegetation)
@@ -150,7 +152,7 @@ public class TerrainPreview : EditorWindow
 
         foreach (var pair in m_World.Grid.Chunks)
         {
-            var mesh = ChunkMesher.BuildChunkMesh(m_World.Grid, pair.Key, pair.Value, k_BlockSize, m_FaceShading);
+            var mesh = ChunkMesher.BuildChunkMesh(m_World.Grid, pair.Key, pair.Value, k_BlockSize, m_FaceShading, m_AmbientOcclusion);
             if (mesh == null)
             {
                 continue;
@@ -328,6 +330,7 @@ public class TerrainPreview : EditorWindow
         AddEntityMaterial(EntityKind.Flower, new Color(0.95f, 0.85f, 0.25f));
         AddEntityMaterial(EntityKind.Sheep, new Color(0.95f, 0.95f, 0.95f));
         AddEntityMaterial(EntityKind.Pig, new Color(0.95f, 0.65f, 0.7f));
+        AddEntityMaterial(EntityKind.Wolf, new Color(0.55f, 0.55f, 0.6f));
     }
 
     void AddEntityMaterial(EntityKind kind, Color color)

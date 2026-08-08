@@ -30,6 +30,50 @@ namespace BlockField
         // インデックスは k_Faces / FaceVisibility.Directions (+X,-X,+Y,-Y,+Z,-Z) と対応。
         static readonly float[] k_FaceBrightness = { 0.82f, 0.82f, 1.0f, 0.6f, 0.78f, 0.78f };
 
+        // k_Faces と同順の整数版 (n,u,v)。頂点AOの隣接セル参照に使う
+        static readonly (Int3 n, Int3 u, Int3 v)[] k_FacesInt =
+        {
+            (new Int3(1, 0, 0), new Int3(0, 0, 1), new Int3(0, 1, 0)),
+            (new Int3(-1, 0, 0), new Int3(0, 1, 0), new Int3(0, 0, 1)),
+            (new Int3(0, 1, 0), new Int3(1, 0, 0), new Int3(0, 0, 1)),
+            (new Int3(0, -1, 0), new Int3(0, 0, 1), new Int3(1, 0, 0)),
+            (new Int3(0, 0, 1), new Int3(0, 1, 0), new Int3(1, 0, 0)),
+            (new Int3(0, 0, -1), new Int3(1, 0, 0), new Int3(0, 1, 0)),
+        };
+
+        // 頂点AO (E0): 遮蔽数 0/1/2/3 → 明度係数
+        static readonly float[] k_AoBrightness = { 1.0f, 0.85f, 0.7f, 0.6f };
+
+        // 頂点の角の符号 (su, sv)。頂点順 [n-u-v, n-u+v, n+u+v, n+u-v] と対応
+        static readonly (int su, int sv)[] k_CornerSigns = { (-1, -1), (-1, 1), (1, 1), (1, -1) };
+
+        /// <summary>
+        /// 頂点の遮蔽数 (0..3)。面の1つ先の層で、頂点の角方向にある側方2セル＋角1セルを数える。
+        /// 側方2つが両方塞がっている場合は角の見えに関係なく最大遮蔽 (3) とする（標準的なボクセルAO）。
+        /// </summary>
+        static int CountVertexOcclusion(VoxelGrid grid, Int3 cell, int faceIndex, int cornerIndex)
+        {
+            var (n, u, v) = k_FacesInt[faceIndex];
+            var (su, sv) = k_CornerSigns[cornerIndex];
+
+            var sideU = Scale(u, su);
+            var sideV = Scale(v, sv);
+            var basePos = cell + n;
+
+            bool side1 = IsSolid(grid, basePos + sideU);
+            bool side2 = IsSolid(grid, basePos + sideV);
+            if (side1 && side2)
+            {
+                return 3;
+            }
+            bool corner = IsSolid(grid, basePos + sideU + sideV);
+            return (side1 ? 1 : 0) + (side2 ? 1 : 0) + (corner ? 1 : 0);
+        }
+
+        static Int3 Scale(Int3 v, int s) => new Int3(v.x * s, v.y * s, v.z * s);
+
+        static bool IsSolid(VoxelGrid grid, Int3 cell) => grid.Get(cell) != BlockId.Air;
+
         /// <summary>ブロック種→頂点色。</summary>
         public static Color32 GetBlockColor(BlockId id)
         {
@@ -49,7 +93,7 @@ namespace BlockField
         /// 可視面が1つも無ければ null。
         /// </summary>
         public static Mesh BuildChunkMesh(VoxelGrid grid, Int3 chunkCoord, Chunk chunk, float blockSize,
-            bool applyFaceBrightness = true)
+            bool applyFaceBrightness = true, bool applyAmbientOcclusion = true)
         {
             var vertices = new List<Vector3>();
             var normals = new List<Vector3>();
@@ -87,11 +131,6 @@ namespace BlockField
                             }
 
                             float brightness = applyFaceBrightness ? k_FaceBrightness[f] : 1f;
-                            var color = new Color32(
-                                (byte)(baseColor.r * brightness),
-                                (byte)(baseColor.g * brightness),
-                                (byte)(baseColor.b * brightness),
-                                baseColor.a);
 
                             var (n, u, v) = k_Faces[f];
                             int baseIndex = vertices.Count;
@@ -103,7 +142,17 @@ namespace BlockField
                             for (int i = 0; i < 4; i++)
                             {
                                 normals.Add(n);
-                                colors.Add(color);
+
+                                // 頂点AO (E0): 面に接する側方2＋角1の遮蔽ブロック数で減衰
+                                float ao = applyAmbientOcclusion
+                                    ? k_AoBrightness[CountVertexOcclusion(grid, worldCell, f, i)]
+                                    : 1f;
+                                float total = brightness * ao;
+                                colors.Add(new Color32(
+                                    (byte)(baseColor.r * total),
+                                    (byte)(baseColor.g * total),
+                                    (byte)(baseColor.b * total),
+                                    baseColor.a));
                             }
 
                             triangles.Add(baseIndex + 0);

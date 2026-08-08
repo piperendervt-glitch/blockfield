@@ -81,13 +81,18 @@ namespace BlockField
             long tick = world?.TickCount ?? 0;
             int plants = world?.PlantCount ?? 0;
             int animals = world?.AnimalCount ?? 0;
+            int wolves = world?.WolfCount ?? 0;
+            int starved = world?.StarvationCount ?? 0;
+            int predated = world?.PredationCount ?? 0;
+            int births = world?.BirthCount ?? 0;
 
             return
                 $"USE_SCENE: {perm}   Planes: {planes}   RayHit: {rayHit}\n" +
                 $"Origin: {origin}   AnchorSaved: {(anchorSaved ? "Y" : "N")}\n" +
                 $"Blocks: {blocks}   Field: {field}   FPS: {fps:F1}\n" +
                 $"Seed: {seed}   Gen: {genMs}ms\n" +
-                $"Tick: {tick}   Plants: {plants}   Animals: {animals}\n" +
+                $"Tick: {tick}  Plants: {plants}  Animals: {animals}  Wolves: {wolves}\n" +
+                $"Starve: {starved}  Pred: {predated}  Birth: {births}\n" +
                 $"Last: {s_LastEvent}";
         }
     }

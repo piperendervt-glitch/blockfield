@@ -121,13 +121,24 @@ public static class SceneBootstrap
         terrainField.origin = diorama;
         terrainField.terrainMaterial = terrainMat;
 
-        // エンティティ表示 (Demo 2 D5)。マテリアルはオクルージョン対応シェーダーのアセット
+        // エンティティ表示 (Demo 2 D5 / Demo 3 E0,E7)。
+        // 面明度差キューブ (ShadedCube) の頂点色を効かせるため _VERTEX_COLOR を有効化する
         var entityRenderer = dioramaGo.AddComponent<BlockField.EntityRenderer>();
         entityRenderer.terrainField = terrainField;
-        entityRenderer.grassTuftMaterial = GetOrCreateMaterial("EntityGrassTuft", new Color(0.25f, 0.8f, 0.25f), k_OcclusionShader);
-        entityRenderer.flowerMaterial = GetOrCreateMaterial("EntityFlower", new Color(0.95f, 0.85f, 0.25f), k_OcclusionShader);
-        entityRenderer.sheepMaterial = GetOrCreateMaterial("EntitySheep", new Color(0.95f, 0.95f, 0.95f), k_OcclusionShader);
-        entityRenderer.pigMaterial = GetOrCreateMaterial("EntityPig", new Color(0.95f, 0.65f, 0.7f), k_OcclusionShader);
+        entityRenderer.grassTuftMaterial = CreateEntityMaterial("EntityGrassTuft", new Color(0.25f, 0.8f, 0.25f));
+        entityRenderer.flowerMaterial = CreateEntityMaterial("EntityFlower", new Color(0.95f, 0.85f, 0.25f));
+        entityRenderer.sheepMaterial = CreateEntityMaterial("EntitySheep", new Color(0.95f, 0.95f, 0.95f));
+        entityRenderer.pigMaterial = CreateEntityMaterial("EntityPig", new Color(0.95f, 0.65f, 0.7f));
+        entityRenderer.wolfMaterial = CreateEntityMaterial("EntityWolf", new Color(0.55f, 0.55f, 0.6f));
+
+        // メッシュ偵察 (Demo 3 E6)。ARMeshManager は XR Origin の子である必要がある
+        var meshReconGo = new GameObject("Mesh Recon (E6)");
+        meshReconGo.transform.SetParent(originGo.transform, false);
+        var meshManager = meshReconGo.AddComponent<ARMeshManager>();
+        meshManager.meshPrefab = GetOrCreateReconMeshPrefab();
+        var meshRecon = meshReconGo.AddComponent<BlockField.MeshRecon>();
+        meshRecon.meshManager = meshManager;
+        meshRecon.diorama = diorama;
 
         // HMD内デバッグパネル (World Space Canvas、カメラ前下方 0.6m に固定)
         var canvasGo = new GameObject("Debug Panel");
@@ -137,7 +148,7 @@ public static class SceneBootstrap
         var canvas = canvasGo.AddComponent<Canvas>();
         canvas.renderMode = RenderMode.WorldSpace;
         var canvasRect = canvasGo.GetComponent<RectTransform>();
-        canvasRect.sizeDelta = new Vector2(600f, 260f);
+        canvasRect.sizeDelta = new Vector2(600f, 300f);
 
         var bgGo = new GameObject("Background");
         bgGo.transform.SetParent(canvasGo.transform, false);
@@ -185,6 +196,39 @@ public static class SceneBootstrap
         AssetDatabase.SaveAssets();
 
         Debug.Log($"[SceneBootstrap] {ScenePath} を生成した。");
+    }
+
+    /// <summary>エンティティ用マテリアル: オクルージョンシェーダー＋頂点色（面明度差）有効。</summary>
+    static Material CreateEntityMaterial(string name, Color color)
+    {
+        var mat = GetOrCreateMaterial(name, color, k_OcclusionShader);
+        mat.SetFloat("_UseVertexColor", 1f);
+        mat.EnableKeyword("_VERTEX_COLOR");
+        EditorUtility.SetDirty(mat);
+        return mat;
+    }
+
+    /// <summary>偵察メッシュ用プレハブ（MeshFilter＋無効化レンダラー＝見た目なし）。</summary>
+    static MeshFilter GetOrCreateReconMeshPrefab()
+    {
+        const string dir = "Assets/Prefabs";
+        const string path = dir + "/ReconMesh.prefab";
+        var existing = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+        if (existing == null)
+        {
+            if (!Directory.Exists(dir))
+            {
+                Directory.CreateDirectory(dir);
+                AssetDatabase.Refresh();
+            }
+            var temp = new GameObject("ReconMesh");
+            temp.AddComponent<MeshFilter>();
+            var renderer = temp.AddComponent<MeshRenderer>();
+            renderer.enabled = false; // ログ取得のみ、描画しない
+            existing = PrefabUtility.SaveAsPrefabAsset(temp, path);
+            Object.DestroyImmediate(temp);
+        }
+        return existing.GetComponent<MeshFilter>();
     }
 
     /// <summary>

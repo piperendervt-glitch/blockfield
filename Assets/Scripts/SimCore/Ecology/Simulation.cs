@@ -13,11 +13,8 @@ namespace BlockField.SimCore.Ecology
     /// </summary>
     public static class Simulation
     {
-        // 空腹・繁殖の定数 (Demo 3)。パラメータ化は Demo 5（バランス調整）で必要になってから
-        const float k_HungerPerTick = 0.02f;
+        // 空腹・繁殖の定数 (Demo 3)。可変にする必要が出たものは SimParams へ昇格済み
         const float k_HungerActionThreshold = 0.5f;
-        const float k_BreedHungerMax = 0.3f;
-        const float k_BreedChance = 0.1f;
         const float k_BreedCost = 0.3f;
         const int k_BreedCooldownTicks = 20;
         const int k_WolfSightRadius = 6;
@@ -85,7 +82,8 @@ namespace BlockField.SimCore.Ecology
         /// <summary>動物スポーン: suitability 1.0 のセルのみ。狼は低頻度（Sheep:Pig = 1:1、Wolf は別枠上限）。</summary>
         static void SpawnAnimals(World world, Mulberry32 rng, SimParams p)
         {
-            if (world.AnimalCount >= p.animalCap)
+            // 野生スポーンは animalSpawnCap で止まり、animalCap までの余裕は出生（繁殖）用
+            if (world.AnimalCount >= p.animalSpawnCap)
             {
                 return;
             }
@@ -113,7 +111,7 @@ namespace BlockField.SimCore.Ecology
 
                     int facing = rng.Range(0, 4);
                     world.TrySpawn(kind, x, z, facing);
-                    if (world.AnimalCount >= p.animalCap)
+                    if (world.AnimalCount >= p.animalSpawnCap)
                     {
                         return;
                     }
@@ -151,7 +149,7 @@ namespace BlockField.SimCore.Ecology
                     continue;
                 }
 
-                e.hunger += k_HungerPerTick;
+                e.hunger += p.hungerPerTick;
                 if (e.hunger >= 1f)
                 {
                     dead.Add(e.id);
@@ -210,7 +208,7 @@ namespace BlockField.SimCore.Ecology
                     continue;
                 }
 
-                e.hunger += k_HungerPerTick;
+                e.hunger += p.hungerPerTick;
                 if (e.hunger >= 1f)
                 {
                     dead.Add(e.id);
@@ -288,18 +286,18 @@ namespace BlockField.SimCore.Ecology
                     continue;
                 }
 
-                if (e.hunger >= k_BreedHungerMax)
+                if (e.hunger >= p.breedHungerMax)
                 {
                     continue;
                 }
 
-                int partnerIndex = FindBreedPartner(world, e);
+                int partnerIndex = FindBreedPartner(world, e, p.breedHungerMax);
                 if (partnerIndex < 0)
                 {
                     continue;
                 }
 
-                if (rng.NextFloat01() >= k_BreedChance)
+                if (rng.NextFloat01() >= p.breedChance)
                 {
                     continue;
                 }
@@ -356,7 +354,7 @@ namespace BlockField.SimCore.Ecology
         /// 繁殖相手: 隣接（4近傍、高低差1以下）の同種で、双方の条件（hunger&lt;0.3、クールダウン0）を
         /// 満たす個体。ペアの二重処理を防ぐため相手の id が自分より大きい場合のみ成立。
         /// </summary>
-        static int FindBreedPartner(World world, Entity e)
+        static int FindBreedPartner(World world, Entity e, float breedHungerMax)
         {
             foreach (var dir in FacingDirections)
             {
@@ -378,7 +376,7 @@ namespace BlockField.SimCore.Ecology
                 var partner = world.Entities[index];
                 if (partner.kind == e.kind
                     && partner.id > e.id
-                    && partner.hunger < k_BreedHungerMax
+                    && partner.hunger < breedHungerMax
                     && partner.breedCooldown == 0)
                 {
                     return index;

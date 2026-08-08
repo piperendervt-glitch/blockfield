@@ -125,7 +125,7 @@ namespace BlockField.Tests.EditMode
             world.TrySpawn(EntityKind.GrassTuft, x + 1, z, 0);
 
             int eatenAt = -1;
-            for (int t = 0; t < 60 && eatenAt < 0; t++)
+            for (int t = 0; t < 80 && eatenAt < 0; t++)
             {
                 Simulation.Tick(world, world.Rng, p);
                 if (world.PlantCount == 0)
@@ -134,7 +134,7 @@ namespace BlockField.Tests.EditMode
                 }
             }
 
-            Assert.GreaterOrEqual(eatenAt, 0, "60ティック以内に植物が食べられなかった");
+            Assert.GreaterOrEqual(eatenAt, 0, "80ティック以内に植物が食べられなかった");
             Assert.AreEqual(1, world.SheepCount, "羊が消えている");
             // hunger は摂食でリセットされている（摂食直後 < 摂食閾値0.5）
             foreach (var e in world.Entities)
@@ -154,7 +154,7 @@ namespace BlockField.Tests.EditMode
             var (x, z) = FindFlatRun(world, 1);
             world.TrySpawn(EntityKind.Sheep, x, z, 0);
 
-            for (int t = 0; t < 80; t++)
+            for (int t = 0; t < 130; t++) // hungerPerTick 0.01 → 餓死は100ティック目
             {
                 Simulation.Tick(world, world.Rng, p);
             }

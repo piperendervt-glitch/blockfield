@@ -52,6 +52,33 @@ namespace BlockField
             return mesh;
         }
 
+        /// <summary>
+        /// 面方向の明度差 (E0) を頂点色にベイクした24頂点キューブ。
+        /// 係数は ChunkMesher の地形と同一（上面1.0 / ±X 0.82 / ±Z 0.78 / 底面0.6）。
+        /// _VERTEX_COLOR 有効なマテリアルと組で使う（頂点色 × BaseColor）。
+        /// </summary>
+        public static Mesh CreateShadedCube()
+        {
+            var mesh = CreateCube();
+            var normals = mesh.normals;
+            var colors = new Color32[normals.Length];
+            for (int i = 0; i < normals.Length; i++)
+            {
+                var n = normals[i];
+                float b;
+                if (n.y > 0.5f) b = 1.0f;
+                else if (n.y < -0.5f) b = 0.6f;
+                else if (Mathf.Abs(n.x) > 0.5f) b = 0.82f;
+                else b = 0.78f;
+
+                byte v = (byte)(b * 255f);
+                colors[i] = new Color32(v, v, v, 255);
+            }
+            mesh.colors32 = colors;
+            mesh.name = "ShadedCube (generated)";
+            return mesh;
+        }
+
         /// <summary>XZ平面のリング（外径1・内径 innerRatio、両面）。レティクル用。</summary>
         public static Mesh CreateRing(float innerRatio = 0.6f, int segments = 32)
         {
