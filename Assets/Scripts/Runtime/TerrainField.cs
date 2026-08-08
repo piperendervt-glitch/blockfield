@@ -67,6 +67,8 @@ namespace BlockField
         float m_LastToggleTime = float.NegativeInfinity;
         readonly List<GameObject> m_Chunks = new();
         readonly List<Mesh> m_Meshes = new();
+        readonly Dictionary<Int3, GameObject> m_ChunkMap = new();
+        readonly List<Int3> m_DirtyBuffer = new();
 
         void Awake()
         {
@@ -145,6 +147,9 @@ namespace BlockField
                     m_CsvSaveTimer = 0f;
                     SavePopulationCsv();
                 }
+
+                // 設置・破壊による変更チャンクの限定再メッシュ (Demo 4 F3)
+                RemeshDirtyChunks();
             }
 
             bool toggleRequested = m_ToggleRequested;
@@ -187,22 +192,10 @@ namespace BlockField
             foreach (var pair in grid.Chunks)
             {
                 var mesh = ChunkMesher.BuildChunkMesh(grid, pair.Key, pair.Value, k_BlockSize);
-                if (mesh == null)
+                if (mesh != null)
                 {
-                    continue;
+                    CreateChunkObject(pair.Key, mesh, parent);
                 }
-                m_Meshes.Add(mesh);
-
-                var go = new GameObject($"Chunk {pair.Key}");
-                go.transform.SetParent(parent, false);
-                go.transform.localPosition = new Vector3(
-                    pair.Key.x * Chunk.Size * k_BlockSize - offsetX,
-                    pair.Key.y * Chunk.Size * k_BlockSize,
-                    pair.Key.z * Chunk.Size * k_BlockSize - offsetZ);
-                go.AddComponent<MeshFilter>().sharedMesh = mesh;
-                go.AddComponent<MeshRenderer>().sharedMaterial = m_TerrainMaterial;
-                go.SetActive(m_FieldVisible);
-                m_Chunks.Add(go);
 
                 // 非Airブロック数
                 for (int i = 0; i < Chunk.VolumeLength; i++)
@@ -221,6 +214,77 @@ namespace BlockField
             Debug.Log($"[TerrainField] 地形生成完了: seed={p.seed}, {k_Width}x{k_Depth}x{k_MaxHeight}, " +
                 $"ブロック {blockCount} 個, チャンク {m_Chunks.Count} 個, {GenerationMs} ms");
             DebugPanel.Notify($"terrain seed={p.seed} ({GenerationMs}ms)");
+        }
+
+        void CreateChunkObject(Int3 chunkCoord, Mesh mesh, Transform parent)
+        {
+            float offsetX = k_Width * 0.5f * k_BlockSize;
+            float offsetZ = k_Depth * 0.5f * k_BlockSize;
+
+            m_Meshes.Add(mesh);
+            var go = new GameObject($"Chunk {chunkCoord}");
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = new Vector3(
+                chunkCoord.x * Chunk.Size * k_BlockSize - offsetX,
+                chunkCoord.y * Chunk.Size * k_BlockSize,
+                chunkCoord.z * Chunk.Size * k_BlockSize - offsetZ);
+            go.AddComponent<MeshFilter>().sharedMesh = mesh;
+            go.AddComponent<MeshRenderer>().sharedMaterial = m_TerrainMaterial;
+            go.SetActive(m_FieldVisible);
+            m_Chunks.Add(go);
+            m_ChunkMap[chunkCoord] = go;
+        }
+
+        /// <summary>変更のあったチャンクのみ再メッシュする (Demo 4 F3 / M5計測)。</summary>
+        void RemeshDirtyChunks()
+        {
+            if (m_Origin.OriginTransform == null || !m_World.ConsumeDirtyChunks(m_DirtyBuffer))
+            {
+                return;
+            }
+
+            var stopwatch = Stopwatch.StartNew();
+            var parent = m_Origin.OriginTransform;
+            int remeshed = 0;
+
+            foreach (var chunkCoord in m_DirtyBuffer)
+            {
+                bool hasChunk = m_World.Grid.TryGetChunk(chunkCoord, out var chunk);
+                Mesh newMesh = hasChunk
+                    ? ChunkMesher.BuildChunkMesh(m_World.Grid, chunkCoord, chunk, k_BlockSize)
+                    : null;
+
+                if (m_ChunkMap.TryGetValue(chunkCoord, out var go))
+                {
+                    var filter = go.GetComponent<MeshFilter>();
+                    var oldMesh = filter.sharedMesh;
+                    if (newMesh == null)
+                    {
+                        m_Chunks.Remove(go);
+                        m_ChunkMap.Remove(chunkCoord);
+                        Destroy(go);
+                    }
+                    else
+                    {
+                        filter.sharedMesh = newMesh;
+                        m_Meshes.Add(newMesh);
+                    }
+                    m_Meshes.Remove(oldMesh);
+                    Destroy(oldMesh);
+                    remeshed++;
+                }
+                else if (newMesh != null)
+                {
+                    CreateChunkObject(chunkCoord, newMesh, parent);
+                    remeshed++;
+                }
+            }
+
+            stopwatch.Stop();
+            if (remeshed > 0)
+            {
+                Debug.Log($"[TerrainField] 再メッシュ: {remeshed}チャンク {stopwatch.ElapsedMilliseconds}ms");
+            }
         }
 
         void OnApplicationPause(bool paused)
@@ -258,6 +322,7 @@ namespace BlockField
                 Destroy(chunk);
             }
             m_Chunks.Clear();
+            m_ChunkMap.Clear();
 
             foreach (var mesh in m_Meshes)
             {

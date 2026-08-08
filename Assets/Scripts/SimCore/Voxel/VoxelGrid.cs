@@ -95,6 +95,9 @@ namespace BlockField.SimCore.Voxel
         /// <summary>生成済みチャンクの列挙（順序は不定。決定論が必要な処理は座標でソートすること）。</summary>
         public IEnumerable<KeyValuePair<Int3, Chunk>> Chunks => m_Chunks;
 
+        /// <summary>チャンク座標での取得（限定再メッシュ用）。</summary>
+        public bool TryGetChunk(Int3 chunkCoord, out Chunk chunk) => m_Chunks.TryGetValue(chunkCoord, out chunk);
+
         /// <summary>
         /// グリッド全体の決定論的コンテンツハッシュ (FNV-1a 64bit)。
         /// チャンクを座標順にソートしてから、座標とブロック列を順に畳み込む。M3 判定に使用。

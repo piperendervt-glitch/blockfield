@@ -96,6 +96,12 @@ public class TerrainPreview : EditorWindow
             {
                 GeneratePreview();
             }
+
+            // Demo 4 F5: イベント注入（次の Simulate の先頭ティックで適用される）
+            if (GUILayout.Button("Inject 10 random place/break"))
+            {
+                InjectRandomActions(10);
+            }
         }
 
         if (GUILayout.Button("Clear"))
@@ -152,7 +158,9 @@ public class TerrainPreview : EditorWindow
 
         foreach (var pair in m_World.Grid.Chunks)
         {
-            var mesh = ChunkMesher.BuildChunkMesh(m_World.Grid, pair.Key, pair.Value, k_BlockSize, m_FaceShading, m_AmbientOcclusion);
+            // Player 出所ブロックは青灰色で視認（エディタプレビューのみ）
+            var mesh = ChunkMesher.BuildChunkMesh(m_World.Grid, pair.Key, pair.Value, k_BlockSize,
+                m_FaceShading, m_AmbientOcclusion, tintPlayerBlocks: true);
             if (mesh == null)
             {
                 continue;
@@ -201,6 +209,71 @@ public class TerrainPreview : EditorWindow
         Debug.Log($"[TerrainPreview] 生成完了: seed={m_Seed}, {p.width}x{p.depth}, 面明度差={(m_FaceShading ? "ON" : "OFF")}");
     }
 
+    /// <summary>
+    /// ランダムな Place/Break を注入 (Demo 4 F5)。Place は表層の上（多くは有効）、
+    /// Break は表層ブロック。次の Simulate で適用され、Player ブロックは青灰色で描かれる。
+    /// </summary>
+    void InjectRandomActions(int count)
+    {
+        var rng = new Mulberry32((uint)System.DateTime.Now.Ticks);
+        for (int i = 0; i < count; i++)
+        {
+            int x = rng.Range(0, m_World.Width);
+            int z = rng.Range(0, m_World.Depth);
+            int h = m_World.GetSurfaceHeight(x, z);
+
+            if (rng.Range(0, 2) == 0)
+            {
+                m_World.EnqueuePlayerAction(SimEventType.PlayerPlace, new Int3(x, h, z), BlockId.Stone);
+            }
+            else
+            {
+                m_World.EnqueuePlayerAction(SimEventType.PlayerBreak, new Int3(x, h - 1, z), BlockId.Air);
+            }
+        }
+        Debug.Log($"[TerrainPreview] {count}件の Place/Break を注入した。Simulate で適用される。");
+    }
+
+    /// <summary>DirtyChunks を反映して地形メッシュを再構築（エディタは全再構築で簡略化）。</summary>
+    void RefreshTerrainMeshes()
+    {
+        var dirtyBuffer = new List<Int3>();
+        if (!m_World.ConsumeDirtyChunks(dirtyBuffer))
+        {
+            return;
+        }
+
+        // 既存チャンク表示を破棄して作り直す（プレビューは規模が小さいので全再構築で十分）
+        for (int i = m_Root.transform.childCount - 1; i >= 0; i--)
+        {
+            var child = m_Root.transform.GetChild(i).gameObject;
+            if (child.name.StartsWith("Chunk "))
+            {
+                DestroyImmediate(child);
+            }
+        }
+        foreach (var pair in m_World.Grid.Chunks)
+        {
+            var mesh = ChunkMesher.BuildChunkMesh(m_World.Grid, pair.Key, pair.Value, k_BlockSize,
+                m_FaceShading, m_AmbientOcclusion, tintPlayerBlocks: true);
+            if (mesh == null)
+            {
+                continue;
+            }
+            mesh.hideFlags = HideFlags.DontSave;
+            m_Generated.Add(mesh);
+
+            var go = new GameObject($"Chunk {pair.Key}") { hideFlags = HideFlags.DontSave };
+            go.transform.SetParent(m_Root.transform, false);
+            go.transform.localPosition = new Vector3(
+                pair.Key.x * Chunk.Size * k_BlockSize,
+                pair.Key.y * Chunk.Size * k_BlockSize,
+                pair.Key.z * Chunk.Size * k_BlockSize);
+            go.AddComponent<MeshFilter>().sharedMesh = mesh;
+            go.AddComponent<MeshRenderer>().sharedMaterial = m_TerrainMaterial;
+        }
+    }
+
     void Simulate(int ticks)
     {
         for (int i = 0; i < ticks; i++)
@@ -209,6 +282,7 @@ public class TerrainPreview : EditorWindow
         }
         UpdateEntityDisplay();
         UpdateVegetationOverlay();
+        RefreshTerrainMeshes();
         Debug.Log($"[TerrainPreview] {ticks}ティック実行 → Tick={m_World.TickCount}, 植物={m_World.PlantCount}, " +
             $"羊={m_World.SheepCount}, 豚={m_World.PigCount}, 狼={m_World.WolfCount}, " +
             $"餓死={m_World.StarvationCount}, 捕食={m_World.PredationCount}, 出生={m_World.BirthCount}");

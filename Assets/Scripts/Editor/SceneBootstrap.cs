@@ -131,6 +131,15 @@ public static class SceneBootstrap
         entityRenderer.pigMaterial = CreateEntityMaterial("EntityPig", new Color(0.95f, 0.65f, 0.7f));
         entityRenderer.wolfMaterial = CreateEntityMaterial("EntityWolf", new Color(0.55f, 0.55f, 0.6f));
 
+        // 設置・破壊操作 (Demo 4 F3)
+        var interactor = dioramaGo.AddComponent<BlockField.BlockInteractor>();
+        interactor.terrainField = terrainField;
+        interactor.trackingSpace = offsetGo.transform;
+        interactor.breakHighlightMaterial = CreateTransparentMaterial("HighlightBreak", new Color(1f, 0.25f, 0.2f, 0.45f));
+        interactor.placeHighlightMaterial = CreateTransparentMaterial("HighlightPlace", new Color(1f, 1f, 1f, 0.4f));
+        interactor.pendingPlaceMaterial = CreateTransparentMaterial("PendingPlace", new Color(0.55f, 0.55f, 0.58f, 0.6f));
+        interactor.pendingBreakMaterial = CreateTransparentMaterial("PendingBreak", new Color(0.1f, 0.1f, 0.1f, 0.55f));
+
         // メッシュ偵察 (Demo 3 E6)。ARMeshManager は XR Origin の子である必要がある
         var meshReconGo = new GameObject("Mesh Recon (E6)");
         meshReconGo.transform.SetParent(originGo.transform, false);
@@ -204,6 +213,20 @@ public static class SceneBootstrap
         var mat = GetOrCreateMaterial(name, color, k_OcclusionShader);
         mat.SetFloat("_UseVertexColor", 1f);
         mat.EnableKeyword("_VERTEX_COLOR");
+        EditorUtility.SetDirty(mat);
+        return mat;
+    }
+
+    /// <summary>半透明マテリアル（ハイライト・仮表示用）。オクルージョンシェーダーの透過設定。</summary>
+    static Material CreateTransparentMaterial(string name, Color color)
+    {
+        var mat = GetOrCreateMaterial(name, color, k_OcclusionShader);
+        mat.SetFloat("_Surface", 1f);
+        mat.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+        mat.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+        mat.SetFloat("_ZWrite", 0f);
+        mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+        mat.renderQueue = 3000;
         EditorUtility.SetDirty(mat);
         return mat;
     }

@@ -92,8 +92,11 @@ namespace BlockField
         /// （セル (0,0,0) の中心が (0, 0.5*blockSize, 0)、Demo 0 の整数セル座標系を踏襲）。
         /// 可視面が1つも無ければ null。
         /// </summary>
+        /// <summary>Player 出所ブロックの視認用ティント色（エディタプレビュー用）。</summary>
+        static readonly Color32 k_PlayerTint = new Color32(100, 110, 145, 255);
+
         public static Mesh BuildChunkMesh(VoxelGrid grid, Int3 chunkCoord, Chunk chunk, float blockSize,
-            bool applyFaceBrightness = true, bool applyAmbientOcclusion = true)
+            bool applyFaceBrightness = true, bool applyAmbientOcclusion = true, bool tintPlayerBlocks = false)
         {
             var vertices = new List<Vector3>();
             var normals = new List<Vector3>();
@@ -121,7 +124,9 @@ namespace BlockField
 
                         var worldCell = baseCell + new Int3(x, y, z);
                         var center = new Vector3(x * blockSize, (y + 0.5f) * blockSize, z * blockSize);
-                        var baseColor = GetBlockColor(id);
+                        var baseColor = tintPlayerBlocks && chunk.GetOrigin(x, y, z) == BlockOrigin.Player
+                            ? k_PlayerTint
+                            : GetBlockColor(id);
 
                         for (int f = 0; f < FaceVisibility.FaceCount; f++)
                         {
