@@ -57,6 +57,7 @@ namespace BlockField
         {
             // デモのためリトライUIは無し。オクルージョン無効のまま続行する。
             Debug.LogWarning($"[ScenePermissionGate] 権限が拒否された: {permission} — オクルージョン無効のまま続行。");
+            DebugPanel.Notify("USE_SCENE denied - occlusion off");
         }
 #endif
 
@@ -70,6 +71,7 @@ namespace BlockField
 
             m_OcclusionManager.enabled = true;
             Debug.Log("[ScenePermissionGate] AROcclusionManager を有効化した。");
+            DebugPanel.Notify("occlusion enabled");
         }
     }
 }

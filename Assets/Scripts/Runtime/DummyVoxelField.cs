@@ -25,26 +25,39 @@ namespace BlockField
         public Material[] voxelMaterials { get => m_VoxelMaterials; set => m_VoxelMaterials = value; }
         public Material bridgeMaterial { get => m_BridgeMaterial; set => m_BridgeMaterial = value; }
 
+        const float k_SwitchCooldown = 1f;
+
         InputAction m_AButtonAction;
         bool m_Built;
         int m_CountIndex;
         Mesh m_CubeMesh;
+        bool m_SwitchRequested;
+        float m_LastSwitchTime = float.NegativeInfinity;
         readonly List<GameObject> m_Chunks = new();
         readonly List<Mesh> m_GeneratedMeshes = new();
+
+        /// <summary>現在表示中のボクセル数（デバッグパネル表示用）。</summary>
+        public int CurrentCount { get; private set; }
 
         void Awake()
         {
             m_AButtonAction = new InputAction("RightHandAButton", InputActionType.Button,
                 "<XRController>{RightHand}/primaryButton");
+            // WasPressedThisFrame はヒッチ時に多重発火したため performed コールバックで検出する
+            m_AButtonAction.performed += OnAButtonPerformed;
 
-            // 結合元となるキューブメッシュをプリミティブから取得
-            var tmp = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            m_CubeMesh = tmp.GetComponent<MeshFilter>().sharedMesh;
-            Destroy(tmp);
+            m_CubeMesh = PrimitiveMeshFactory.CreateCube();
         }
+
+        void OnDestroy() => m_AButtonAction.performed -= OnAButtonPerformed;
 
         void OnEnable() => m_AButtonAction.Enable();
         void OnDisable() => m_AButtonAction.Disable();
+
+        void OnAButtonPerformed(InputAction.CallbackContext _)
+        {
+            m_SwitchRequested = true;
+        }
 
         void Update()
         {
@@ -61,8 +74,11 @@ namespace BlockField
                 return;
             }
 
-            if (m_AButtonAction.WasPressedThisFrame())
+            bool requested = m_SwitchRequested;
+            m_SwitchRequested = false;
+            if (requested && Time.unscaledTime - m_LastSwitchTime >= k_SwitchCooldown)
             {
+                m_LastSwitchTime = Time.unscaledTime;
                 m_CountIndex = (m_CountIndex + 1) % k_Counts.Length;
                 BuildField(k_Counts[m_CountIndex]);
             }
@@ -126,7 +142,9 @@ namespace BlockField
                 m_Chunks.Add(go);
             }
 
-            Debug.Log($"[DummyVoxelField] ボクセル表示: {layers * k_Side * k_Side} 個 ({k_Side}x{k_Side}x{layers}層, メッシュ{materialCount}分割)");
+            CurrentCount = layers * k_Side * k_Side;
+            Debug.Log($"[DummyVoxelField] ボクセル表示: {CurrentCount} 個 ({k_Side}x{k_Side}x{layers}層, メッシュ{materialCount}分割)");
+            DebugPanel.Notify($"voxels: {CurrentCount}");
         }
 
         /// <summary>M3用: 原点から前方(+Z)へ張り出す 1×10×1 の橋（机の縁を越えて空中に伸びる想定）。</summary>

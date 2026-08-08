@@ -34,6 +34,20 @@ namespace BlockField
         /// <summary>確定・復元済みの原点。未確定なら null。</summary>
         public Transform OriginTransform { get; private set; }
 
+        public enum OriginState
+        {
+            Restoring,
+            Placing,
+            Placed,
+            Restored,
+        }
+
+        /// <summary>原点の状態（デバッグパネル表示用）。</summary>
+        public OriginState State { get; private set; } = OriginState.Restoring;
+
+        /// <summary>直近フレームでレイが平面にヒットしているか（デバッグパネル表示用）。</summary>
+        public bool HasPlaneHit { get; private set; }
+
         InputAction m_PositionAction;
         InputAction m_RotationAction;
         InputAction m_TriggerAction;
@@ -90,8 +104,10 @@ namespace BlockField
             }
 
             m_PlacementActive = true;
+            State = OriginState.Placing;
             CreateReticle();
             Debug.Log("[DioramaOrigin] 配置モード開始。右コントローラで平面を指し、トリガーで原点を確定してください。");
+            DebugPanel.Notify("placement mode: point at plane, pull trigger");
         }
 
         async Awaitable<bool> TryRestoreAsync()
@@ -118,7 +134,9 @@ namespace BlockField
             }
 
             AttachOrigin(result.value);
+            State = OriginState.Restored;
             Debug.Log("[DioramaOrigin] アンカー復元に成功。原点を復元した。");
+            DebugPanel.Notify("anchor restored");
             return true;
         }
 
@@ -131,10 +149,13 @@ namespace BlockField
 
             if (!TryGetControllerRay(out var ray) || !TryRaycastPlanes(ray, out var hitPose))
             {
+                HasPlaneHit = false;
                 if (m_Reticle != null) m_Reticle.SetActive(false);
                 m_PrevTrigger = m_TriggerAction.ReadValue<float>();
                 return;
             }
+
+            HasPlaneHit = true;
 
             if (m_Reticle != null)
             {
@@ -232,13 +253,16 @@ namespace BlockField
 
                 var anchor = addResult.value;
                 AttachOrigin(anchor);
+                State = OriginState.Placed;
                 m_PlacementActive = false;
+                HasPlaneHit = false;
                 if (m_Reticle != null)
                 {
                     Destroy(m_Reticle);
                     m_Reticle = null;
                 }
                 Debug.Log("[DioramaOrigin] 原点を確定した。");
+                DebugPanel.Notify("origin placed");
 
                 var saveResult = await m_AnchorManager.TrySaveAnchorAsync(anchor);
                 if (saveResult.status.IsSuccess())
@@ -246,10 +270,12 @@ namespace BlockField
                     var data = new SaveData { anchorGuid = saveResult.value.guid.ToString() };
                     File.WriteAllText(SavePath, JsonUtility.ToJson(data));
                     Debug.Log($"[DioramaOrigin] アンカーを永続化した (guid: {data.anchorGuid})。");
+                    DebugPanel.Notify("anchor saved");
                 }
                 else
                 {
                     Debug.LogWarning($"[DioramaOrigin] アンカー保存に失敗 (status: {saveResult.status.statusCode})。このセッション中は動作するが再起動後は復元されない。");
+                    DebugPanel.Notify("anchor save FAILED");
                 }
             }
             catch (Exception e)
@@ -265,29 +291,22 @@ namespace BlockField
         void AttachOrigin(ARAnchor anchor)
         {
             // 原点マーカー: 4cm の赤い箱 (M1 のテープ照合用)
-            var marker = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            marker.name = "Diorama Origin";
-            Destroy(marker.GetComponent<Collider>());
+            var marker = new GameObject("Diorama Origin");
             marker.transform.SetParent(anchor.transform, false);
             marker.transform.localScale = Vector3.one * 0.04f;
-            if (m_OriginMaterial != null)
-            {
-                marker.GetComponent<MeshRenderer>().sharedMaterial = m_OriginMaterial;
-            }
+            marker.AddComponent<MeshFilter>().sharedMesh = PrimitiveMeshFactory.CreateCube();
+            marker.AddComponent<MeshRenderer>().sharedMaterial = m_OriginMaterial;
 
             OriginTransform = marker.transform;
         }
 
         void CreateReticle()
         {
-            m_Reticle = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-            m_Reticle.name = "Placement Reticle";
-            Destroy(m_Reticle.GetComponent<Collider>());
-            m_Reticle.transform.localScale = new Vector3(0.08f, 0.002f, 0.08f);
-            if (m_ReticleMaterial != null)
-            {
-                m_Reticle.GetComponent<MeshRenderer>().sharedMaterial = m_ReticleMaterial;
-            }
+            // 15cm の両面リング (視認性優先、Unlitマテリアル)
+            m_Reticle = new GameObject("Placement Reticle");
+            m_Reticle.transform.localScale = Vector3.one * 0.15f;
+            m_Reticle.AddComponent<MeshFilter>().sharedMesh = PrimitiveMeshFactory.CreateRing();
+            m_Reticle.AddComponent<MeshRenderer>().sharedMaterial = m_ReticleMaterial;
             m_Reticle.SetActive(false);
         }
     }

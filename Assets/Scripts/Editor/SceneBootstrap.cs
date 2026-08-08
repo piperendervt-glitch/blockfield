@@ -4,6 +4,7 @@ using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.XR;
+using UnityEngine.UI;
 using UnityEngine.XR.ARFoundation;
 using UnityEngine.XR.ARSubsystems;
 using Unity.XR.CoreUtils;
@@ -80,6 +81,9 @@ public static class SceneBootstrap
 
         origin.Camera = cam;
         origin.CameraFloorOffsetObject = offsetGo;
+        // Floor基準を明示（未指定だとDeviceモードにフォールバックし CameraYOffset(1.1176) が
+        // 加算され、原点確定位置のy値が床基準でなくなり紛らわしいため）
+        origin.RequestedTrackingOriginMode = XROrigin.TrackingOriginMode.Floor;
 
         // Trackable マネージャー群。
         // 注: ARPlaneManager / ARAnchorManager は [RequireComponent(typeof(XROrigin))] のため
@@ -94,7 +98,8 @@ public static class SceneBootstrap
         diorama.anchorManager = anchorManager;
         diorama.trackingSpace = offsetGo.transform;
         diorama.originMaterial = GetOrCreateMaterial("OriginRed", new Color(0.9f, 0.1f, 0.1f));
-        diorama.reticleMaterial = GetOrCreateMaterial("ReticleWhite", new Color(1f, 1f, 1f, 0.8f));
+        // レティクルは視認性優先で Unlit の明るい緑
+        diorama.reticleMaterial = GetOrCreateMaterial("ReticleWhite", new Color(0.3f, 1f, 0.4f), "Universal Render Pipeline/Unlit");
 
         var voxelField = dioramaGo.AddComponent<BlockField.DummyVoxelField>();
         voxelField.origin = diorama;
@@ -106,6 +111,46 @@ public static class SceneBootstrap
             GetOrCreateMaterial("Voxel3", new Color(0.45f, 0.55f, 0.65f)),
         };
         voxelField.bridgeMaterial = GetOrCreateMaterial("BridgeBlue", new Color(0.2f, 0.4f, 0.9f));
+
+        // HMD内デバッグパネル (World Space Canvas、カメラ前下方 0.6m に固定)
+        var canvasGo = new GameObject("Debug Panel");
+        canvasGo.transform.SetParent(camGo.transform, false);
+        canvasGo.transform.localPosition = new Vector3(0f, -0.25f, 0.6f);
+        canvasGo.transform.localScale = Vector3.one * 0.0007f;
+        var canvas = canvasGo.AddComponent<Canvas>();
+        canvas.renderMode = RenderMode.WorldSpace;
+        var canvasRect = canvasGo.GetComponent<RectTransform>();
+        canvasRect.sizeDelta = new Vector2(600f, 220f);
+
+        var bgGo = new GameObject("Background");
+        bgGo.transform.SetParent(canvasGo.transform, false);
+        var bg = bgGo.AddComponent<Image>();
+        bg.color = new Color(0f, 0f, 0f, 0.55f);
+        bg.rectTransform.anchorMin = Vector2.zero;
+        bg.rectTransform.anchorMax = Vector2.one;
+        bg.rectTransform.offsetMin = Vector2.zero;
+        bg.rectTransform.offsetMax = Vector2.zero;
+
+        var textGo = new GameObject("Text");
+        textGo.transform.SetParent(canvasGo.transform, false);
+        var uiText = textGo.AddComponent<Text>();
+        uiText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        uiText.fontSize = 30;
+        uiText.color = Color.white;
+        uiText.alignment = TextAnchor.UpperLeft;
+        uiText.horizontalOverflow = HorizontalWrapMode.Overflow;
+        uiText.verticalOverflow = VerticalWrapMode.Overflow;
+        uiText.text = "DebugPanel";
+        uiText.rectTransform.anchorMin = Vector2.zero;
+        uiText.rectTransform.anchorMax = Vector2.one;
+        uiText.rectTransform.offsetMin = new Vector2(16f, 12f);
+        uiText.rectTransform.offsetMax = new Vector2(-16f, -12f);
+
+        var panel = canvasGo.AddComponent<BlockField.DebugPanel>();
+        panel.diorama = diorama;
+        panel.voxelField = voxelField;
+        panel.planeManager = planeManager;
+        panel.text = uiText;
 
         Directory.CreateDirectory("Assets/Scenes");
         if (!EditorSceneManager.SaveScene(scene, ScenePath))
@@ -125,14 +170,21 @@ public static class SceneBootstrap
         Debug.Log($"[SceneBootstrap] {ScenePath} を生成した。");
     }
 
-    /// <summary>Assets/Materials/ に URP Lit のマテリアルアセットを（無ければ）生成して返す。</summary>
-    static Material GetOrCreateMaterial(string name, Color color)
+    /// <summary>
+    /// Assets/Materials/ にマテリアルアセットを（無ければ）生成して返す。
+    /// 既存アセットにもシェーダー・色を適用し、コードを唯一の情報源にする。
+    /// </summary>
+    static Material GetOrCreateMaterial(string name, Color color, string shaderName = "Universal Render Pipeline/Lit")
     {
         const string dir = "Assets/Materials";
         string path = dir + "/" + name + ".mat";
+        var shader = Shader.Find(shaderName);
         var mat = AssetDatabase.LoadAssetAtPath<Material>(path);
         if (mat != null)
         {
+            mat.shader = shader;
+            mat.color = color;
+            EditorUtility.SetDirty(mat);
             return mat;
         }
 
@@ -142,7 +194,7 @@ public static class SceneBootstrap
             AssetDatabase.Refresh();
         }
 
-        mat = new Material(Shader.Find("Universal Render Pipeline/Lit")) { color = color };
+        mat = new Material(shader) { color = color };
         AssetDatabase.CreateAsset(mat, path);
         return mat;
     }
