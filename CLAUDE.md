@@ -12,6 +12,13 @@
 - Unity Editorが開いているとCLIテストは失敗する。Temp/UnityLockfile を確認すること
 - pre-pushゲートあり。全テストパスなしにpushしない
 
+## 実機テスト運用
+- テスト手順は事前に固定し、プレイ前にすべて提示する
+- ユーザーのHMD装着中はメッセージでの指示・質問・依頼をしない
+  （ユーザーは画面を見られない）。ログ監視と記録に徹し、
+  報告はユーザーがHMDを外して発言してから行う
+- 1セッションの装着時間は5分以内を目安に手順を設計する
+
 ## ビルド
 - scripts/build_quest.ps1 → scripts/deploy.ps1
 - ProjectSettings/ の差分は必ずコミット（XR preloadedAssets消失対策）
