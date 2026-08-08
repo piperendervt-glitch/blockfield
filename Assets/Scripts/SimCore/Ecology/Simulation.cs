@@ -8,7 +8,8 @@ namespace BlockField.SimCore.Ecology
     /// <summary>
     /// シムティック (Demo 2 D1/D3/D4 + Demo 3 E1-E4)。ワールド状態への決定論的な更新の入口。
     /// ティック内の処理順は固定:
-    /// 植物スポーン → 動物スポーン → 植生場更新 → 草食獣（摂食/餓死/移動）→ 狼（捕食）→ 繁殖。
+    /// プレイヤー操作適用 → 植物スポーン → 動物スポーン → 植生場更新 →
+    /// 草食獣（摂食/餓死/移動）→ 狼（捕食）→ 繁殖。
     /// RNG 消費順もこの順で固定されるため、同一シード＋同一ティック数で同一結果になる。
     /// </summary>
     public static class Simulation
@@ -36,6 +37,9 @@ namespace BlockField.SimCore.Ecology
 
         public static void Tick(World world, Mulberry32 rng, SimParams p)
         {
+            // Demo 4 F2: プレイヤー操作はティック先頭で適用（RNG非消費 → リプレイ決定論を保つ）
+            world.ApplyPendingActions();
+
             SpawnPlants(world, rng, p);
             SpawnAnimals(world, rng, p);
             UpdateVegetation(world, p);

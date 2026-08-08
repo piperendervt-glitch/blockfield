@@ -6,6 +6,8 @@
 - シーン/プレハブの変更は Editor スクリプト経由でコード化する。
   GUI手作業の結果だけをコミットしない
 - RNGは SimCore/Rng の決定論実装のみ使用。System.Random / UnityEngine.Random 禁止
+- 生態系から地形を書き換えるコードは VoxelGrid.TrySetBlockEcology を必ず使う
+  （Player 出所ブロックは生態系から不変 — 固定レイヤー原則）
 - 設計の終着点は docs/design/stigmergy_vision.md、
   全体計画は docs/design/roadmap.md。個別Demoの実装判断は
   これらと矛盾しないこと（特に: 場のデータ構造の統一、

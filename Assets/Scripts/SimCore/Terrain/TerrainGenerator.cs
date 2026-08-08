@@ -64,7 +64,7 @@ namespace BlockField.SimCore.Terrain
                             id = BlockId.Stone;
                         }
 
-                        grid.Set(new Int3(x, y, z), id);
+                        grid.SetBlock(new Int3(x, y, z), id, BlockOrigin.Terrain);
                     }
                 }
             }

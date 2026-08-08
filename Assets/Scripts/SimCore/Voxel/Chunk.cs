@@ -14,6 +14,7 @@ namespace BlockField.SimCore.Voxel
         public const int VolumeLength = Size * Size * Size;
 
         readonly byte[] m_Blocks = new byte[VolumeLength];
+        readonly byte[] m_Origins = new byte[VolumeLength]; // BlockOrigin (block と同インデックス)
 
         /// <summary>ローカル座標→フラット配列インデックス（x + Size*(y + Size*z)）。</summary>
         public static int ToIndex(int x, int y, int z)
@@ -29,12 +30,32 @@ namespace BlockField.SimCore.Voxel
 
         public void Set(int x, int y, int z, BlockId id)
         {
+            Set(x, y, z, id, BlockOrigin.Terrain);
+        }
+
+        /// <summary>
+        /// ブロックと出所属性の設定。Air セルの origin は Terrain(0) に正規化し、
+        /// ハッシュの安定性を保つ（同じ形状なら破壊経緯によらず同ハッシュ）。
+        /// </summary>
+        public void Set(int x, int y, int z, BlockId id, BlockOrigin origin)
+        {
             ValidateLocal(x, y, z);
-            m_Blocks[ToIndex(x, y, z)] = (byte)id;
+            int index = ToIndex(x, y, z);
+            m_Blocks[index] = (byte)id;
+            m_Origins[index] = id == BlockId.Air ? (byte)BlockOrigin.Terrain : (byte)origin;
+        }
+
+        public BlockOrigin GetOrigin(int x, int y, int z)
+        {
+            ValidateLocal(x, y, z);
+            return (BlockOrigin)m_Origins[ToIndex(x, y, z)];
         }
 
         /// <summary>ハッシュ計算用の生バイトアクセス（インデックスは ToIndex 準拠）。</summary>
         public byte GetRaw(int index) => m_Blocks[index];
+
+        /// <summary>ハッシュ計算用の出所属性生バイトアクセス。</summary>
+        public byte GetRawOrigin(int index) => m_Origins[index];
 
         static void ValidateLocal(int x, int y, int z)
         {

@@ -1,8 +1,9 @@
 using System.Collections.Generic;
+using BlockField.SimCore.Voxel;
 
 namespace BlockField.SimCore.Ecology
 {
-    /// <summary>イベント種別。実書き込みは Demo 4（設置・破壊）と Demo 4.5（観測）で導入。</summary>
+    /// <summary>イベント種別。Observation は Demo 4.5（現実観測）で使用予定。</summary>
     public enum SimEventType : byte
     {
         PlayerPlace = 0,
@@ -10,23 +11,33 @@ namespace BlockField.SimCore.Ecology
         Observation = 2,
     }
 
-    public readonly struct SimEvent
+    /// <summary>
+    /// シムイベント (Demo 4 F2)。JSON 化しやすいプレーンな構造を保つ。
+    /// - PlayerPlace: blockId は設置ブロック
+    /// - PlayerBreak: blockId は破壊時点のブロック（監査用）
+    /// - applied: 適用されたか（無効操作は false のまま記録される）
+    /// </summary>
+    public struct SimEvent
     {
-        public readonly long tick;
-        public readonly SimEventType type;
-        public readonly string payload;
+        public long tick;
+        public SimEventType type;
+        public Int3 cell;
+        public byte blockId;
+        public bool applied;
 
-        public SimEvent(long tick, SimEventType type, string payload)
+        public SimEvent(long tick, SimEventType type, Int3 cell, byte blockId, bool applied)
         {
             this.tick = tick;
             this.type = type;
-            this.payload = payload;
+            this.cell = cell;
+            this.blockId = blockId;
+            this.applied = applied;
         }
     }
 
     /// <summary>
-    /// イベントログの枠 (Demo 3 E5)。決定論を f(初期シード, イベントログ) へ拡張するための入力記録。
-    /// 「ログは状態ではなく入力の記録」なので ContentHash には含めない。
+    /// イベントログ。決定論 f(初期シード, イベントログ) の「入力の記録」であり、
+    /// ContentHash には含めない。World.Replay がこのリストからワールドを再構築する。
     /// </summary>
     public sealed class EventLog
     {

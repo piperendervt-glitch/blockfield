@@ -39,8 +39,17 @@ namespace BlockField.SimCore.Voxel
             return chunk.Get(local.x, local.y, local.z);
         }
 
-        /// <summary>ワールドセル座標の設定。必要ならチャンクを生成する（Air の空チャンク生成は避ける）。</summary>
+        /// <summary>ワールドセル座標の設定（出所 Terrain）。互換用エイリアス。</summary>
         public void Set(Int3 world, BlockId id)
+        {
+            SetBlock(world, id, BlockOrigin.Terrain);
+        }
+
+        /// <summary>
+        /// ブロックと出所属性の設定 (Demo 4 F1)。必要ならチャンクを生成する
+        /// （Air の空チャンク生成は避ける）。
+        /// </summary>
+        public void SetBlock(Int3 world, BlockId id, BlockOrigin origin)
         {
             var chunkCoord = WorldToChunk(world);
             if (!m_Chunks.TryGetValue(chunkCoord, out var chunk))
@@ -54,7 +63,33 @@ namespace BlockField.SimCore.Voxel
             }
 
             var local = WorldToLocal(world);
-            chunk.Set(local.x, local.y, local.z, id);
+            chunk.Set(local.x, local.y, local.z, id, origin);
+        }
+
+        /// <summary>出所属性の取得。未生成チャンクは Terrain。</summary>
+        public BlockOrigin GetOrigin(Int3 world)
+        {
+            if (!m_Chunks.TryGetValue(WorldToChunk(world), out var chunk))
+            {
+                return BlockOrigin.Terrain;
+            }
+            var local = WorldToLocal(world);
+            return chunk.GetOrigin(local.x, local.y, local.z);
+        }
+
+        /// <summary>
+        /// 生態系文脈からの書き込み口（固定レイヤー原則のAPI強制）。
+        /// 対象セルの出所が Player の場合は書き込まず false を返す。
+        /// 生態系から地形を変更するコード（木の成長等）は必ずこの口を使うこと。
+        /// </summary>
+        public bool TrySetBlockEcology(Int3 world, BlockId id)
+        {
+            if (GetOrigin(world) == BlockOrigin.Player)
+            {
+                return false;
+            }
+            SetBlock(world, id, BlockOrigin.Ecology);
+            return true;
         }
 
         /// <summary>生成済みチャンクの列挙（順序は不定。決定論が必要な処理は座標でソートすること）。</summary>
@@ -90,6 +125,11 @@ namespace BlockField.SimCore.Voxel
                 for (int i = 0; i < Chunk.VolumeLength; i++)
                 {
                     hash = (hash ^ chunk.GetRaw(i)) * fnvPrime;
+                }
+                // 出所属性 (Demo 4 F1) も状態の一部としてハッシュに含める
+                for (int i = 0; i < Chunk.VolumeLength; i++)
+                {
+                    hash = (hash ^ chunk.GetRawOrigin(i)) * fnvPrime;
                 }
             }
 
