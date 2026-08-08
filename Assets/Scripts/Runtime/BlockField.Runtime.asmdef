@@ -1,0 +1,6 @@
+{
+    "name": "BlockField.Runtime",
+    "references": [
+        "BlockField.SimCore"
+    ]
+}

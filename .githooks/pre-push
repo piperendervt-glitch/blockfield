@@ -1,0 +1,12 @@
+#!/bin/sh
+# pre-push gate: EditMode テストが全パスしないと push させない。
+# git はフックを repo root を cwd として実行する。
+echo "[pre-push] running EditMode tests..."
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts/run_tests.ps1"
+code=$?
+if [ $code -ne 0 ]; then
+    echo "[pre-push] tests failed (exit $code) — push blocked."
+    exit $code
+fi
+echo "[pre-push] tests passed."
+exit 0

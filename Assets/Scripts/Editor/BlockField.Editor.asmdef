@@ -1,0 +1,12 @@
+{
+    "name": "BlockField.Editor",
+    "references": [
+        "BlockField.Runtime",
+        "BlockField.SimCore",
+        "Unity.RenderPipelines.Core.Runtime",
+        "Unity.RenderPipelines.Universal.Runtime"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ]
+}
