@@ -10,6 +10,9 @@ struct Attributes
 {
     float4 positionOS : POSITION;
     float2 uv : TEXCOORD0;
+    #if defined(_VERTEX_COLOR)
+    float4 color : COLOR;
+    #endif
     UNITY_VERTEX_INPUT_INSTANCE_ID
 };
 
@@ -19,6 +22,9 @@ struct Varyings
     float3 positionWS : TEXCOORD0;
     float2 uv : TEXCOORD1;
     float fogCoord : TEXCOORD2;
+    #if defined(_VERTEX_COLOR)
+    float4 color : COLOR;
+    #endif
     UNITY_VERTEX_INPUT_INSTANCE_ID
     UNITY_VERTEX_OUTPUT_STEREO
 };
@@ -37,6 +43,9 @@ Varyings UnlitPassVertex(Attributes input)
     output.fogCoord = ComputeFogFactor(vertexInput.positionCS.z);
     output.positionWS = vertexInput.positionWS;
     output.positionCS = vertexInput.positionCS;
+    #if defined(_VERTEX_COLOR)
+    output.color = input.color;
+    #endif
 
     return output;
 }
@@ -50,6 +59,10 @@ half4 UnlitPassFragment(Varyings input) : SV_Target
     half4 texColor = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, uv);
     half3 color = texColor.rgb * _BaseColor.rgb;
     half alpha = texColor.a * _BaseColor.a;
+    #if defined(_VERTEX_COLOR)
+    color *= input.color.rgb;
+    alpha *= input.color.a;
+    #endif
 
     alpha = AlphaDiscard(alpha, _Cutoff);
     color = AlphaModulate(color, alpha);

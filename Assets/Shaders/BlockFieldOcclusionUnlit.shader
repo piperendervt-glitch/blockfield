@@ -9,6 +9,9 @@ Shader "BlockField/OcclusionUnlit"
         [MainColor] _BaseColor("Color", Color) = (1, 1, 1, 1)
         _Cutoff("AlphaCutout", Range(0.0, 1.0)) = 0.5
 
+        // 頂点色をアルベドに乗算する（地形メッシュ用。頂点色を持たないメッシュではオフのまま使う）
+        [Toggle(_VERTEX_COLOR)] _UseVertexColor("Use Vertex Color", Float) = 0.0
+
         _Surface("__surface", Float) = 0.0
         _Blend("__mode", Float) = 0.0
         _Cull("__cull", Float) = 2.0
@@ -58,6 +61,7 @@ Shader "BlockField/OcclusionUnlit"
             #pragma shader_feature_local_fragment _SURFACE_TYPE_TRANSPARENT
             #pragma shader_feature_local_fragment _ALPHATEST_ON
             #pragma shader_feature_local_fragment _ALPHAMODULATE_ON
+            #pragma shader_feature_local _VERTEX_COLOR
 
             #pragma multi_compile_fog
             #pragma multi_compile_instancing

@@ -111,16 +111,15 @@ public static class SceneBootstrap
         // レティクルは視認性優先で Unlit の明るい緑
         diorama.reticleMaterial = GetOrCreateMaterial("ReticleWhite", new Color(0.3f, 1f, 0.4f), "Universal Render Pipeline/Unlit");
 
-        var voxelField = dioramaGo.AddComponent<BlockField.DummyVoxelField>();
-        voxelField.origin = diorama;
-        voxelField.voxelMaterials = new[]
-        {
-            GetOrCreateMaterial("Voxel0", new Color(0.35f, 0.65f, 0.30f), k_OcclusionShader),
-            GetOrCreateMaterial("Voxel1", new Color(0.55f, 0.42f, 0.28f), k_OcclusionShader),
-            GetOrCreateMaterial("Voxel2", new Color(0.75f, 0.70f, 0.50f), k_OcclusionShader),
-            GetOrCreateMaterial("Voxel3", new Color(0.45f, 0.55f, 0.65f), k_OcclusionShader),
-        };
-        voxelField.bridgeMaterial = GetOrCreateMaterial("BridgeBlue", new Color(0.2f, 0.4f, 0.9f), k_OcclusionShader);
+        // 地形表示 (Demo 1 B2): 頂点色対応のオクルージョンシェーダー1マテリアルに統一
+        var terrainMat = GetOrCreateMaterial("TerrainVertexColor", Color.white, k_OcclusionShader);
+        terrainMat.SetFloat("_UseVertexColor", 1f);
+        terrainMat.EnableKeyword("_VERTEX_COLOR");
+        EditorUtility.SetDirty(terrainMat);
+
+        var terrainField = dioramaGo.AddComponent<BlockField.TerrainField>();
+        terrainField.origin = diorama;
+        terrainField.terrainMaterial = terrainMat;
 
         // HMD内デバッグパネル (World Space Canvas、カメラ前下方 0.6m に固定)
         var canvasGo = new GameObject("Debug Panel");
@@ -158,7 +157,7 @@ public static class SceneBootstrap
 
         var panel = canvasGo.AddComponent<BlockField.DebugPanel>();
         panel.diorama = diorama;
-        panel.voxelField = voxelField;
+        panel.terrainField = terrainField;
         panel.planeManager = planeManager;
         panel.text = uiText;
 

@@ -18,12 +18,12 @@ namespace BlockField
         const float k_RefreshInterval = 1f;
 
         [SerializeField] DioramaOrigin m_Diorama;
-        [SerializeField] DummyVoxelField m_VoxelField;
+        [SerializeField] TerrainField m_TerrainField;
         [SerializeField] ARPlaneManager m_PlaneManager;
         [SerializeField] Text m_Text;
 
         public DioramaOrigin diorama { get => m_Diorama; set => m_Diorama = value; }
-        public DummyVoxelField voxelField { get => m_VoxelField; set => m_VoxelField = value; }
+        public TerrainField terrainField { get => m_TerrainField; set => m_TerrainField = value; }
         public ARPlaneManager planeManager { get => m_PlaneManager; set => m_PlaneManager = value; }
         public Text text { get => m_Text; set => m_Text = value; }
 
@@ -70,15 +70,18 @@ namespace BlockField
             string rayHit = m_Diorama != null && m_Diorama.HasPlaneHit ? "Y" : "N";
             string origin = m_Diorama != null ? m_Diorama.State.ToString() : "-";
             bool anchorSaved = File.Exists(Path.Combine(Application.persistentDataPath, "diorama_anchor.json"));
-            int voxels = m_VoxelField != null ? m_VoxelField.CurrentCount : 0;
+            int blocks = m_TerrainField != null ? m_TerrainField.BlockCount : 0;
+            uint seed = m_TerrainField != null ? m_TerrainField.CurrentSeed : 0;
+            long genMs = m_TerrainField != null ? m_TerrainField.GenerationMs : 0;
             float fps = m_SmoothedDeltaTime > 0.0001f ? 1f / m_SmoothedDeltaTime : 0f;
 
-            string field = m_VoxelField != null && m_VoxelField.FieldVisible ? "ON" : "OFF";
+            string field = m_TerrainField != null && m_TerrainField.FieldVisible ? "ON" : "OFF";
 
             return
                 $"USE_SCENE: {perm}   Planes: {planes}   RayHit: {rayHit}\n" +
                 $"Origin: {origin}   AnchorSaved: {(anchorSaved ? "Y" : "N")}\n" +
-                $"Voxels: {voxels}   Field: {field}   FPS: {fps:F1}\n" +
+                $"Blocks: {blocks}   Field: {field}   FPS: {fps:F1}\n" +
+                $"Seed: {seed}   Gen: {genMs}ms\n" +
                 $"Last: {s_LastEvent}";
         }
     }
