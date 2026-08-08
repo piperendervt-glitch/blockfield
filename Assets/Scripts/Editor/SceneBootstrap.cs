@@ -66,12 +66,17 @@ public static class SceneBootstrap
         camGo.AddComponent<ARCameraBackground>();
 
         // Occlusion: Environment Depth = Fastest。
-        // ただし com.oculus.permission.USE_SCENE (XR_FB_scene) のランタイム権限取得前に
-        // 有効化するとMeta OpenXRが毎フレームエラーを出すため、既定は無効。
-        // 権限リクエストフロー実装後に enabled = true にすること。
+        // com.oculus.permission.USE_SCENE (XR_FB_scene) のランタイム権限取得前に
+        // 有効化するとMeta OpenXRが毎フレームエラーを出すため、生成時は無効。
+        // 実行時に ScenePermissionGate が権限を要求し、許可後に enabled = true にする。
         var occlusion = camGo.AddComponent<AROcclusionManager>();
         occlusion.requestedEnvironmentDepthMode = EnvironmentDepthMode.Fastest;
         occlusion.enabled = false;
+
+        // USE_SCENE 権限フロー (Demo 0 T1)
+        var gateGo = new GameObject("Scene Permission Gate");
+        var gate = gateGo.AddComponent<BlockField.ScenePermissionGate>();
+        gate.occlusionManager = occlusion;
 
         origin.Camera = cam;
         origin.CameraFloorOffsetObject = offsetGo;

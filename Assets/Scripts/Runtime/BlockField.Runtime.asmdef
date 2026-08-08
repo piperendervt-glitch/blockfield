@@ -1,6 +1,7 @@
 {
     "name": "BlockField.Runtime",
     "references": [
-        "BlockField.SimCore"
+        "BlockField.SimCore",
+        "Unity.XR.ARFoundation"
     ]
 }
