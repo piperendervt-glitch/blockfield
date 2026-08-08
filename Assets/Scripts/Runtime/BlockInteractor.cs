@@ -25,6 +25,13 @@ namespace BlockField
         const float k_RayWidth = 0.002f;
         const float k_PendingPlaceScale = 0.7f;
 
+        /// <summary>
+        /// レイのピッチ下向き補正（度）。コントローラの前方軸そのままでは上向きすぎて
+        /// 机上ジオラマを狙いにくいため、Meta の UI ポインティング慣例に合わせて
+        /// ローカルで下へ傾ける。
+        /// </summary>
+        const float k_AimPitchDegrees = 50f;
+
         [SerializeField] TerrainField m_TerrainField;
         [SerializeField] Transform m_TrackingSpace;
         [SerializeField] Material m_BreakHighlightMaterial;
@@ -43,11 +50,18 @@ namespace BlockField
         public Material rayHitMaterial { get => m_RayHitMaterial; set => m_RayHitMaterial = value; }
         public Material rayMissMaterial { get => m_RayMissMaterial; set => m_RayMissMaterial = value; }
 
+        enum PendingKind
+        {
+            Place,      // セルが非Airになったら解決
+            BreakBlock, // セルがAirになったら解決
+            BreakPlant, // セル上の植物が消えたら解決
+        }
+
         sealed class PendingVisual
         {
             public GameObject go;
             public Int3 cell;
-            public bool isPlace; // true=設置予約(セルが非Airになったら消す) / false=破壊予約(Airになったら消す)
+            public PendingKind kind;
             public float startTime;
         }
 
@@ -68,6 +82,7 @@ namespace BlockField
         readonly List<PendingVisual> m_Pending = new();
 
         bool m_HasTarget;
+        bool m_TargetIsPlant;
         Int3 m_TargetCell;
         Int3 m_PlaceCell;
         bool m_CanPlace;
@@ -175,7 +190,10 @@ namespace BlockField
             var localPos = m_PositionAction.ReadValue<Vector3>();
             var localRot = m_RotationAction.ReadValue<Quaternion>();
             var worldPos = m_TrackingSpace != null ? m_TrackingSpace.TransformPoint(localPos) : localPos;
-            var worldDir = (m_TrackingSpace != null ? m_TrackingSpace.rotation * localRot : localRot) * Vector3.forward;
+            // ピッチ下向き補正（k_AimPitchDegrees 参照）
+            var aimRot = (m_TrackingSpace != null ? m_TrackingSpace.rotation * localRot : localRot)
+                * Quaternion.Euler(k_AimPitchDegrees, 0f, 0f);
+            var worldDir = aimRot * Vector3.forward;
 
             m_RayStartWorld = worldPos;
             m_RayEndWorld = worldPos + worldDir * k_MaxRayDistanceMeters;
@@ -189,20 +207,26 @@ namespace BlockField
             float cyf = lp.y / k_BlockSize;
             float czf = (lp.z + offsetZ) / k_BlockSize + 0.5f;
 
+            // 植物エンティティも遮蔽として走査（Minecraft 仕様: 植物を先にヒット）
             if (VoxelRaycast.Raycast(world.Grid, cxf, cyf, czf, ld.x, ld.y, ld.z,
-                    k_MaxRayDistanceMeters / k_BlockSize, out var hitCell, out var hitNormal))
+                    k_MaxRayDistanceMeters / k_BlockSize,
+                    cell => world.TryGetEntityIndexAt(cell, out int i) && world.Entities[i].IsPlant,
+                    out var hitCell, out var hitNormal, out bool hitPlant))
             {
                 m_HasTarget = true;
+                m_TargetIsPlant = hitPlant;
                 m_TargetCell = hitCell;
                 m_PlaceCell = hitCell + hitNormal;
-                // 法線ゼロ（レイ始点が壁内）や高さ範囲外へは設置不可
-                m_CanPlace = hitNormal != new Int3(0, 0, 0)
+                // 植物ヒット時・法線ゼロ（レイ始点が壁内）・高さ範囲外は設置不可
+                m_CanPlace = !hitPlant
+                    && hitNormal != new Int3(0, 0, 0)
                     && m_PlaceCell.y >= 0 && m_PlaceCell.y < world.Params.maxHeight
                     && world.Grid.Get(m_PlaceCell) == BlockId.Air;
 
-                // レイ終端はヒット面（セル中心＋法線×半ブロック）
+                // レイ終端はヒット面（セル中心＋法線×半ブロック）。植物は中心まで
                 var faceLocal = CellToLocal(hitCell)
-                    + new Vector3(hitNormal.x, hitNormal.y, hitNormal.z) * (k_BlockSize * 0.5f);
+                    + (hitPlant ? Vector3.zero
+                        : new Vector3(hitNormal.x, hitNormal.y, hitNormal.z) * (k_BlockSize * 0.5f));
                 m_RayEndWorld = origin.TransformPoint(faceLocal);
             }
 
@@ -220,15 +244,19 @@ namespace BlockField
 
         void UpdateHighlights(Transform origin)
         {
+            // ミス時も枠だけ消してレイは表示し続ける（照準の行方が常に分かるように）
             if (!m_HasTarget)
             {
-                SetTargetVisible(false);
+                m_BreakHighlight.SetActive(false);
+                m_PlaceHighlight.SetActive(false);
                 return;
             }
 
             m_BreakHighlight.SetActive(true);
             m_BreakHighlight.transform.position = origin.TransformPoint(CellToLocal(m_TargetCell));
             m_BreakHighlight.transform.rotation = origin.rotation;
+            // 植物ヒット時は植物サイズ（0.5ブロック）に合わせた小さい赤枠
+            m_BreakHighlight.transform.localScale = Vector3.one * (k_BlockSize * (m_TargetIsPlant ? 0.6f : 1.02f));
 
             m_PlaceHighlight.SetActive(m_CanPlace);
             if (m_CanPlace)
@@ -254,38 +282,57 @@ namespace BlockField
             {
                 m_LastActionTime = Time.unscaledTime;
                 world.EnqueuePlayerAction(SimEventType.PlayerPlace, m_PlaceCell, BlockId.Stone);
-                AddPendingVisual(m_PlaceCell, isPlace: true);
+                AddPendingVisual(m_PlaceCell, PendingKind.Place);
                 Debug.Log($"[BlockInteractor] 設置予約: {m_PlaceCell}");
             }
             else if (brk)
             {
                 m_LastActionTime = Time.unscaledTime;
-                world.EnqueuePlayerAction(SimEventType.PlayerBreak, m_TargetCell, BlockId.Air);
-                AddPendingVisual(m_TargetCell, isPlace: false);
-                Debug.Log($"[BlockInteractor] 破壊予約: {m_TargetCell}");
+                if (m_TargetIsPlant)
+                {
+                    world.EnqueuePlayerAction(SimEventType.PlayerBreakPlant, m_TargetCell, BlockId.Air);
+                    AddPendingVisual(m_TargetCell, PendingKind.BreakPlant);
+                    Debug.Log($"[BlockInteractor] 植物破壊予約: {m_TargetCell}");
+                }
+                else
+                {
+                    world.EnqueuePlayerAction(SimEventType.PlayerBreak, m_TargetCell, BlockId.Air);
+                    AddPendingVisual(m_TargetCell, PendingKind.BreakBlock);
+                    Debug.Log($"[BlockInteractor] 破壊予約: {m_TargetCell}");
+                }
             }
         }
 
-        void AddPendingVisual(Int3 cell, bool isPlace)
+        void AddPendingVisual(Int3 cell, PendingKind kind)
         {
             // 不透明の仮表示（MR合成制約）: 設置予約=縮小ブロック（確定で実体100%に）、
-            // 破壊予約=わずかに拡大した暗色の箱で対象を覆う
-            var go = new GameObject(isPlace ? "Pending Place" : "Pending Break");
-            go.transform.localScale = Vector3.one * (k_BlockSize * (isPlace ? k_PendingPlaceScale : 1.05f));
+            // 破壊予約=わずかに拡大した暗色の箱、植物破壊予約=植物サイズの暗色の箱
+            float scale = kind switch
+            {
+                PendingKind.Place => k_PendingPlaceScale,
+                PendingKind.BreakPlant => 0.55f,
+                _ => 1.05f,
+            };
+            var go = new GameObject($"Pending {kind}");
+            go.transform.localScale = Vector3.one * (k_BlockSize * scale);
             go.AddComponent<MeshFilter>().sharedMesh = m_CubeMesh;
-            go.AddComponent<MeshRenderer>().sharedMaterial = isPlace ? m_PendingPlaceMaterial : m_PendingBreakMaterial;
-            m_Pending.Add(new PendingVisual { go = go, cell = cell, isPlace = isPlace, startTime = Time.unscaledTime });
+            go.AddComponent<MeshRenderer>().sharedMaterial =
+                kind == PendingKind.Place ? m_PendingPlaceMaterial : m_PendingBreakMaterial;
+            m_Pending.Add(new PendingVisual { go = go, cell = cell, kind = kind, startTime = Time.unscaledTime });
         }
 
-        /// <summary>仮表示: Tick適用（グリッド反映）を検知したら破棄。タイムアウトで無効操作分も掃除。</summary>
+        /// <summary>仮表示: Tick適用（グリッド/エンティティ反映）を検知したら破棄。タイムアウトで無効操作分も掃除。</summary>
         void UpdatePendingVisuals(World world, Transform origin)
         {
             for (int i = m_Pending.Count - 1; i >= 0; i--)
             {
                 var pending = m_Pending[i];
-                bool resolved = pending.isPlace
-                    ? world.Grid.Get(pending.cell) != BlockId.Air
-                    : world.Grid.Get(pending.cell) == BlockId.Air;
+                bool resolved = pending.kind switch
+                {
+                    PendingKind.Place => world.Grid.Get(pending.cell) != BlockId.Air,
+                    PendingKind.BreakBlock => world.Grid.Get(pending.cell) == BlockId.Air,
+                    _ => !(world.TryGetEntityIndexAt(pending.cell, out int idx) && world.Entities[idx].IsPlant),
+                };
 
                 if (resolved || Time.unscaledTime - pending.startTime > k_PendingTimeout)
                 {

@@ -112,7 +112,7 @@ namespace BlockField.Tests.EditMode
             var tp = WorldParams(7u);
             var sp = SimParams.Default;
 
-            // 逐次実行: ランダムな Place/Break を20件投入（有効・無効混在）
+            // 逐次実行: ランダムな Place/Break/BreakPlant を投入（有効・無効混在）
             var worldA = World.Create(tp);
             var actionRng = new Mulberry32(0xAC7104u);
             int enqueued = 0;
@@ -120,22 +120,42 @@ namespace BlockField.Tests.EditMode
             {
                 if (t % 3 == 0 && enqueued < 20)
                 {
-                    var type = actionRng.Range(0, 2) == 0 ? SimEventType.PlayerPlace : SimEventType.PlayerBreak;
+                    int roll = actionRng.Range(0, 3);
+                    var type = roll == 0 ? SimEventType.PlayerPlace
+                        : roll == 1 ? SimEventType.PlayerBreak
+                        : SimEventType.PlayerBreakPlant;
                     var cell = new Int3(actionRng.Range(0, 50), actionRng.Range(0, 16), actionRng.Range(0, 50));
                     worldA.EnqueuePlayerAction(type, cell, BlockId.Stone);
                     enqueued++;
                 }
+
+                // 有効な PlayerBreakPlant を確実に1件含める（実在の植物セルを狙う）
+                if (t == 30)
+                {
+                    foreach (var e in worldA.Entities)
+                    {
+                        if (e.IsPlant)
+                        {
+                            worldA.EnqueuePlayerAction(SimEventType.PlayerBreakPlant, e.cell, BlockId.Air);
+                            break;
+                        }
+                    }
+                }
+
                 Simulation.Tick(worldA, worldA.Rng, sp);
             }
 
             int applied = 0;
+            bool plantBreakApplied = false;
             foreach (var e in worldA.EventLog.Events)
             {
                 if (e.applied) applied++;
+                if (e.applied && e.type == SimEventType.PlayerBreakPlant) plantBreakApplied = true;
             }
-            Assert.AreEqual(20, worldA.EventLog.Events.Count, "全操作がログに残っていない");
+            Assert.GreaterOrEqual(worldA.EventLog.Events.Count, 20, "全操作がログに残っていない");
             Assert.Greater(applied, 0, "有効操作が1つもない（テスト前提が弱い）");
-            Assert.Less(applied, 20, "無効操作が1つもない（テスト前提が弱い）");
+            Assert.Less(applied, worldA.EventLog.Events.Count, "無効操作が1つもない（テスト前提が弱い）");
+            Assert.IsTrue(plantBreakApplied, "有効な PlayerBreakPlant がイベント列に含まれていない");
 
             // リプレイ: f(シード, イベントログ)
             var events = new List<SimEvent>(worldA.EventLog.Events);
@@ -246,6 +266,62 @@ namespace BlockField.Tests.EditMode
                 }
             }
             return near;
+        }
+
+        [Test]
+        public void PlayerBreakPlant_RemovesPlantOnly_TerrainUnchanged()
+        {
+            var world = World.Create(WorldParams(1u));
+            var p = FrozenParams();
+            var (x, z) = FindFlatRunFor(world, 1);
+            int h = world.GetSurfaceHeight(x, z);
+            var plantCell = new Int3(x, h, z);
+            var surfaceCell = new Int3(x, h - 1, z);
+            var surfaceBlock = world.Grid.Get(surfaceCell);
+
+            Assert.GreaterOrEqual(world.TrySpawn(EntityKind.GrassTuft, x, z, 0), 0);
+
+            // 1ティック回して植生場に書き込ませてから破壊
+            Simulation.Tick(world, world.Rng, p);
+            float vegBefore = world.Vegetation.Values.Get(x, z);
+            Assert.Greater(vegBefore, 0f, "テスト前提: 植生場に書き込みがあること");
+
+            world.EnqueuePlayerAction(SimEventType.PlayerBreakPlant, plantCell, BlockId.Air);
+            Simulation.Tick(world, world.Rng, p);
+
+            Assert.AreEqual(0, world.PlantCount, "植物が消えていない");
+            Assert.AreEqual(surfaceBlock, world.Grid.Get(surfaceCell), "地形が変更された（植物のみ消えるはず）");
+            Assert.AreEqual(h, world.GetSurfaceHeight(x, z), "表層高さが変わった");
+            Assert.Less(world.Vegetation.Values.Get(x, z), vegBefore * 0.75f, "植生場が半減していない");
+
+            var buffer = new List<Int3>();
+            Assert.IsFalse(world.ConsumeDirtyChunks(buffer), "地形不変更なのに DirtyChunks が積まれた");
+        }
+
+        static (int x, int z) FindFlatRunFor(World world, int len)
+        {
+            for (int z = 0; z < world.Depth; z++)
+            {
+                for (int x = 0; x + len <= world.Width; x++)
+                {
+                    bool ok = true;
+                    int h = world.GetSurfaceHeight(x, z);
+                    for (int i = 0; i < len; i++)
+                    {
+                        if (world.Suitability.Get(x + i, z) < 1f || world.GetSurfaceHeight(x + i, z) != h)
+                        {
+                            ok = false;
+                            break;
+                        }
+                    }
+                    if (ok)
+                    {
+                        return (x, z);
+                    }
+                }
+            }
+            Assert.Fail("平坦な行が見つからない");
+            return (0, 0);
         }
 
         // ---- 無効操作・DirtyChunks ----

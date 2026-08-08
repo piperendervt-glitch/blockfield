@@ -186,10 +186,28 @@ namespace BlockField.SimCore.Ecology
                         applied = true;
                     }
                 }
+                else if (action.type == SimEventType.PlayerBreakPlant)
+                {
+                    // 植物の独立破壊: 地形は不変更、植物のみ消滅＋植生場×0.5
+                    if (TryGetEntityIndexAt(action.cell, out int index) && m_Entities[index].IsPlant)
+                    {
+                        recordedBlock = (byte)m_Entities[index].kind; // 監査用: 破壊した植物種
+                        m_FeedbackDeadScratch.Clear();
+                        m_FeedbackDeadScratch.Add(m_Entities[index].id);
+                        RemoveEntities(m_FeedbackDeadScratch);
+
+                        if (InBounds(action.cell.x, action.cell.z))
+                        {
+                            float v = Vegetation.Values.Get(action.cell.x, action.cell.z);
+                            Vegetation.Values.Set(action.cell.x, action.cell.z, v * 0.5f);
+                        }
+                        applied = true;
+                    }
+                }
 
                 EventLog.Append(new SimEvent(TickCount, action.type, action.cell, recordedBlock, applied));
 
-                if (applied)
+                if (applied && action.type != SimEventType.PlayerBreakPlant)
                 {
                     ApplyBlockChangeFeedback(action.cell, action.type == SimEventType.PlayerBreak);
                 }

@@ -19,8 +19,26 @@ namespace BlockField.SimCore.Voxel
             float maxDistance,
             out Int3 hitCell, out Int3 hitNormal)
         {
+            return Raycast(grid, originX, originY, originZ, dirX, dirY, dirZ, maxDistance,
+                null, out hitCell, out hitNormal, out _);
+        }
+
+        /// <summary>
+        /// エンティティ遮蔽対応版 (Demo 4 UX: 植物の独立破壊)。
+        /// 走査中の各セルでまず entityBlocker を評価し、真ならブロックより先に
+        /// 「エンティティヒット」(hitEntity=true) として返す（植物は Air セルを占有するため、
+        /// 地形ヒットより手前で検出される）。
+        /// </summary>
+        public static bool Raycast(VoxelGrid grid,
+            float originX, float originY, float originZ,
+            float dirX, float dirY, float dirZ,
+            float maxDistance,
+            Predicate<Int3> entityBlocker,
+            out Int3 hitCell, out Int3 hitNormal, out bool hitEntity)
+        {
             hitCell = default;
             hitNormal = default;
+            hitEntity = false;
 
             float length = MathF.Sqrt(dirX * dirX + dirY * dirY + dirZ * dirZ);
             if (length < 1e-6f || maxDistance <= 0f)
@@ -36,6 +54,13 @@ namespace BlockField.SimCore.Voxel
             int cz = FloorToInt(originZ);
 
             var startCell = new Int3(cx, cy, cz);
+            if (entityBlocker != null && entityBlocker(startCell))
+            {
+                hitCell = startCell;
+                hitNormal = new Int3(0, 0, 0);
+                hitEntity = true;
+                return true;
+            }
             if (grid.Get(startCell) != BlockId.Air)
             {
                 hitCell = startCell;
@@ -86,12 +111,21 @@ namespace BlockField.SimCore.Voxel
                 }
 
                 var cell = new Int3(cx, cy, cz);
+                var normal = axis == 0 ? new Int3(-stepX, 0, 0)
+                    : axis == 1 ? new Int3(0, -stepY, 0)
+                    : new Int3(0, 0, -stepZ);
+
+                if (entityBlocker != null && entityBlocker(cell))
+                {
+                    hitCell = cell;
+                    hitNormal = normal;
+                    hitEntity = true;
+                    return true;
+                }
                 if (grid.Get(cell) != BlockId.Air)
                 {
                     hitCell = cell;
-                    hitNormal = axis == 0 ? new Int3(-stepX, 0, 0)
-                        : axis == 1 ? new Int3(0, -stepY, 0)
-                        : new Int3(0, 0, -stepZ);
+                    hitNormal = normal;
                     return true;
                 }
             }

@@ -9,6 +9,9 @@ namespace BlockField.SimCore.Ecology
         PlayerPlace = 0,
         PlayerBreak = 1,
         Observation = 2,
+
+        /// <summary>植物の独立破壊 (Demo 4 UX)。地形は不変更、植物のみ消滅＋植生場×0.5。</summary>
+        PlayerBreakPlant = 3,
     }
 
     /// <summary>
