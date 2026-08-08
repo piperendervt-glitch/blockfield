@@ -26,6 +26,8 @@ namespace BlockField
         public Material bridgeMaterial { get => m_BridgeMaterial; set => m_BridgeMaterial = value; }
 
         const float k_SwitchCooldown = 1f;
+        const int k_BridgeLength = 10;
+        const int k_BridgeCellY = 1; // 平原1層目 (y=0) の上に乗せて共面を避ける
 
         InputAction m_AButtonAction;
         bool m_Built;
@@ -35,6 +37,28 @@ namespace BlockField
         float m_LastSwitchTime = float.NegativeInfinity;
         readonly List<GameObject> m_Chunks = new();
         readonly List<Mesh> m_GeneratedMeshes = new();
+        HashSet<Vector3Int> m_BridgeCells;
+
+        /// <summary>セル座標→原点ローカル座標（ブロック中心）。全生成物はこの整数セル系に載せる。</summary>
+        static Vector3 CellToLocal(Vector3Int cell)
+        {
+            return new Vector3(cell.x * k_BlockSize, (cell.y + 0.5f) * k_BlockSize, cell.z * k_BlockSize);
+        }
+
+        /// <summary>十字の橋が占有するセル集合。原則「同一セルに2つ生成しない」の予約に使う。</summary>
+        static HashSet<Vector3Int> BuildBridgeCells()
+        {
+            var cells = new HashSet<Vector3Int>();
+            var directions = new[] { Vector3Int.forward, Vector3Int.back, Vector3Int.right, Vector3Int.left };
+            foreach (var dir in directions)
+            {
+                for (int i = 1; i <= k_BridgeLength; i++)
+                {
+                    cells.Add(new Vector3Int(dir.x * i, k_BridgeCellY, dir.z * i));
+                }
+            }
+            return cells;
+        }
 
         /// <summary>現在表示中のボクセル数（デバッグパネル表示用）。</summary>
         public int CurrentCount { get; private set; }
@@ -47,6 +71,7 @@ namespace BlockField
             m_AButtonAction.performed += OnAButtonPerformed;
 
             m_CubeMesh = PrimitiveMeshFactory.CreateCube();
+            m_BridgeCells = BuildBridgeCells();
         }
 
         void OnDestroy() => m_AButtonAction.performed -= OnAButtonPerformed;
@@ -99,7 +124,9 @@ namespace BlockField
                 combinesPerMaterial[i] = new List<CombineInstance>();
             }
 
-            float half = (k_Side - 1) * 0.5f;
+            // 整数セル座標で生成し、橋の予約セルはスキップする（同一セルに2つ生成しない原則）
+            int half = k_Side / 2;
+            int skipped = 0;
             var scale = Vector3.one * k_BlockSize;
             for (int y = 0; y < layers; y++)
             {
@@ -107,15 +134,18 @@ namespace BlockField
                 {
                     for (int x = 0; x < k_Side; x++)
                     {
-                        var localPos = new Vector3(
-                            (x - half) * k_BlockSize,
-                            (y + 0.5f) * k_BlockSize,
-                            (z - half) * k_BlockSize);
+                        var cell = new Vector3Int(x - half, y, z - half);
+                        if (m_BridgeCells.Contains(cell))
+                        {
+                            skipped++;
+                            continue;
+                        }
+
                         int materialIndex = (x + z + y) % materialCount;
                         combinesPerMaterial[materialIndex].Add(new CombineInstance
                         {
                             mesh = m_CubeMesh,
-                            transform = Matrix4x4.TRS(localPos, Quaternion.identity, scale),
+                            transform = Matrix4x4.TRS(CellToLocal(cell), Quaternion.identity, scale),
                         });
                     }
                 }
@@ -142,8 +172,8 @@ namespace BlockField
                 m_Chunks.Add(go);
             }
 
-            CurrentCount = layers * k_Side * k_Side;
-            Debug.Log($"[DummyVoxelField] ボクセル表示: {CurrentCount} 個 ({k_Side}x{k_Side}x{layers}層, メッシュ{materialCount}分割)");
+            CurrentCount = layers * k_Side * k_Side - skipped;
+            Debug.Log($"[DummyVoxelField] ボクセル表示: {CurrentCount} 個 ({k_Side}x{k_Side}x{layers}層, メッシュ{materialCount}分割, 橋との重複セル{skipped}個スキップ)");
             DebugPanel.Notify($"voxels: {CurrentCount}");
         }
 
@@ -157,20 +187,16 @@ namespace BlockField
             var bridgeRoot = new GameObject("Occlusion Bridge");
             bridgeRoot.transform.SetParent(parent, false);
 
-            var directions = new[] { Vector3.forward, Vector3.back, Vector3.right, Vector3.left };
+            // 平原と同じ整数セル系の y=+1 セル（平原1層目の上）に生成。共面にならない
             var combines = new List<CombineInstance>();
             var scale = Vector3.one * k_BlockSize;
-            foreach (var dir in directions)
+            foreach (var cell in m_BridgeCells)
             {
-                for (int i = 1; i <= 10; i++)
+                combines.Add(new CombineInstance
                 {
-                    var localPos = dir * (i * k_BlockSize) + new Vector3(0f, 0.5f * k_BlockSize, 0f);
-                    combines.Add(new CombineInstance
-                    {
-                        mesh = m_CubeMesh,
-                        transform = Matrix4x4.TRS(localPos, Quaternion.identity, scale),
-                    });
-                }
+                    mesh = m_CubeMesh,
+                    transform = Matrix4x4.TRS(CellToLocal(cell), Quaternion.identity, scale),
+                });
             }
 
             var mesh = new Mesh { name = "OcclusionBridge" };
