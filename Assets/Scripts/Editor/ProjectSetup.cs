@@ -50,14 +50,14 @@ public static class ProjectSetup
         PlayerSettings.SetScriptingBackend(NamedBuildTarget.Android, ScriptingImplementation.IL2CPP);
         PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
 
-        // Min SDK 29 (Android 10)
-        PlayerSettings.Android.minSdkVersion = (AndroidSdkVersions)29;
+        // Min SDK 32 (Android 12L) — Meta Quest Camera (Passthrough) の要件
+        PlayerSettings.Android.minSdkVersion = (AndroidSdkVersions)32;
 
         // Graphics API: Vulkan のみ
         PlayerSettings.SetUseDefaultGraphicsAPIs(BuildTarget.Android, false);
         PlayerSettings.SetGraphicsAPIs(BuildTarget.Android, new[] { GraphicsDeviceType.Vulkan });
 
-        Debug.Log("[ProjectSetup] PlayerSettings configured (IL2CPP / ARM64 / MinSdk29 / Vulkan).");
+        Debug.Log("[ProjectSetup] PlayerSettings configured (IL2CPP / ARM64 / MinSdk32 / Vulkan).");
     }
 
     private static void ConfigureUrp()
