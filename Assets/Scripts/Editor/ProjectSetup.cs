@@ -94,6 +94,10 @@ public static class ProjectSetup
             pipelineAsset = UniversalRenderPipelineAsset.Create(rendererData);
             AssetDatabase.CreateAsset(pipelineAsset, PipelineAssetPath);
         }
+        // パススルー合成のためHDRを無効化。
+        // HDRオンだとカラーバッファが B10G11R11（アルファ無し）になり、
+        // Premultiply合成で全ピクセル不透明→パススルーが黒く覆われる。
+        pipelineAsset.supportsHDR = false;
         EditorUtility.SetDirty(pipelineAsset);
 
         // Graphics / Quality へ割り当て

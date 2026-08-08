@@ -47,6 +47,8 @@ public static class SceneBootstrap
         cam.clearFlags = CameraClearFlags.SolidColor;
         cam.backgroundColor = new Color(0f, 0f, 0f, 0f);
         cam.nearClipPlane = 0.05f;
+        // HDRバッファ(B10G11R11)はアルファを持たずパススルー合成が壊れるため無効化
+        cam.allowHDR = false;
 
         // HMDトラッキング (Input System)
         var tpd = camGo.AddComponent<TrackedPoseDriver>();
@@ -63,9 +65,13 @@ public static class SceneBootstrap
         camGo.AddComponent<ARCameraManager>();
         camGo.AddComponent<ARCameraBackground>();
 
-        // Occlusion: Environment Depth = Fastest
+        // Occlusion: Environment Depth = Fastest。
+        // ただし com.oculus.permission.USE_SCENE (XR_FB_scene) のランタイム権限取得前に
+        // 有効化するとMeta OpenXRが毎フレームエラーを出すため、既定は無効。
+        // 権限リクエストフロー実装後に enabled = true にすること。
         var occlusion = camGo.AddComponent<AROcclusionManager>();
         occlusion.requestedEnvironmentDepthMode = EnvironmentDepthMode.Fastest;
+        occlusion.enabled = false;
 
         origin.Camera = cam;
         origin.CameraFloorOffsetObject = offsetGo;
