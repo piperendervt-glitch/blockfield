@@ -121,6 +121,14 @@ public static class SceneBootstrap
         terrainField.origin = diorama;
         terrainField.terrainMaterial = terrainMat;
 
+        // エンティティ表示 (Demo 2 D5)。マテリアルはオクルージョン対応シェーダーのアセット
+        var entityRenderer = dioramaGo.AddComponent<BlockField.EntityRenderer>();
+        entityRenderer.terrainField = terrainField;
+        entityRenderer.grassTuftMaterial = GetOrCreateMaterial("EntityGrassTuft", new Color(0.25f, 0.8f, 0.25f), k_OcclusionShader);
+        entityRenderer.flowerMaterial = GetOrCreateMaterial("EntityFlower", new Color(0.95f, 0.85f, 0.25f), k_OcclusionShader);
+        entityRenderer.sheepMaterial = GetOrCreateMaterial("EntitySheep", new Color(0.95f, 0.95f, 0.95f), k_OcclusionShader);
+        entityRenderer.pigMaterial = GetOrCreateMaterial("EntityPig", new Color(0.95f, 0.65f, 0.7f), k_OcclusionShader);
+
         // HMD内デバッグパネル (World Space Canvas、カメラ前下方 0.6m に固定)
         var canvasGo = new GameObject("Debug Panel");
         canvasGo.transform.SetParent(camGo.transform, false);
@@ -129,7 +137,7 @@ public static class SceneBootstrap
         var canvas = canvasGo.AddComponent<Canvas>();
         canvas.renderMode = RenderMode.WorldSpace;
         var canvasRect = canvasGo.GetComponent<RectTransform>();
-        canvasRect.sizeDelta = new Vector2(600f, 220f);
+        canvasRect.sizeDelta = new Vector2(600f, 260f);
 
         var bgGo = new GameObject("Background");
         bgGo.transform.SetParent(canvasGo.transform, false);

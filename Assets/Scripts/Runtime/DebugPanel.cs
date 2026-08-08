@@ -77,11 +77,17 @@ namespace BlockField
 
             string field = m_TerrainField != null && m_TerrainField.FieldVisible ? "ON" : "OFF";
 
+            var world = m_TerrainField != null ? m_TerrainField.CurrentWorld : null;
+            long tick = world?.TickCount ?? 0;
+            int plants = world?.PlantCount ?? 0;
+            int animals = world?.AnimalCount ?? 0;
+
             return
                 $"USE_SCENE: {perm}   Planes: {planes}   RayHit: {rayHit}\n" +
                 $"Origin: {origin}   AnchorSaved: {(anchorSaved ? "Y" : "N")}\n" +
                 $"Blocks: {blocks}   Field: {field}   FPS: {fps:F1}\n" +
                 $"Seed: {seed}   Gen: {genMs}ms\n" +
+                $"Tick: {tick}   Plants: {plants}   Animals: {animals}\n" +
                 $"Last: {s_LastEvent}";
         }
     }
