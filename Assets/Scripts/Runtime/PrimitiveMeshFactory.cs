@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace BlockField
@@ -77,6 +78,76 @@ namespace BlockField
             mesh.colors32 = colors;
             mesh.name = "ShadedCube (generated)";
             return mesh;
+        }
+
+        /// <summary>
+        /// 単位キューブの12辺を細い直方体でなぞるワイヤーフレーム枠 (Demo 4 UX)。
+        /// 照準表示用 — MR合成の制約（α&lt;1はパススルーと合成される）により
+        /// 半透明ではなく不透明の枠で示す。thickness は辺の太さ（1辺長に対する比）。
+        /// </summary>
+        public static Mesh CreateWireframeCube(float thickness = 0.08f)
+        {
+            var vertices = new List<Vector3>();
+            var normals = new List<Vector3>();
+            var triangles = new List<int>();
+
+            float h = 0.5f;
+            float t = thickness;
+            // 辺の長さは角の重なり分を含めて 1+t
+            var xSize = new Vector3(1f + t, t, t);
+            var ySize = new Vector3(t, 1f + t, t);
+            var zSize = new Vector3(t, t, 1f + t);
+
+            for (int a = -1; a <= 1; a += 2)
+            {
+                for (int b = -1; b <= 1; b += 2)
+                {
+                    AddBox(vertices, normals, triangles, new Vector3(0f, a * h, b * h), xSize);
+                    AddBox(vertices, normals, triangles, new Vector3(a * h, 0f, b * h), ySize);
+                    AddBox(vertices, normals, triangles, new Vector3(a * h, b * h, 0f), zSize);
+                }
+            }
+
+            var mesh = new Mesh { name = "WireframeCube (generated)" };
+            mesh.SetVertices(vertices);
+            mesh.SetNormals(normals);
+            mesh.SetTriangles(triangles, 0);
+            return mesh;
+        }
+
+        /// <summary>直方体1個を頂点リストへ追加（CreateCube と同じ検証済み巻き順規則）。</summary>
+        static void AddBox(List<Vector3> vertices, List<Vector3> normals, List<int> triangles,
+            Vector3 center, Vector3 size)
+        {
+            var faces = new (Vector3 n, Vector3 u, Vector3 v)[]
+            {
+                (Vector3.up, Vector3.right, Vector3.forward),
+                (Vector3.down, Vector3.forward, Vector3.right),
+                (Vector3.right, Vector3.forward, Vector3.up),
+                (Vector3.left, Vector3.up, Vector3.forward),
+                (Vector3.forward, Vector3.up, Vector3.right),
+                (Vector3.back, Vector3.right, Vector3.up),
+            };
+
+            var half = size * 0.5f;
+            foreach (var (n, u, v) in faces)
+            {
+                int baseIndex = vertices.Count;
+                vertices.Add(center + Vector3.Scale(n - u - v, half));
+                vertices.Add(center + Vector3.Scale(n - u + v, half));
+                vertices.Add(center + Vector3.Scale(n + u + v, half));
+                vertices.Add(center + Vector3.Scale(n + u - v, half));
+                for (int i = 0; i < 4; i++)
+                {
+                    normals.Add(n);
+                }
+                triangles.Add(baseIndex + 0);
+                triangles.Add(baseIndex + 1);
+                triangles.Add(baseIndex + 2);
+                triangles.Add(baseIndex + 0);
+                triangles.Add(baseIndex + 2);
+                triangles.Add(baseIndex + 3);
+            }
         }
 
         /// <summary>XZ平面のリング（外径1・内径 innerRatio、両面）。レティクル用。</summary>

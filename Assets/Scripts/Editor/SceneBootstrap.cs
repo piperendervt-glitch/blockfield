@@ -131,14 +131,16 @@ public static class SceneBootstrap
         entityRenderer.pigMaterial = CreateEntityMaterial("EntityPig", new Color(0.95f, 0.65f, 0.7f));
         entityRenderer.wolfMaterial = CreateEntityMaterial("EntityWolf", new Color(0.55f, 0.55f, 0.6f));
 
-        // 設置・破壊操作 (Demo 4 F3)
+        // 設置・破壊操作 (Demo 4 F3)。全マテリアル不透明（MR合成制約）
         var interactor = dioramaGo.AddComponent<BlockField.BlockInteractor>();
         interactor.terrainField = terrainField;
         interactor.trackingSpace = offsetGo.transform;
-        interactor.breakHighlightMaterial = CreateTransparentMaterial("HighlightBreak", new Color(1f, 0.25f, 0.2f, 0.45f));
-        interactor.placeHighlightMaterial = CreateTransparentMaterial("HighlightPlace", new Color(1f, 1f, 1f, 0.4f));
-        interactor.pendingPlaceMaterial = CreateTransparentMaterial("PendingPlace", new Color(0.55f, 0.55f, 0.58f, 0.6f));
-        interactor.pendingBreakMaterial = CreateTransparentMaterial("PendingBreak", new Color(0.1f, 0.1f, 0.1f, 0.55f));
+        interactor.breakHighlightMaterial = GetOrCreateMaterial("AimBreakFrame", new Color(0.95f, 0.2f, 0.15f), k_OcclusionShader);
+        interactor.placeHighlightMaterial = GetOrCreateMaterial("AimPlaceFrame", Color.white, k_OcclusionShader);
+        interactor.pendingPlaceMaterial = GetOrCreateMaterial("PendingPlace", new Color(0.6f, 0.6f, 0.63f), k_OcclusionShader);
+        interactor.pendingBreakMaterial = GetOrCreateMaterial("PendingBreak", new Color(0.12f, 0.12f, 0.13f), k_OcclusionShader);
+        interactor.rayHitMaterial = GetOrCreateMaterial("RayHit", Color.white, k_OcclusionShader);
+        interactor.rayMissMaterial = GetOrCreateMaterial("RayMiss", new Color(0.35f, 0.35f, 0.38f), k_OcclusionShader);
 
         // メッシュ偵察 (Demo 3 E6)。ARMeshManager は XR Origin の子である必要がある
         var meshReconGo = new GameObject("Mesh Recon (E6)");
@@ -217,18 +219,18 @@ public static class SceneBootstrap
         return mat;
     }
 
-    /// <summary>半透明マテリアル（ハイライト・仮表示用）。オクルージョンシェーダーの透過設定。</summary>
-    static Material CreateTransparentMaterial(string name, Color color)
+    /// <summary>
+    /// 不透明設定の強制。MR合成の制約（α&lt;1の描画はパススルーと合成される）により
+    /// 実機マテリアルは原則すべて不透明にする。
+    /// </summary>
+    static void ApplyOpaqueDefaults(Material mat)
     {
-        var mat = GetOrCreateMaterial(name, color, k_OcclusionShader);
-        mat.SetFloat("_Surface", 1f);
-        mat.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
-        mat.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-        mat.SetFloat("_ZWrite", 0f);
-        mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
-        mat.renderQueue = 3000;
-        EditorUtility.SetDirty(mat);
-        return mat;
+        mat.SetFloat("_Surface", 0f);
+        mat.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.One);
+        mat.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.Zero);
+        mat.SetFloat("_ZWrite", 1f);
+        mat.DisableKeyword("_SURFACE_TYPE_TRANSPARENT");
+        mat.renderQueue = -1;
     }
 
     /// <summary>偵察メッシュ用プレハブ（MeshFilter＋無効化レンダラー＝見た目なし）。</summary>
@@ -268,6 +270,7 @@ public static class SceneBootstrap
         {
             mat.shader = shader;
             mat.color = color;
+            ApplyOpaqueDefaults(mat);
             EditorUtility.SetDirty(mat);
             return mat;
         }
