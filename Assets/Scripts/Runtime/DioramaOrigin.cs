@@ -288,16 +288,27 @@ namespace BlockField
             }
         }
 
+        /// <summary>
+        /// 確定・復元の両経路から呼ばれ、OriginTransform を設定する。
+        /// DummyVoxelField は OriginTransform の非null をポーリングして生成するため、
+        /// どちらの経路でもボクセル生成が走る。
+        /// </summary>
         void AttachOrigin(ARAnchor anchor)
         {
-            // 原点マーカー: 4cm の赤い箱 (M1 のテープ照合用)
-            var marker = new GameObject("Diorama Origin");
-            marker.transform.SetParent(anchor.transform, false);
+            // 原点はスケール1の空ルート。
+            // 注: マーカーの Transform を直接原点にすると、その localScale(0.04) が
+            // 子のボクセル群に継承されて全体が1.6mmサイズに縮む（実機で顕在化したバグ）。
+            var originRoot = new GameObject("Diorama Origin");
+            originRoot.transform.SetParent(anchor.transform, false);
+
+            // 原点マーカー: 4cm の赤い箱 (M1 の机の角との照合用)
+            var marker = new GameObject("Origin Marker");
+            marker.transform.SetParent(originRoot.transform, false);
             marker.transform.localScale = Vector3.one * 0.04f;
             marker.AddComponent<MeshFilter>().sharedMesh = PrimitiveMeshFactory.CreateCube();
             marker.AddComponent<MeshRenderer>().sharedMaterial = m_OriginMaterial;
 
-            OriginTransform = marker.transform;
+            OriginTransform = originRoot.transform;
         }
 
         void CreateReticle()

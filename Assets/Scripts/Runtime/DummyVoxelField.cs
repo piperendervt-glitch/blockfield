@@ -147,23 +147,30 @@ namespace BlockField
             DebugPanel.Notify($"voxels: {CurrentCount}");
         }
 
-        /// <summary>M3用: 原点から前方(+Z)へ張り出す 1×10×1 の橋（机の縁を越えて空中に伸びる想定）。</summary>
+        /// <summary>
+        /// M3用: 原点から十字4方向へ各10個張り出す橋。
+        /// 机の角に原点を置けばどれかの方向が必ず縁を越えるため、向き調整が不要になる。
+        /// </summary>
         void BuildBridge()
         {
             var parent = m_Origin.OriginTransform;
             var bridgeRoot = new GameObject("Occlusion Bridge");
             bridgeRoot.transform.SetParent(parent, false);
 
+            var directions = new[] { Vector3.forward, Vector3.back, Vector3.right, Vector3.left };
             var combines = new List<CombineInstance>();
             var scale = Vector3.one * k_BlockSize;
-            for (int i = 1; i <= 10; i++)
+            foreach (var dir in directions)
             {
-                var localPos = new Vector3(0f, 0.5f * k_BlockSize, i * k_BlockSize);
-                combines.Add(new CombineInstance
+                for (int i = 1; i <= 10; i++)
                 {
-                    mesh = m_CubeMesh,
-                    transform = Matrix4x4.TRS(localPos, Quaternion.identity, scale),
-                });
+                    var localPos = dir * (i * k_BlockSize) + new Vector3(0f, 0.5f * k_BlockSize, 0f);
+                    combines.Add(new CombineInstance
+                    {
+                        mesh = m_CubeMesh,
+                        transform = Matrix4x4.TRS(localPos, Quaternion.identity, scale),
+                    });
+                }
             }
 
             var mesh = new Mesh { name = "OcclusionBridge" };
@@ -173,7 +180,8 @@ namespace BlockField
             bridgeRoot.AddComponent<MeshFilter>().sharedMesh = mesh;
             bridgeRoot.AddComponent<MeshRenderer>().sharedMaterial = m_BridgeMaterial;
 
-            Debug.Log("[DummyVoxelField] オクルージョン判定用の橋 (1x10x1) を原点前方に表示した。");
+            Debug.Log("[DummyVoxelField] オクルージョン判定用の橋 (十字4方向×10個) を原点周囲に表示した。");
+            DebugPanel.Notify("bridge built (cross)");
         }
 
         void ClearChunks()
