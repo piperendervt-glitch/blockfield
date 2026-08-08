@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Diagnostics;
+using BlockField.SimCore.Ecology;
 using BlockField.SimCore.Rng;
 using BlockField.SimCore.Terrain;
 using BlockField.SimCore.Voxel;
@@ -23,6 +24,9 @@ namespace BlockField
         const int k_MaxHeight = 16;
         const uint k_DefaultSeed = 12345u;
 
+        /// <summary>シムティック間隔（秒）。Time.deltaTime 積算で駆動しフレームレート非依存にする。</summary>
+        const float k_TickInterval = 1f;
+
         [SerializeField] DioramaOrigin m_Origin;
         [SerializeField] Material m_TerrainMaterial;
 
@@ -42,8 +46,13 @@ namespace BlockField
         /// <summary>地形の表示状態（M3モード時は false）。</summary>
         public bool FieldVisible => m_FieldVisible;
 
+        /// <summary>現在のワールド（シムの主体。D5 でエンティティ表示を載せる）。</summary>
+        public World CurrentWorld => m_World;
+
         InputAction m_AButtonAction;
         InputAction m_BButtonAction;
+        World m_World;
+        float m_TickAccumulator;
         uint[] m_Seeds;
         int m_SeedIndex;
         bool m_Built;
@@ -115,6 +124,17 @@ namespace BlockField
                 BuildTerrain();
             }
 
+            // シムティック駆動 (1Hz, フレームレート非依存)。RNG はワールド保持のものを使う
+            if (m_World != null)
+            {
+                m_TickAccumulator += Time.deltaTime;
+                while (m_TickAccumulator >= k_TickInterval)
+                {
+                    m_TickAccumulator -= k_TickInterval;
+                    Simulation.Tick(m_World, m_World.Rng);
+                }
+            }
+
             bool toggleRequested = m_ToggleRequested;
             m_ToggleRequested = false;
             if (toggleRequested && Time.unscaledTime - m_LastToggleTime >= k_SwitchCooldown)
@@ -142,7 +162,9 @@ namespace BlockField
             p.depth = k_Depth;
             p.maxHeight = k_MaxHeight;
 
-            var grid = TerrainGenerator.Generate(p);
+            m_World = World.Create(p);
+            m_TickAccumulator = 0f;
+            var grid = m_World.Grid;
 
             // 地形を原点中心に置くオフセット（セル単位）
             var parent = m_Origin.OriginTransform;

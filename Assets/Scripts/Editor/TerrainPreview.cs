@@ -1,17 +1,17 @@
 using System.Collections.Generic;
 using BlockField;
+using BlockField.SimCore.Ecology;
 using BlockField.SimCore.Rng;
 using BlockField.SimCore.Terrain;
 using BlockField.SimCore.Voxel;
 using UnityEditor;
 using UnityEngine;
-using UnityEngine.Rendering;
 
 /// <summary>
-/// SimCore 地形生成のエディタ内プレビュー (Demo 1 C1)。
-/// Scene ビューに一時オブジェクトとしてメッシュを生成する（保存・ビルド対象外）。
-/// メッシュ生成は簡易実装（隠面ブロックのみスキップするキューブ並べ）。
-/// B1 の面カリングメッシャー実装時に置き換える。
+/// SimCore のエディタ内プレビュー (Demo 1 C1 / Demo 2 D6)。
+/// 地形は ChunkMesher（実機と同一の面カリング＋面明度差）で表示し、
+/// シムティックを回してエンティティの配置を Scene ビューで確認できる。
+/// 全オブジェクトは HideFlags.DontSave（保存・ビルド対象外）。
 /// </summary>
 public class TerrainPreview : EditorWindow
 {
@@ -25,7 +25,14 @@ public class TerrainPreview : EditorWindow
     int m_SizeIndex = 1;
     float m_ReliefScale = 24f;
     float m_MountainAmplitude = 1f;
+    bool m_FaceShading = true;
 
+    World m_World;
+    GameObject m_Root;
+    GameObject m_EntityRoot;
+    Mesh m_CubeMesh;
+    Material m_TerrainMaterial;
+    readonly Dictionary<EntityKind, Material> m_EntityMaterials = new Dictionary<EntityKind, Material>();
     readonly List<Object> m_Generated = new List<Object>();
 
     [MenuItem("Tools/BlockField/Terrain Preview")]
@@ -49,15 +56,43 @@ public class TerrainPreview : EditorWindow
         m_SizeIndex = GUILayout.Toolbar(m_SizeIndex, new[] { "50x50", "100x100" });
         m_ReliefScale = EditorGUILayout.Slider("起伏スケール", m_ReliefScale, 8f, 64f);
         m_MountainAmplitude = EditorGUILayout.Slider("山振幅", m_MountainAmplitude, 0.2f, 1f);
+        m_FaceShading = EditorGUILayout.Toggle("面明度差 (D0)", m_FaceShading);
 
         EditorGUILayout.Space();
         if (GUILayout.Button("Generate"))
         {
             GeneratePreview();
         }
+
+        using (new EditorGUI.DisabledScope(m_World == null))
+        {
+            EditorGUILayout.BeginHorizontal();
+            if (GUILayout.Button("Simulate 10 ticks"))
+            {
+                Simulate(10);
+            }
+            if (GUILayout.Button("Simulate 100 ticks"))
+            {
+                Simulate(100);
+            }
+            EditorGUILayout.EndHorizontal();
+
+            if (GUILayout.Button("Reset (同一シードで再生成)"))
+            {
+                GeneratePreview();
+            }
+        }
+
         if (GUILayout.Button("Clear"))
         {
             DestroyPreview();
+        }
+
+        EditorGUILayout.Space();
+        if (m_World != null)
+        {
+            EditorGUILayout.LabelField($"Tick: {m_World.TickCount}");
+            EditorGUILayout.LabelField($"Plants: {m_World.PlantCount} / Animals: {m_World.AnimalCount}");
         }
     }
 
@@ -73,114 +108,127 @@ public class TerrainPreview : EditorWindow
         p.reliefScale = m_ReliefScale;
         p.mountainAmplitude = m_MountainAmplitude;
 
-        var grid = TerrainGenerator.Generate(p);
+        m_World = World.Create(p);
 
-        var root = new GameObject(k_RootName) { hideFlags = HideFlags.DontSave };
-        m_Generated.Add(root);
+        m_Root = new GameObject(k_RootName) { hideFlags = HideFlags.DontSave };
+        m_Generated.Add(m_Root);
 
-        var cube = PrimitiveMeshFactory.CreateCube();
-        m_Generated.Add(cube);
+        m_CubeMesh = PrimitiveMeshFactory.CreateCube();
+        m_CubeMesh.hideFlags = HideFlags.DontSave;
+        m_Generated.Add(m_CubeMesh);
 
-        // ブロック種ごとの結合リスト（露出ブロックのみ。完全に埋まったブロックはスキップ）
-        var combines = new Dictionary<BlockId, List<CombineInstance>>
+        // 実機と同じ頂点色シェーダー（オクルージョンはエディタでは不活性）
+        m_TerrainMaterial = new Material(Shader.Find("BlockField/OcclusionUnlit"))
         {
-            { BlockId.Grass, new List<CombineInstance>() },
-            { BlockId.Dirt, new List<CombineInstance>() },
-            { BlockId.Stone, new List<CombineInstance>() },
-            { BlockId.Sand, new List<CombineInstance>() },
+            name = "TerrainPreviewMat",
+            hideFlags = HideFlags.DontSave,
         };
+        m_TerrainMaterial.SetFloat("_UseVertexColor", 1f);
+        m_TerrainMaterial.EnableKeyword("_VERTEX_COLOR");
+        m_Generated.Add(m_TerrainMaterial);
 
-        var scale = Vector3.one * k_BlockSize;
-        for (int z = 0; z < p.depth; z++)
+        foreach (var pair in m_World.Grid.Chunks)
         {
-            for (int x = 0; x < p.width; x++)
-            {
-                for (int y = 0; y < p.maxHeight; y++)
-                {
-                    var cell = new Int3(x, y, z);
-                    var id = grid.Get(cell);
-                    if (id == BlockId.Air || !IsExposed(grid, cell))
-                    {
-                        continue;
-                    }
-
-                    var pos = new Vector3(x * k_BlockSize, (y + 0.5f) * k_BlockSize, z * k_BlockSize);
-                    combines[id].Add(new CombineInstance
-                    {
-                        mesh = cube,
-                        transform = Matrix4x4.TRS(pos, Quaternion.identity, scale),
-                    });
-                }
-            }
-        }
-
-        int blockCount = 0;
-        foreach (var pair in combines)
-        {
-            if (pair.Value.Count == 0)
+            var mesh = ChunkMesher.BuildChunkMesh(m_World.Grid, pair.Key, pair.Value, k_BlockSize, m_FaceShading);
+            if (mesh == null)
             {
                 continue;
             }
-            blockCount += pair.Value.Count;
-
-            var mesh = new Mesh
-            {
-                name = $"TerrainPreview_{pair.Key}",
-                indexFormat = IndexFormat.UInt32,
-                hideFlags = HideFlags.DontSave,
-            };
-            mesh.CombineMeshes(pair.Value.ToArray(), true, true);
+            mesh.hideFlags = HideFlags.DontSave;
             m_Generated.Add(mesh);
 
-            var mat = new Material(Shader.Find("Universal Render Pipeline/Lit"))
-            {
-                name = $"TerrainPreview_{pair.Key}",
-                color = GetBlockColor(pair.Key),
-                hideFlags = HideFlags.DontSave,
-            };
-            m_Generated.Add(mat);
-
-            var go = new GameObject(pair.Key.ToString()) { hideFlags = HideFlags.DontSave };
-            go.transform.SetParent(root.transform, false);
+            var go = new GameObject($"Chunk {pair.Key}") { hideFlags = HideFlags.DontSave };
+            go.transform.SetParent(m_Root.transform, false);
+            go.transform.localPosition = new Vector3(
+                pair.Key.x * Chunk.Size * k_BlockSize,
+                pair.Key.y * Chunk.Size * k_BlockSize,
+                pair.Key.z * Chunk.Size * k_BlockSize);
             go.AddComponent<MeshFilter>().sharedMesh = mesh;
-            go.AddComponent<MeshRenderer>().sharedMaterial = mat;
+            go.AddComponent<MeshRenderer>().sharedMaterial = m_TerrainMaterial;
         }
 
-        // Sceneビューでプレビュー全体をフレーミング
+        m_EntityRoot = new GameObject("Entities") { hideFlags = HideFlags.DontSave };
+        m_EntityRoot.transform.SetParent(m_Root.transform, false);
+
+        CreateEntityMaterials();
+        UpdateEntityDisplay();
+
         float w = p.width * k_BlockSize;
         var bounds = new Bounds(new Vector3(w * 0.5f, k_MaxHeight * k_BlockSize * 0.5f, w * 0.5f),
             new Vector3(w, k_MaxHeight * k_BlockSize, w));
         SceneView.lastActiveSceneView?.Frame(bounds, false);
 
-        Debug.Log($"[TerrainPreview] 生成完了: seed={m_Seed}, {p.width}x{p.depth}, 露出ブロック {blockCount} 個");
+        Debug.Log($"[TerrainPreview] 生成完了: seed={m_Seed}, {p.width}x{p.depth}, 面明度差={(m_FaceShading ? "ON" : "OFF")}");
     }
 
-    /// <summary>6近傍のいずれかが Air なら露出ブロック。</summary>
-    static bool IsExposed(VoxelGrid grid, Int3 cell)
+    void Simulate(int ticks)
     {
-        return grid.Get(new Int3(cell.x + 1, cell.y, cell.z)) == BlockId.Air
-            || grid.Get(new Int3(cell.x - 1, cell.y, cell.z)) == BlockId.Air
-            || grid.Get(new Int3(cell.x, cell.y + 1, cell.z)) == BlockId.Air
-            || grid.Get(new Int3(cell.x, cell.y - 1, cell.z)) == BlockId.Air
-            || grid.Get(new Int3(cell.x, cell.y, cell.z + 1)) == BlockId.Air
-            || grid.Get(new Int3(cell.x, cell.y, cell.z - 1)) == BlockId.Air;
-    }
-
-    static Color GetBlockColor(BlockId id)
-    {
-        switch (id)
+        for (int i = 0; i < ticks; i++)
         {
-            case BlockId.Grass: return new Color(0.35f, 0.65f, 0.30f);
-            case BlockId.Dirt: return new Color(0.45f, 0.32f, 0.20f);
-            case BlockId.Stone: return new Color(0.55f, 0.55f, 0.58f);
-            case BlockId.Sand: return new Color(0.85f, 0.78f, 0.55f);
-            default: return Color.magenta;
+            Simulation.Tick(m_World, m_World.Rng);
         }
+        UpdateEntityDisplay();
+        Debug.Log($"[TerrainPreview] {ticks}ティック実行 → Tick={m_World.TickCount}, 植物={m_World.PlantCount}, 動物={m_World.AnimalCount}");
+        Repaint();
+    }
+
+    void UpdateEntityDisplay()
+    {
+        // 毎回作り直す（数百個程度なのでエディタ用途では十分軽い）
+        for (int i = m_EntityRoot.transform.childCount - 1; i >= 0; i--)
+        {
+            DestroyImmediate(m_EntityRoot.transform.GetChild(i).gameObject);
+        }
+
+        foreach (var e in m_World.Entities)
+        {
+            var go = new GameObject($"{e.kind} #{e.id}") { hideFlags = HideFlags.DontSave };
+            go.transform.SetParent(m_EntityRoot.transform, false);
+            go.transform.localPosition = new Vector3(
+                e.cell.x * k_BlockSize,
+                (e.cell.y + 0.5f) * k_BlockSize,
+                e.cell.z * k_BlockSize);
+
+            if (e.IsPlant)
+            {
+                go.transform.localScale = Vector3.one * (k_BlockSize * 0.5f);
+            }
+            else
+            {
+                // 動物: 直方体＋facing で向きを可視化 (0..3 = +X,+Z,-X,-Z)
+                go.transform.localScale = new Vector3(k_BlockSize, k_BlockSize * 0.7f, k_BlockSize * 1.3f);
+                float yaw = e.facing switch { 0 => 90f, 1 => 0f, 2 => 270f, _ => 180f };
+                go.transform.localRotation = Quaternion.Euler(0f, yaw, 0f);
+            }
+
+            go.AddComponent<MeshFilter>().sharedMesh = m_CubeMesh;
+            go.AddComponent<MeshRenderer>().sharedMaterial = m_EntityMaterials[e.kind];
+        }
+    }
+
+    void CreateEntityMaterials()
+    {
+        m_EntityMaterials.Clear();
+        AddEntityMaterial(EntityKind.GrassTuft, new Color(0.25f, 0.8f, 0.25f));
+        AddEntityMaterial(EntityKind.Flower, new Color(0.95f, 0.85f, 0.25f));
+        AddEntityMaterial(EntityKind.Sheep, new Color(0.95f, 0.95f, 0.95f));
+        AddEntityMaterial(EntityKind.Pig, new Color(0.95f, 0.65f, 0.7f));
+    }
+
+    void AddEntityMaterial(EntityKind kind, Color color)
+    {
+        var mat = new Material(Shader.Find("Universal Render Pipeline/Lit"))
+        {
+            name = $"EntityPreview_{kind}",
+            color = color,
+            hideFlags = HideFlags.DontSave,
+        };
+        m_EntityMaterials[kind] = mat;
+        m_Generated.Add(mat);
     }
 
     void DestroyPreview()
     {
-        // ウィンドウ再起動などで参照が切れている場合に備え、名前でも探して破棄
         var stale = GameObject.Find(k_RootName);
         if (stale != null)
         {
@@ -195,6 +243,10 @@ public class TerrainPreview : EditorWindow
             }
         }
         m_Generated.Clear();
+        m_EntityMaterials.Clear();
+        m_World = null;
+        m_Root = null;
+        m_EntityRoot = null;
     }
 
     void OnDisable()

@@ -25,6 +25,11 @@ namespace BlockField
             (Vector3.back, Vector3.right, Vector3.up),
         };
 
+        // 面方向ごとの明度係数 (D0: 起伏の視認性改善)。
+        // 上面=1.0 / 底面=0.6 / 側面は ±X と ±Z で僅かに差をつけて立体感を出す。
+        // インデックスは k_Faces / FaceVisibility.Directions (+X,-X,+Y,-Y,+Z,-Z) と対応。
+        static readonly float[] k_FaceBrightness = { 0.82f, 0.82f, 1.0f, 0.6f, 0.78f, 0.78f };
+
         /// <summary>ブロック種→頂点色。</summary>
         public static Color32 GetBlockColor(BlockId id)
         {
@@ -43,7 +48,8 @@ namespace BlockField
         /// （セル (0,0,0) の中心が (0, 0.5*blockSize, 0)、Demo 0 の整数セル座標系を踏襲）。
         /// 可視面が1つも無ければ null。
         /// </summary>
-        public static Mesh BuildChunkMesh(VoxelGrid grid, Int3 chunkCoord, Chunk chunk, float blockSize)
+        public static Mesh BuildChunkMesh(VoxelGrid grid, Int3 chunkCoord, Chunk chunk, float blockSize,
+            bool applyFaceBrightness = true)
         {
             var vertices = new List<Vector3>();
             var normals = new List<Vector3>();
@@ -71,7 +77,7 @@ namespace BlockField
 
                         var worldCell = baseCell + new Int3(x, y, z);
                         var center = new Vector3(x * blockSize, (y + 0.5f) * blockSize, z * blockSize);
-                        var color = GetBlockColor(id);
+                        var baseColor = GetBlockColor(id);
 
                         for (int f = 0; f < FaceVisibility.FaceCount; f++)
                         {
@@ -79,6 +85,13 @@ namespace BlockField
                             {
                                 continue;
                             }
+
+                            float brightness = applyFaceBrightness ? k_FaceBrightness[f] : 1f;
+                            var color = new Color32(
+                                (byte)(baseColor.r * brightness),
+                                (byte)(baseColor.g * brightness),
+                                (byte)(baseColor.b * brightness),
+                                baseColor.a);
 
                             var (n, u, v) = k_Faces[f];
                             int baseIndex = vertices.Count;
