@@ -84,8 +84,28 @@ public static class SceneBootstrap
         // Trackable マネージャー群。
         // 注: ARPlaneManager / ARAnchorManager は [RequireComponent(typeof(XROrigin))] のため
         // 空の GameObject には置けない（置くと XROrigin が二重生成される）。XR Origin 本体に載せる。
-        originGo.AddComponent<ARPlaneManager>();
-        originGo.AddComponent<ARAnchorManager>();
+        var planeManager = originGo.AddComponent<ARPlaneManager>();
+        var anchorManager = originGo.AddComponent<ARAnchorManager>();
+
+        // ジオラマ原点＋ダミーボクセル (Demo 0 T2+T3)
+        var dioramaGo = new GameObject("Diorama");
+        var diorama = dioramaGo.AddComponent<BlockField.DioramaOrigin>();
+        diorama.planeManager = planeManager;
+        diorama.anchorManager = anchorManager;
+        diorama.trackingSpace = offsetGo.transform;
+        diorama.originMaterial = GetOrCreateMaterial("OriginRed", new Color(0.9f, 0.1f, 0.1f));
+        diorama.reticleMaterial = GetOrCreateMaterial("ReticleWhite", new Color(1f, 1f, 1f, 0.8f));
+
+        var voxelField = dioramaGo.AddComponent<BlockField.DummyVoxelField>();
+        voxelField.origin = diorama;
+        voxelField.voxelMaterials = new[]
+        {
+            GetOrCreateMaterial("Voxel0", new Color(0.35f, 0.65f, 0.30f)),
+            GetOrCreateMaterial("Voxel1", new Color(0.55f, 0.42f, 0.28f)),
+            GetOrCreateMaterial("Voxel2", new Color(0.75f, 0.70f, 0.50f)),
+            GetOrCreateMaterial("Voxel3", new Color(0.45f, 0.55f, 0.65f)),
+        };
+        voxelField.bridgeMaterial = GetOrCreateMaterial("BridgeBlue", new Color(0.2f, 0.4f, 0.9f));
 
         Directory.CreateDirectory("Assets/Scenes");
         if (!EditorSceneManager.SaveScene(scene, ScenePath))
@@ -103,5 +123,27 @@ public static class SceneBootstrap
         AssetDatabase.SaveAssets();
 
         Debug.Log($"[SceneBootstrap] {ScenePath} を生成した。");
+    }
+
+    /// <summary>Assets/Materials/ に URP Lit のマテリアルアセットを（無ければ）生成して返す。</summary>
+    static Material GetOrCreateMaterial(string name, Color color)
+    {
+        const string dir = "Assets/Materials";
+        string path = dir + "/" + name + ".mat";
+        var mat = AssetDatabase.LoadAssetAtPath<Material>(path);
+        if (mat != null)
+        {
+            return mat;
+        }
+
+        if (!Directory.Exists(dir))
+        {
+            Directory.CreateDirectory(dir);
+            AssetDatabase.Refresh();
+        }
+
+        mat = new Material(Shader.Find("Universal Render Pipeline/Lit")) { color = color };
+        AssetDatabase.CreateAsset(mat, path);
+        return mat;
     }
 }
