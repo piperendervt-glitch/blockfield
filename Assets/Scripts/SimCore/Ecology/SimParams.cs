@@ -54,9 +54,10 @@ namespace BlockField.SimCore.Ecology
         // τ の違いがそのまま「その情報がどれくらい長く価値を持つか」を表す。
         //   植生 decay 0.02  … 植物は動かないので痕跡は長持ちしてよい
         //   恐怖 decay 0.03  … 危険は移動するので古い情報は価値が下がる
-        //   獲物 decay 0.015 … **当初 0.05（鮮度重視）としたが実測で覆った。**
-        //     追跡に使える勾配を張るには匂いが数セル届く必要があり、
-        //     そのためには持続が要る。詳細は PreyField のコメント参照
+        //   獲物 decay 0.05  … 鮮度重視。獲物は動くので古い匂いは価値が下がる。
+        //     一度 0.015 まで遅くしたが（匂いの到達距離を稼ぐため）、
+        //     場が広がりすぎて情報量が落ちたため 0.05 に戻し、
+        //     代わりに拡散を絞って局所化した。詳細は PreyField のコメント参照
 
         /// <summary>恐怖場: 狼が通過セルへ毎ティック書き込む量（上限1.0）。</summary>
         public float fearDeposit;
@@ -139,12 +140,17 @@ namespace BlockField.SimCore.Ecology
             fearDeposit = 0.5f,
             fearDiffuse = 0.1f,
             fearDecay = 0.03f,
-            // 獲物場は「匂いが届く距離」で決まる。L = sqrt(passes*diffuse/4 / decay) ≈ 7.3セル。
-            // 旧実装の視界半径6セルと同等になるよう選んだ（実測の根拠は prereg 追記を参照）
-            preyDeposit = 0.5f,
-            preyDiffuse = 0.8f,
-            preyDiffusePasses = 4,
-            preyDecay = 0.015f,
+            // 獲物場は「匂いが届く距離」で決まる。L = sqrt(passes*diffuse/4 / decay) ≈ 2.4セル。
+            //
+            // 当初は旧実装の視界半径6セルに合わせて L≈7.3 にしたが、実機で
+            // 「平地のほとんどが青くなる」＝勾配が平坦化して場としての情報量が落ちる
+            // 状態になった（実測: 高値セルが全体の92.5%）。
+            // 掃引の結果このパラメータに変更した。高値面積 92.5% → 15.8% と局所化しつつ、
+            // 捕食率は置換前の82%を維持している（M5 の基準50%を上回る）。
+            preyDeposit = 0.3f,
+            preyDiffuse = 0.4f,
+            preyDiffusePasses = 3,
+            preyDecay = 0.05f,
             herbivoreVegetationWeight = 1f,
             herbivoreFearWeight = 1.5f,
             animalSpawnCandidates = 2,

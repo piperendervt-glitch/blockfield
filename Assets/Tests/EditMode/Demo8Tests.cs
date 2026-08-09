@@ -210,6 +210,7 @@ namespace BlockField.Tests.EditMode
             double after = sum / k_Seeds.Length;
             double ratio = after / k_BaselinePredationPer1000;
 
+            // 実測（獲物場の範囲調整後）: 14.67 回/1000t = 置換前の 82%
             Assert.Greater(ratio, 0.5,
                 $"場読みへの置換で捕食率が半減した: {after:F2} 回/1000t " +
                 $"(置換前 {k_BaselinePredationPer1000:F2} の {ratio:P0})");
