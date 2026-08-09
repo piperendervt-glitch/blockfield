@@ -62,7 +62,11 @@ namespace BlockField.Tests.EditMode
         public void M4_NewPlantSpawns_ClusterNearExistingPlants()
         {
             // Demo 3 M4: 場の効果の定量判定（植物ダイナミクスのみで測定）。
-            // ticks 100-200 の新規スポーンの過半が「スポーン時点で既存植物の3セル以内(Chebyshev)」
+            // ticks 100 以降の新規スポーンの過半が「スポーン時点で既存植物の3セル以内(Chebyshev)」
+            //
+            // 観測窓を 200 → 400 ティックに伸ばした。Demo 5b で plantSpawnCandidates を
+            // 10→5 に絞った（植物が上限に張り付き続けるのを解消するため）ので、
+            // 同じ窓では標本が半分になり判定できなくなったため（実測 17 < 必要20）
             var world = World.Create(WorldParams(5u));
             var p = SimParams.Default;
             p.animalSpawnCandidates = 0;
@@ -72,7 +76,7 @@ namespace BlockField.Tests.EditMode
             var prevPlantIds = new HashSet<int>();
             var prevPlantCells = new List<Int3>();
 
-            for (int t = 0; t < 200; t++)
+            for (int t = 0; t < 400; t++)
             {
                 prevPlantIds.Clear();
                 prevPlantCells.Clear();
@@ -179,11 +183,19 @@ namespace BlockField.Tests.EditMode
             // M5（1000ティックあたり捕食回数が半減しない）で担保する。
             var world = World.Create(WorldParams(1u));
             var p = ScenarioParams();
+
+            // 狼の空腹速度はこのシナリオのパラメータとして速める。
+            // Demo 5b で既定を 0.003 に下げた（狼の全滅対策）結果、狼が捕食モードに
+            // 入るのが 167ティック目になり、羊が餓死する100ティックに間に合わなくなった。
+            // ここで見たいのは「隣接した空腹の狼が羊を食べる」機構であって
+            // 空腹の速さではないので、速めて機構だけを検証する
+            p.wolfHungerPerTick = 0.02f;
+
             var (x, z) = FindFlatRun(world, 4);
             world.TrySpawn(EntityKind.Wolf, x, z, 0);
             world.TrySpawn(EntityKind.Sheep, x + 1, z, 0);
 
-            // 狼は hunger > 0.5（51ティック目）から捕食モードに入る。
+            // 狼は hunger > 0.5（26ティック目）から捕食モードに入る。
             // 羊が餓死する100ティックより前に捕食が起きること
             int predatedAt = -1;
             for (int t = 0; t < 100 && predatedAt < 0; t++)

@@ -120,8 +120,21 @@ namespace BlockField.SimCore.Ecology
         /// <summary>徘徊: 毎ティックのランダム向き変更確率（移動とは独立）。</summary>
         public float turnChance;
 
-        /// <summary>空腹の毎ティック進行量（1.0 で餓死）。</summary>
+        /// <summary>空腹の毎ティック進行量（1.0 で餓死）。草食獣に適用。</summary>
         public float hungerPerTick;
+
+        /// <summary>
+        /// 狼の空腹の毎ティック進行量 (Demo 5b)。
+        ///
+        /// 草食獣と分けた理由: 診断で**狼の死因が5シードとも100%餓死**（捕食されるわけでも
+        /// 場が読めないわけでもない）と判明した。匂いは常に感知できていた（感知不能0.0%）ので、
+        /// 律速は「方向は分かるが捕らえきれない」こと。狼は空腹閾値0.5を超えてから
+        /// 餓死までの猶予が50ティックしかなく、その間に獲物へ追いつけずに死んでいた。
+        ///
+        /// 捕食者は大きな獲物を稀に食べる（草を少しずつ食べる草食獣とは食事の間隔が違う）ので、
+        /// 空腹の進みを遅くするのが素直な表現になる。上限や場を触るより副作用が小さい。
+        /// </summary>
+        public float wolfHungerPerTick;
 
         /// <summary>繁殖可能な空腹上限（双方これ未満で繁殖候補になる）。</summary>
         public float breedHungerMax;
@@ -131,7 +144,9 @@ namespace BlockField.SimCore.Ecology
 
         public static SimParams Default => new SimParams
         {
-            plantSpawnCandidates = 10,
+            // 10 だと植物が上限に張り付き続け（実測61%の時間）、場としての情報量が落ちる。
+            // 5 にすると張り付きは34%まで下がり、平均個体数は189で維持される (Demo 5b)
+            plantSpawnCandidates = 5,
             plantCap = 200,
             vegetationDeposit = 0.3f,
             vegetationDiffuse = 0.15f,
@@ -161,6 +176,9 @@ namespace BlockField.SimCore.Ecology
             moveChance = 0.5f,
             turnChance = 0.2f,
             hungerPerTick = 0.01f,
+            // 狼は草食獣の約1/3の速さで空腹になる (Demo 5b)。
+            // 0.01 のままだと5シード中3で全滅していた（死因は100%餓死）
+            wolfHungerPerTick = 0.003f,
             breedHungerMax = 0.4f,
             breedChance = 0.2f,
         };

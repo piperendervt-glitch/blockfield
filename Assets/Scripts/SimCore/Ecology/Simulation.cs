@@ -235,7 +235,8 @@ namespace BlockField.SimCore.Ecology
                     continue;
                 }
 
-                e.hunger += p.hungerPerTick;
+                // 狼は草食獣より空腹の進みが遅い (Demo 5b)。捕食者は大きな獲物を稀に食べる
+                e.hunger += p.wolfHungerPerTick;
                 if (e.hunger >= 1f)
                 {
                     dead.Add(e.id);

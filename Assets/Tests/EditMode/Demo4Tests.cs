@@ -206,9 +206,12 @@ namespace BlockField.Tests.EditMode
             var tp = WorldParams(seed);
             var sp = SimParams.Default;
 
+            // 助走を 120 → 300 ティックに伸ばした。Demo 5b で plantSpawnCandidates を
+            // 10→5 に絞ったため、120ティックでは植物が5つ揃わないシードがある
+            // （実測 2個）。前提が崩れるとテスト自体が成立しない
             var control = World.Create(tp);
             var test = World.Create(tp);
-            for (int t = 0; t < 120; t++)
+            for (int t = 0; t < 300; t++)
             {
                 Simulation.Tick(control, control.Rng, sp);
                 Simulation.Tick(test, test.Rng, sp);
