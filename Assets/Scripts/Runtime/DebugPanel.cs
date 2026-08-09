@@ -29,6 +29,8 @@ namespace BlockField
         [SerializeField] ARPlaneManager m_PlaneManager;
         [SerializeField] RoomTerrainBuilder m_RoomBuilder;
         [SerializeField] RoomTerrainView m_RoomView;
+        [SerializeField] VrModeController m_VrMode;
+        [SerializeField] RoomShellView m_Shell;
         [SerializeField] Text m_Text;
 
         public DioramaOrigin diorama { get => m_Diorama; set => m_Diorama = value; }
@@ -36,6 +38,8 @@ namespace BlockField
         public ARPlaneManager planeManager { get => m_PlaneManager; set => m_PlaneManager = value; }
         public RoomTerrainBuilder roomBuilder { get => m_RoomBuilder; set => m_RoomBuilder = value; }
         public RoomTerrainView roomView { get => m_RoomView; set => m_RoomView = value; }
+        public VrModeController vrMode { get => m_VrMode; set => m_VrMode = value; }
+        public RoomShellView shell { get => m_Shell; set => m_Shell = value; }
         public Text text { get => m_Text; set => m_Text = value; }
 
         static string s_LastEvent = "-";
@@ -146,10 +150,15 @@ namespace BlockField
                 : "-/-/-";
             int walls = composed != null ? composed.WallCellCount : 0;
 
+            // Demo 4.5b: MR/VR モードと外殻ブロック数
+            string vr = m_VrMode != null ? (m_VrMode.IsVrMode ? "VR" : "MR") : "-";
+            int shellBlocks = m_Shell != null ? m_Shell.BlockCount : 0;
+
             return
                 $"Room[B]: {mode}   Surf: {surfaces} (avg {avg:F2})\n" +
                 $"Dist1/2/3+: {dist}   Snow: {snowBlocks} ({composeMs}ms)\n" +
-                $"Biome P/H/M: {biomeText}   Wall: {walls}\n";
+                $"Biome P/H/M: {biomeText}   Wall: {walls}\n" +
+                $"Mode[X]: {vr}   Shell: {shellBlocks}\n";
         }
     }
 }

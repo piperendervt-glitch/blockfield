@@ -179,6 +179,19 @@ public static class SceneBootstrap
         roomView.terrainField = terrainField;
         roomView.material = terrainMat;
 
+        // 部屋の外殻（壁・天井・床下）と MR/VR 切替 (Demo 4.5b V2/V3)。
+        // 外殻は地形と同じ TerrainRoot 配下（アンカー相対）に置き、VRモードのみ表示する
+        var shellGo = new GameObject("Room Shell View (V2)");
+        var shell = shellGo.AddComponent<BlockField.RoomShellView>();
+        shell.builder = roomTerrain;
+        shell.terrainField = terrainField;
+        shell.material = terrainMat;
+
+        var vrModeGo = new GameObject("VR Mode Controller (V3)");
+        var vrMode = vrModeGo.AddComponent<BlockField.VrModeController>();
+        vrMode.passthrough = passthrough;
+        vrMode.shell = shell;
+
         // HMD内デバッグパネル (World Space Canvas、カメラ前下方 0.6m に固定)
         var canvasGo = new GameObject("Debug Panel");
         canvasGo.transform.SetParent(camGo.transform, false);
@@ -187,8 +200,8 @@ public static class SceneBootstrap
         var canvas = canvasGo.AddComponent<Canvas>();
         canvas.renderMode = RenderMode.WorldSpace;
         var canvasRect = canvasGo.GetComponent<RectTransform>();
-        // Demo 4.5 G3/G4/G5 で部屋地形の3行を追加したため 10 行 → 高さを広げる
-        canvasRect.sizeDelta = new Vector2(600f, 420f);
+        // Demo 4.5b で MR/VR 行を追加したため 11 行 → 高さを広げる
+        canvasRect.sizeDelta = new Vector2(600f, 460f);
 
         var bgGo = new GameObject("Background");
         bgGo.transform.SetParent(canvasGo.transform, false);
@@ -220,6 +233,8 @@ public static class SceneBootstrap
         panel.planeManager = planeManager;
         panel.roomBuilder = roomTerrain;
         panel.roomView = roomView;
+        panel.vrMode = vrMode;
+        panel.shell = shell;
         panel.text = uiText;
 
         Directory.CreateDirectory("Assets/Scenes");

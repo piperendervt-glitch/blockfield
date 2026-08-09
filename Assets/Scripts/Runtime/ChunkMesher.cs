@@ -84,6 +84,10 @@ namespace BlockField
                 case BlockId.Stone: return new Color32(140, 140, 148, 255);
                 case BlockId.Sand: return new Color32(217, 199, 140, 255);
                 case BlockId.Snow: return new Color32(242, 246, 252, 255);
+                // 部屋の外殻 (Demo 4.5b): 地形と区別できる暗い青灰。
+                // VRモードでは現実の照明が無く、面明度差(底面0.6)と頂点AO(最大0.6)が
+                // 掛かって最大 0.36 倍まで落ちるため、素の色は明るめに取る
+                case BlockId.RoomShell: return new Color32(122, 132, 152, 255);
                 default: return new Color32(255, 0, 255, 255);
             }
         }

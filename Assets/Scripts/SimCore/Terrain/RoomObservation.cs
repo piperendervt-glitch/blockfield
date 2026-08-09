@@ -84,6 +84,23 @@ namespace BlockField.SimCore.Terrain
         public float OriginWorldX { get; }
         public float OriginWorldZ { get; }
 
+        /// <summary>
+        /// 天井のセルY (Demo 4.5b V2)。Ceiling 平面から求める。
+        /// **整数**で持つのは積もり面の高さと同じ理由（リプレイ経路から float 幾何演算を排除）。
+        /// <see cref="HasCeiling"/> が false のときは未取得。
+        /// </summary>
+        public int CeilingCellY { get; private set; }
+
+        /// <summary>天井の高さが取れているか。</summary>
+        public bool HasCeiling { get; private set; }
+
+        /// <summary>天井の高さを設定する（観測時に1回だけ）。</summary>
+        public void SetCeiling(int cellY)
+        {
+            CeilingCellY = cellY;
+            HasCeiling = true;
+        }
+
         // セルごとの積もり面リスト（高さ昇順）。密配列だが、面を持たないセルは空。
         readonly List<SurfaceHit>[] m_Hits;
 
@@ -228,6 +245,11 @@ namespace BlockField.SimCore.Terrain
             ulong hash = offset;
             hash = Fold(hash, (uint)Width, prime);
             hash = Fold(hash, (uint)Depth, prime);
+            unchecked { hash = (hash ^ (HasCeiling ? 1UL : 0UL)) * prime; }
+            if (HasCeiling)
+            {
+                hash = Fold(hash, (uint)CeilingCellY, prime);
+            }
 
             for (int z = 0; z < Depth; z++)
             {

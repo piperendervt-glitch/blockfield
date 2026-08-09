@@ -98,6 +98,12 @@ namespace BlockField
             /// XZ 平面上の線分に落としたもの。通行不可セルのラスタライズに使う。
             /// </summary>
             public List<WallSegment> Walls;
+
+            /// <summary>天井のワールド高さ (m)。Ceiling ラベルの平面の中心Y。VRモードの外殻に使う。</summary>
+            public float CeilingWorldY;
+
+            /// <summary>Ceiling 平面が見つかったか。</summary>
+            public bool HasCeiling;
         }
 
         /// <summary>この秒数を過ぎてもメッシュが0なら警告を1回出す。</summary>
@@ -266,7 +272,23 @@ namespace BlockField
             // c. 生メッシュのアーカイブ（M4 の保証対象外 — クラスコメント参照）
             ArchiveRawMesh(verts, tris);
 
-            // d. 観測時点のアンカーポーズを記録（再装着後の位置ずれ対策）
+            // d. 天井の高さ (Demo 4.5b V2)。複数あれば最も高いものを採る
+            bool hasCeiling = false;
+            float ceilingY = 0f;
+            foreach (var plane in planes)
+            {
+                if (plane.label != SurfaceLabel.Ceiling)
+                {
+                    continue;
+                }
+                if (!hasCeiling || plane.center.y > ceilingY)
+                {
+                    ceilingY = plane.center.y;
+                    hasCeiling = true;
+                }
+            }
+
+            // e. 観測時点のアンカーポーズを記録（再装着後の位置ずれ対策）
             var originTransform = m_Origin != null ? m_Origin.OriginTransform : null;
             bool hasOrigin = originTransform != null;
             var originPose = hasOrigin
@@ -285,6 +307,8 @@ namespace BlockField
                 OriginPoseAtScan = originPose,
                 HasOriginPose = hasOrigin,
                 Walls = BuildWallSegments(planes),
+                CeilingWorldY = ceilingY,
+                HasCeiling = hasCeiling,
             };
 
             Debug.Log($"[RoomScanner] スキャン完了: {stopwatch.ElapsedMilliseconds}ms " +

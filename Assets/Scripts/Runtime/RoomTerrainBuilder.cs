@@ -89,6 +89,13 @@ namespace BlockField
             int perimeterCells = WallRasterizer.SealPerimeter(Observation);
             int wallCells = planeWallCells + perimeterCells;
 
+            // 天井の高さ (Demo 4.5b V2)。観測データにはセル単位の整数で持たせる
+            if (scan.HasCeiling)
+            {
+                int ceilingCellY = Mathf.FloorToInt(scan.CeilingWorldY / cellSize);
+                Observation.SetCeiling(ceilingCellY);
+            }
+
             stopwatch.Stop();
 
             Stats = stats;
@@ -106,7 +113,8 @@ namespace BlockField
 
             Debug.Log($"[RoomTerrain] 壁の Boundary 化 (G4): 壁平面={scan.Walls?.Count ?? 0} " +
                 $"平面由来={planeWallCells} 外周={perimeterCells} 合計={wallCells} " +
-                $"(厚み={WallRasterizer.ThicknessMeters}m)");
+                $"(厚み={WallRasterizer.ThicknessMeters}m) " +
+                $"天井={(Observation.HasCeiling ? $"cellY={Observation.CeilingCellY} ({scan.CeilingWorldY:F2}m)" : "未取得")}");
 
             // 巻き順の確定: 符号ありが極端に少なければメッシュの巻き順が逆
             if (stats.UpwardSignedHits == 0 && stats.UpwardAbsHits > 0)

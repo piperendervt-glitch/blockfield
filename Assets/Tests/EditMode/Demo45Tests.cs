@@ -625,6 +625,146 @@ namespace BlockField.Tests.EditMode
             Assert.IsFalse(obs.IsBlocked(5, 25), "線分の外まで壁になっている");
         }
 
+        // ---- Demo 4.5b V2: 部屋の外殻 ----
+
+        static RoomObservation BuildSealedRoom(int size, int ceilingCellY, bool setCeiling = true)
+        {
+            var obs = BuildRoomWithWall(size, 0);
+            WallRasterizer.SealPerimeter(obs);
+            if (setCeiling)
+            {
+                obs.SetCeiling(ceilingCellY);
+            }
+            return obs;
+        }
+
+        [Test]
+        public void Shell_ClosesWallsFromFloorToCeiling()
+        {
+            var obs = BuildSealedRoom(20, 50);
+            var world = World.CreateFromRoom(obs, TerrainParams.Default, SnowfallParams.Default, out var terrain);
+            var shell = RoomShellComposer.Compose(obs, terrain.Grid, RoomShellParams.Default);
+
+            Assert.AreEqual(50, shell.CeilingCellY);
+
+            // 外周の柱が床から天井まで隙間なく埋まっている（外殻と地形の合算で見る。
+            // G4 の壁ブロックは地形グリッド側にあるため）
+            int gaps = 0;
+            for (int y = shell.FloorCellY; y <= shell.CeilingCellY; y++)
+            {
+                var cell = new Int3(0, y, 10);
+                if (shell.Grid.Get(cell) == BlockId.Air && terrain.Grid.Get(cell) == BlockId.Air)
+                {
+                    gaps++;
+                }
+            }
+            Assert.AreEqual(0, gaps, "外周の壁に隙間がある");
+            Assert.Greater(shell.WallBlocks, 0, "壁ブロックが積まれていない");
+        }
+
+        [Test]
+        public void Shell_CoversCeilingAndUnderFloor()
+        {
+            var obs = BuildSealedRoom(20, 50);
+            var world = World.CreateFromRoom(obs, TerrainParams.Default, SnowfallParams.Default, out var terrain);
+            var p = RoomShellParams.Default;
+            var shell = RoomShellComposer.Compose(obs, terrain.Grid, p);
+
+            // 天井は部屋全体を覆う
+            Assert.AreEqual(20 * 20, shell.CeilingBlocks, "天井が部屋全体を覆っていない");
+            Assert.AreEqual(BlockId.RoomShell, shell.Grid.Get(new Int3(10, 50, 10)));
+
+            // 床下は指定層数
+            Assert.AreEqual(20 * 20 * p.underFloorLayers, shell.UnderFloorBlocks, "床下の層数が合わない");
+            for (int i = 0; i < p.underFloorLayers; i++)
+            {
+                Assert.AreEqual(BlockId.RoomShell, shell.Grid.Get(new Int3(10, -i, 10)),
+                    $"床下 {i} 層目が埋まっていない");
+            }
+        }
+
+        [Test]
+        public void Shell_DoesNotOverlapTerrainGrid()
+        {
+            // 同じセルを両方のグリッドが埋めると同一平面の面が2枚できて Z ファイトする
+            var obs = BuildSealedRoom(20, 50);
+            var world = World.CreateFromRoom(obs, TerrainParams.Default, SnowfallParams.Default, out var terrain);
+            var shell = RoomShellComposer.Compose(obs, terrain.Grid, RoomShellParams.Default);
+
+            int overlap = 0;
+            for (int z = 0; z < 20; z++)
+            {
+                for (int x = 0; x < 20; x++)
+                {
+                    for (int y = -5; y <= 52; y++)
+                    {
+                        var cell = new Int3(x, y, z);
+                        if (shell.Grid.Get(cell) != BlockId.Air && terrain.Grid.Get(cell) != BlockId.Air)
+                        {
+                            overlap++;
+                        }
+                    }
+                }
+            }
+            Assert.AreEqual(0, overlap, "外殻と地形が同じセルを埋めている");
+        }
+
+        [Test]
+        public void Shell_IsNotPartOfEcologyGrid()
+        {
+            // 天井を World のグリッドに入れると表層高さ探索が天井を拾い生態系が全滅する。
+            // 外殻は別グリッドなので World は一切影響を受けない
+            var obs = BuildSealedRoom(20, 50);
+            var world = World.CreateFromRoom(obs, TerrainParams.Default, SnowfallParams.Default, out var terrain);
+
+            int heightBefore = world.GetSurfaceHeight(10, 10);
+            ulong hashBefore = world.ComputeContentHash();
+
+            RoomShellComposer.Compose(obs, terrain.Grid, RoomShellParams.Default);
+
+            Assert.AreEqual(heightBefore, world.GetSurfaceHeight(10, 10), "外殻の合成が表層高さを変えた");
+            Assert.AreEqual(hashBefore, world.ComputeContentHash(), "外殻の合成がワールド状態を変えた");
+            Assert.Less(world.GetSurfaceHeight(10, 10), 50, "室内の表層が天井の高さになっている");
+        }
+
+        [Test]
+        public void Shell_FallsBackWhenCeilingPlaneMissing()
+        {
+            var obs = BuildSealedRoom(20, 0, setCeiling: false);
+            var world = World.CreateFromRoom(obs, TerrainParams.Default, SnowfallParams.Default, out var terrain);
+            var p = RoomShellParams.Default;
+            var shell = RoomShellComposer.Compose(obs, terrain.Grid, p);
+
+            Assert.IsFalse(obs.HasCeiling);
+            // 最上面 (cellY=0) ＋ マージン
+            Assert.AreEqual(p.fallbackCeilingMargin, shell.CeilingCellY,
+                "Ceiling 平面が無いときのフォールバック高さが違う");
+            Assert.Greater(shell.CeilingBlocks, 0, "フォールバックでも天井が張られていない");
+        }
+
+        [Test]
+        public void Shell_IsDeterministic()
+        {
+            var obs = BuildSealedRoom(20, 50);
+            var world = World.CreateFromRoom(obs, TerrainParams.Default, SnowfallParams.Default, out var terrain);
+
+            var a = RoomShellComposer.Compose(obs, terrain.Grid, RoomShellParams.Default);
+            var b = RoomShellComposer.Compose(obs, terrain.Grid, RoomShellParams.Default);
+
+            Assert.AreEqual(a.Grid.ComputeContentHash(), b.Grid.ComputeContentHash());
+            Assert.AreEqual(a.TotalBlocks, b.TotalBlocks);
+        }
+
+        [Test]
+        public void Observation_CeilingAffectsContentHash()
+        {
+            var withCeiling = BuildSealedRoom(20, 50);
+            var without = BuildSealedRoom(20, 50, setCeiling: false);
+
+            Assert.AreNotEqual(withCeiling.ComputeContentHash(), without.ComputeContentHash(),
+                "天井の高さがハッシュに反映されていない");
+        }
+
         [Test]
         public void Snowfall_DifferentSeed_ProducesDifferentTerrain()
         {

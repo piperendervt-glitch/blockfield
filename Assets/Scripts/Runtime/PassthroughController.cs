@@ -25,8 +25,12 @@ namespace BlockField
         [SerializeField] ARCameraBackground m_CameraBackground;
         [SerializeField] AROcclusionManager m_OcclusionManager;
 
-        /// <summary>VRモードの背景色（不透明）。パススルー無効時のみ使う。</summary>
-        [SerializeField] Color m_VrBackgroundColor = new Color(0.02f, 0.03f, 0.05f, 1f);
+        /// <summary>
+        /// VRモードの背景色（不透明）。パススルー無効時のみ使う。
+        /// 暗い青灰＝夜空／洞窟のイメージ。真っ黒にしないのは、ブロックの
+        /// 底面（明度0.6）や AO の効いた面と背景が同化しないようにするため。
+        /// </summary>
+        [SerializeField] Color m_VrBackgroundColor = new Color(0.055f, 0.075f, 0.115f, 1f);
 
         public Camera targetCamera { get => m_Camera; set => m_Camera = value; }
         public ARCameraBackground cameraBackground { get => m_CameraBackground; set => m_CameraBackground = value; }
@@ -35,6 +39,10 @@ namespace BlockField
 
         /// <summary>パススルーが有効か。</summary>
         public bool IsPassthroughEnabled { get; private set; } = true;
+
+        // VRへ入る直前のオクルージョン状態（MRへ戻すときに復元する）
+        bool m_OcclusionWasEnabled;
+        bool m_OcclusionRestorePending;
 
         void Awake()
         {
@@ -48,10 +56,10 @@ namespace BlockField
         /// 有効: 背景は透明（アルファ0）で現実映像が合成される。ARCameraBackground 有効。
         /// 無効: 背景は不透明の VR 背景色。ARCameraBackground を止めて現実映像を描かない。
         ///
-        /// オクルージョンはパススルー無効時には意味を持たない（遮蔽する現実物体が
-        /// 描かれないため）ので合わせて止める。ただし**有効化は権限フローの責務**
-        /// （<see cref="ScenePermissionGate"/>）なので、ここでは無効化のみ行い、
-        /// 有効に戻す判断は権限を持つ側に委ねる。
+        /// オクルージョンはパススルー無効時には意味を持たないどころか有害である
+        /// （遮蔽する現実物体が描かれないのに深度だけが効き、仮想物体が消える）。
+        /// 無効化する際に元の状態を覚えておき、MRへ戻すときに復元する
+        /// （権限が下りていなければ元々 false なので、false のまま戻る）。
         /// </summary>
         public void SetPassthroughEnabled(bool enabled)
         {
@@ -70,10 +78,21 @@ namespace BlockField
                 m_CameraBackground.enabled = enabled;
             }
 
-            if (!enabled && m_OcclusionManager != null)
+            if (m_OcclusionManager != null)
             {
-                m_OcclusionManager.enabled = false;
+                if (!enabled)
+                {
+                    // VRへ: 現在の状態を覚えてから止める
+                    m_OcclusionWasEnabled = m_OcclusionManager.enabled;
+                    m_OcclusionManager.enabled = false;
+                }
+                else if (m_OcclusionRestorePending)
+                {
+                    // MRへ戻る: VRに入る前の状態へ復元する
+                    m_OcclusionManager.enabled = m_OcclusionWasEnabled;
+                }
             }
+            m_OcclusionRestorePending = !enabled;
 
             Debug.Log($"[Passthrough] {(enabled ? "有効（MR）" : "無効（VR）")}: " +
                 $"clear=SolidColor bg={(m_Camera != null ? m_Camera.backgroundColor.ToString() : "カメラ未設定")} " +
