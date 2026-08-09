@@ -152,6 +152,11 @@ public static class SceneBootstrap
         roomScanner.meshManager = meshManager;
         roomScanner.planeManager = planeManager;
 
+        // 多層ハイトマップ化 (Demo 4.5 G2)。表示はまだ行わず、統計をログ出力するのみ
+        var roomTerrain = scannerGo.AddComponent<BlockField.RoomTerrainBuilder>();
+        roomTerrain.scanner = roomScanner;
+        roomTerrain.terrainField = terrainField;
+
         // HMD内デバッグパネル (World Space Canvas、カメラ前下方 0.6m に固定)
         var canvasGo = new GameObject("Debug Panel");
         canvasGo.transform.SetParent(camGo.transform, false);
