@@ -18,7 +18,8 @@ namespace BlockField.SimCore.Ecology
         const float k_HungerActionThreshold = 0.5f;
         const float k_BreedCost = 0.3f;
         const int k_BreedCooldownTicks = 20;
-        const int k_WolfSightRadius = 6;
+        // k_WolfSightRadius は Demo 8 H3 で削除した。
+        // 「視界半径」という個体側の概念そのものが、獲物場の拡散距離に置き換わったため
         const float k_WolfSpawnShare = 0.15f;
 
         /// <summary>facing (0..3) → 移動方向 (+X, +Z, -X, -Z)。</summary>
@@ -187,9 +188,8 @@ namespace BlockField.SimCore.Ecology
                     }
                     else
                     {
-                        // 場読み: 植生場の4近傍勾配が最大の方向へ向く（決定論、RNG不使用）
-                        int bestFacing = FindVegetationGradientFacing(world, e.cell, e.facing);
-                        e.facing = bestFacing;
+                        // 場読み: 「餌に寄りたい」と「危険を避けたい」を1つのスコアで合成する
+                        e.facing = FindForagingFacing(world, p, e.cell, e.facing);
                         TryMove(world, rng, p, ref e, allowRandomTurnOnBlock: true);
                     }
                 }
@@ -203,6 +203,13 @@ namespace BlockField.SimCore.Ecology
                     TryMove(world, rng, p, ref e, allowRandomTurnOnBlock: true);
                 }
 
+                // 獲物場への書き込み (Demo 8 H3)。移動後の位置に匂いを残す。
+                // 狼はこの痕跡だけを頼りに追跡する（個体を探す処理は無くなった）
+                if (world.InBounds(e.cell.x, e.cell.z))
+                {
+                    world.Prey.Deposit(e.cell, p.preyDeposit);
+                }
+
                 world.UpdateEntity(i, e);
             }
 
@@ -210,8 +217,11 @@ namespace BlockField.SimCore.Ecology
         }
 
         /// <summary>
-        /// 狼 (E3): hunger 進行 → 餓死 / 捕食モード（視界内最近接の草食獣へ1セル/ティック接近、隣接で捕食）/
-        /// 見つからなければランダム徘徊。
+        /// 狼 (E3 → Demo 8 H3): hunger 進行 → 餓死 / 捕食モード（獲物場の勾配を追う。
+        /// 隣接に草食獣がいれば捕食）/ 見つからなければランダム徘徊。
+        ///
+        /// Demo 8 で「視界内の全個体を走査して最近接を選ぶ」処理を獲物場の読み出しに
+        /// 置き換えた。狼は獲物の位置を知らず、匂いの濃い方へ進むだけである。
         /// </summary>
         static void UpdateWolves(World world, Mulberry32 rng, SimParams p)
         {
@@ -236,32 +246,19 @@ namespace BlockField.SimCore.Ecology
 
                 if (e.hunger > k_HungerActionThreshold)
                 {
-                    int preyIndex = FindNearestHerbivore(world, e.cell, k_WolfSightRadius, dead);
+                    // 隣接の草食獣は捕食する。この判定だけは個体を見る（4近傍の固定順、O(1)）
+                    int preyIndex = FindAdjacentHerbivore(world, e.cell, dead);
                     if (preyIndex >= 0)
                     {
-                        var prey = world.Entities[preyIndex];
-                        int dx = prey.cell.x - e.cell.x;
-                        int dz = prey.cell.z - e.cell.z;
-
-                        if (Math.Abs(dx) + Math.Abs(dz) == 1 && Math.Abs(prey.cell.y - e.cell.y) <= 1)
-                        {
-                            // 隣接 → 捕食
-                            dead.Add(prey.id);
-                            world.PredationCount++;
-                            e.hunger = 0f;
-                        }
-                        else
-                        {
-                            // 1セル/ティックで接近（主軸→副軸の順に試行、RNG不使用）
-                            ChaseStep(world, ref e, dx, dz);
-                        }
+                        dead.Add(world.Entities[preyIndex].id);
+                        world.PredationCount++;
+                        e.hunger = 0f;
                     }
                     else
                     {
-                        if (rng.NextFloat01() < p.turnChance)
-                        {
-                            e.facing = rng.Range(0, 4);
-                        }
+                        // 場読み: 獲物場の濃い方へ向く（決定論、RNG不使用）。
+                        // 匂いが全く無ければ現在の向きのまま＝ランダム徘徊に落ちる
+                        e.facing = FindPreyGradientFacing(world, e.cell, e.facing);
                         TryMove(world, rng, p, ref e, allowRandomTurnOnBlock: true);
                     }
                 }
@@ -272,6 +269,19 @@ namespace BlockField.SimCore.Ecology
                         e.facing = rng.Range(0, 4);
                     }
                     TryMove(world, rng, p, ref e, allowRandomTurnOnBlock: true);
+                }
+
+                // 恐怖場への書き込み (Demo 8 H1)。移動後の位置に危険の痕跡を残す。
+                // これが積もって「けもの道」になり、草食獣の迂回行動を生む
+                if (world.InBounds(e.cell.x, e.cell.z))
+                {
+                    world.Fear.Deposit(e.cell, p.fearDeposit);
+                }
+
+                // 診断用の統計（導出値、ハッシュ非対象）: 何歩歩いたか
+                if (e.cell != world.Entities[i].cell)
+                {
+                    world.WolfStepCount++;
                 }
 
                 world.UpdateEntity(i, e);
@@ -444,11 +454,25 @@ namespace BlockField.SimCore.Ecology
             return true;
         }
 
-        /// <summary>植生場の4近傍値が最大の方向（同値は固定順の先勝ち、全て0なら現facing維持）。</summary>
-        static int FindVegetationGradientFacing(World world, Int3 cell, int currentFacing)
+        /// <summary>
+        /// 草食獣の採餌方向 (Demo 8 H2)。4近傍を
+        /// スコア = w_veg × 植生場 − w_fear × 恐怖場 で評価し、最大のセルへ向く。
+        ///
+        /// 【設計意図】2つの場を1つのスコアに合成することで、
+        /// 「腹が減っているが危険な場所にある草」という葛藤が表現できる。
+        /// 濃い草があっても、そこに狼の痕跡が濃く残っていれば近寄らない。
+        /// w_fear を w_veg より大きくしてあるので、迷ったら安全側に倒れる。
+        /// 個体は狼を見ておらず、場に残された痕跡だけを読んでいる。
+        ///
+        /// 同値は固定順の先勝ち。RNG は使わない（＝決定論）。
+        /// 場読みの振る舞いを直接検証できるよう public にしている。
+        /// </summary>
+        public static int FindForagingFacing(World world, SimParams p, Int3 cell, int currentFacing)
         {
             int best = currentFacing;
-            float bestValue = -1f;
+            float bestScore = 0f;
+            bool found = false;
+
             for (int f = 0; f < FacingDirections.Length; f++)
             {
                 var dir = FacingDirections[f];
@@ -458,7 +482,48 @@ namespace BlockField.SimCore.Ecology
                 {
                     continue;
                 }
-                float v = world.Vegetation.GetAtColumn(nx, nz);
+
+                float score = p.herbivoreVegetationWeight * world.Vegetation.GetAtColumn(nx, nz)
+                    - p.herbivoreFearWeight * world.Fear.GetAtColumn(nx, nz);
+
+                if (!found || score > bestScore)
+                {
+                    bestScore = score;
+                    best = f;
+                    found = true;
+                }
+            }
+
+            // スコアが全て負（草が無く危険だけ）でも**最大の方向を選ぶ**。
+            // ここで「魅力が無いから向きを変えない」としてしまうと、
+            // 危険地帯のど真ん中にいるときに限って回避が働かず、
+            // 恐怖場を入れた意味が無くなる（実測で M2 が不成立になった原因）。
+            // 負の中の最大＝最も危険が薄い方向へ逃げる、が正しい振る舞い
+            return found ? best : currentFacing;
+        }
+
+        /// <summary>
+        /// 狼の追跡方向 (Demo 8 H3)。獲物場の4近傍値が最大の方向へ向く。
+        /// 全て0（匂いが届いていない）なら現在の向きを維持し、通常の徘徊に落ちる。
+        ///
+        /// これが「半径6セル以内の全個体を走査して最近接を選ぶ」処理の置き換えである。
+        /// 個体数に依らず4近傍を見るだけなので O(1)。
+        /// 場読みの振る舞いを直接検証できるよう public にしている。
+        /// </summary>
+        public static int FindPreyGradientFacing(World world, Int3 cell, int currentFacing)
+        {
+            int best = currentFacing;
+            float bestValue = 0f;
+            for (int f = 0; f < FacingDirections.Length; f++)
+            {
+                var dir = FacingDirections[f];
+                int nx = cell.x + dir.x;
+                int nz = cell.z + dir.z;
+                if (!world.InBounds(nx, nz))
+                {
+                    continue;
+                }
+                float v = world.Prey.GetAtColumn(nx, nz);
                 if (v > bestValue)
                 {
                     bestValue = v;
@@ -468,68 +533,36 @@ namespace BlockField.SimCore.Ecology
             return bestValue > 0f ? best : currentFacing;
         }
 
-        /// <summary>半径内（XZ距離）で最も近い草食獣のインデックス（同距離は小さい id 優先）。無ければ -1。</summary>
-        static int FindNearestHerbivore(World world, Int3 from, int radius, HashSet<int> excludeIds)
+        /// <summary>
+        /// 隣接（4近傍、高低差1以下）の草食獣のインデックス。無ければ -1。
+        /// 捕食の成立判定だけは個体を見る必要があるが、走査するのは4セルだけである。
+        /// </summary>
+        static int FindAdjacentHerbivore(World world, Int3 from, HashSet<int> excludeIds)
         {
-            int best = -1;
-            int bestDistSq = radius * radius + 1;
-            for (int i = 0; i < world.Entities.Count; i++)
+            foreach (var dir in FacingDirections)
             {
-                var e = world.Entities[i];
-                if (!e.IsHerbivore || excludeIds.Contains(e.id))
+                int nx = from.x + dir.x;
+                int nz = from.z + dir.z;
+                if (!world.InBounds(nx, nz))
                 {
                     continue;
                 }
-                int dx = e.cell.x - from.x;
-                int dz = e.cell.z - from.z;
-                int distSq = dx * dx + dz * dz;
-                if (distSq < bestDistSq)
+                var cell = new Int3(nx, world.GetSurfaceHeight(nx, nz), nz);
+                if (Math.Abs(cell.y - from.y) > 1)
                 {
-                    bestDistSq = distSq;
-                    best = i;
+                    continue;
+                }
+                if (!world.TryGetEntityIndexAt(cell, out int index))
+                {
+                    continue;
+                }
+                var e = world.Entities[index];
+                if (e.IsHerbivore && !excludeIds.Contains(e.id))
+                {
+                    return index;
                 }
             }
-            return best;
-        }
-
-        /// <summary>狼の追跡1歩: 主軸（絶対値の大きい軸、同値はX優先）→副軸の順に移動を試す。</summary>
-        static void ChaseStep(World world, ref Entity e, int dx, int dz)
-        {
-            int primary = Math.Abs(dx) >= Math.Abs(dz)
-                ? (dx > 0 ? 0 : 2)   // +X / -X
-                : (dz > 0 ? 1 : 3);  // +Z / -Z
-            int secondary = Math.Abs(dx) >= Math.Abs(dz)
-                ? (dz > 0 ? 1 : 3)
-                : (dx > 0 ? 0 : 2);
-
-            if (TryStep(world, ref e, primary))
-            {
-                return;
-            }
-            if ((dx != 0 && dz != 0) || primary != secondary)
-            {
-                TryStep(world, ref e, secondary);
-            }
-        }
-
-        static bool TryStep(World world, ref Entity e, int facing)
-        {
-            var dir = FacingDirections[facing];
-            int nx = e.cell.x + dir.x;
-            int nz = e.cell.z + dir.z;
-            if (!world.InBounds(nx, nz))
-            {
-                return false;
-            }
-            int h = world.GetSurfaceHeight(nx, nz);
-            var target = new Int3(nx, h, nz);
-            if (Math.Abs(h - e.cell.y) > 1 || world.IsCellOccupied(target))
-            {
-                return false;
-            }
-            e.facing = facing;
-            e.cell = target;
-            return true;
+            return -1;
         }
 
         /// <summary>通常の移動判定 (Demo 2 D4): moveChance で facing 方向へ、高低差1以下・未占有なら移動。</summary>

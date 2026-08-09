@@ -33,6 +33,7 @@ namespace BlockField
         [SerializeField] RoomTerrainView m_RoomView;
         [SerializeField] VrModeController m_VrMode;
         [SerializeField] RoomShellView m_Shell;
+        [SerializeField] FieldOverlayView m_FieldOverlay;
         [SerializeField] Text m_Text;
 
         public DioramaOrigin diorama { get => m_Diorama; set => m_Diorama = value; }
@@ -42,6 +43,7 @@ namespace BlockField
         public RoomTerrainView roomView { get => m_RoomView; set => m_RoomView = value; }
         public VrModeController vrMode { get => m_VrMode; set => m_VrMode = value; }
         public RoomShellView shell { get => m_Shell; set => m_Shell = value; }
+        public FieldOverlayView fieldOverlay { get => m_FieldOverlay; set => m_FieldOverlay = value; }
         public Text text { get => m_Text; set => m_Text = value; }
 
         static string s_LastEvent = "-";
@@ -107,6 +109,16 @@ namespace BlockField
                         $"餓死={EcologyStats.DioramaReference.StarvationPerAnimalPerKiloTick:F2}");
                     Debug.Log($"[DebugPanel] 累計: 餓死={world.StarvationCount} 捕食={world.PredationCount} " +
                         $"出生={world.BirthCount} 摂食成功={world.FeedSuccessCount}/{world.FeedAttemptCount}");
+
+                    // Demo 8 H4: 場の状態（規約どおりパネルとログの両方に出す）
+                    var (fMean, fMax) = EcologyStats.FieldStats(world.Fear);
+                    var (pMean, pMax) = EcologyStats.FieldStats(world.Prey);
+                    var (vMean, vMax) = EcologyStats.FieldStats(world.Vegetation);
+                    Debug.Log($"[DebugPanel] 場: 植生 平均={vMean:F4} 最大={vMax:F3} / " +
+                        $"恐怖 平均={fMean:F4} 最大={fMax:F3} / 獲物 平均={pMean:F4} 最大={pMax:F3}");
+                    Debug.Log($"[DebugPanel] 追跡: 狼の歩数={world.WolfStepCount} " +
+                        $"捕食/1000歩={EcologyStats.PredationPerKiloWolfStep(world):F1} " +
+                        $"草食獣の恐怖曝露={EcologyStats.HerbivoreFearExposure(world):F2}（1.0未満で薄い所にいる）");
                 }
 
                 // 座標系ズレ（メタボタン長押しの再センタリング）の切り分け用。
@@ -188,6 +200,11 @@ namespace BlockField
             float starvePerK = EcologyStats.StarvationPerAnimalPerKiloTick(world);
             float feedRate = UpdateAndGetFeedRate(world);
 
+            // Demo 8 H4: 場の状態と、狼の追跡効率・草食獣の危険曝露
+            var (fearMean, fearMax) = EcologyStats.FieldStats(world.Fear);
+            var (preyMean, preyMax) = EcologyStats.FieldStats(world.Prey);
+            var (vegMean, vegMax) = EcologyStats.FieldStats(world.Vegetation);
+
             return
                 $"Dens P/A: {plantDensity * 100:F2}%/{animalDensity * 100:F2}% " +
                 $"(ref {EcologyStats.DioramaReference.PlantDensity * 100:F2}/" +
@@ -195,7 +212,12 @@ namespace BlockField
                 $"Feed{k_FeedWindowTicks}: {feedRate * 100:F1}% " +
                 $"(ref {EcologyStats.DioramaReference.FeedSuccessRate * 100:F1})   " +
                 $"Starve/1k: {starvePerK:F2} " +
-                $"(ref {EcologyStats.DioramaReference.StarvationPerAnimalPerKiloTick:F2})\n";
+                $"(ref {EcologyStats.DioramaReference.StarvationPerAnimalPerKiloTick:F2})\n" +
+                $"Fld avg/max V:{vegMean:F3}/{vegMax:F2} " +
+                $"F:{fearMean:F3}/{fearMax:F2} P:{preyMean:F3}/{preyMax:F2}\n" +
+                $"Pred/1k step: {EcologyStats.PredationPerKiloWolfStep(world):F1}   " +
+                $"FearExpo: {EcologyStats.HerbivoreFearExposure(world):F2}   " +
+                $"Ovl[Y]: {(m_FieldOverlay != null ? m_FieldOverlay.Current.ToString() : "-")}\n";
         }
 
         /// <summary>

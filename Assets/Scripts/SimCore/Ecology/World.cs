@@ -23,6 +23,12 @@ namespace BlockField.SimCore.Ecology
         public SuitabilityField Suitability { get; }
         public VegetationField Vegetation { get; }
 
+        /// <summary>恐怖場 (Demo 8 第1段)。狼が書き、草食獣が避ける。</summary>
+        public FearField Fear { get; }
+
+        /// <summary>獲物場 (Demo 8 第1段)。草食獣が書き、狼が追う。</summary>
+        public PreyField Prey { get; }
+
         /// <summary>
         /// 場の一元管理 (Demo 4.5 作業1)。ContentHash 計算と更新ループが場の種類を
         /// 知らずに回るための辞書。決定論のため名前昇順で走査する（m_FieldOrder）。
@@ -65,6 +71,12 @@ namespace BlockField.SimCore.Ecology
         /// <see cref="FeedAttemptCount"/> との比が「餓死する前に食べられているか」の直接指標になる。
         /// </summary>
         public int FeedSuccessCount { get; internal set; }
+
+        /// <summary>
+        /// 狼が実際に移動したセル数 (Demo 8 M5 の指標)。
+        /// 「何歩歩いて1匹捕らえたか」を出すための分母。
+        /// </summary>
+        public int WolfStepCount { get; internal set; }
 
         readonly struct PendingAction
         {
@@ -129,10 +141,14 @@ namespace BlockField.SimCore.Ecology
             m_SurfaceHeights = ComputeSurfaceHeights(Grid, p.width, p.depth, m_ScanMinY, m_ScanMaxY, m_NoSurfaceHeight);
             Suitability = ComputeSuitability(p.width, p.depth, m_SurfaceHeights, Grid, m_NoSurfaceHeight);
             Vegetation = new VegetationField(p.width, p.depth);
+            Fear = new FearField(p.width, p.depth);
+            Prey = new PreyField(p.width, p.depth);
             SuitableCellCount = CountSuitableCells(Suitability, p.width, p.depth);
 
             RegisterField(Suitability);
             RegisterField(Vegetation);
+            RegisterField(Fear);
+            RegisterField(Prey);
         }
 
         /// <summary>
@@ -159,10 +175,14 @@ namespace BlockField.SimCore.Ecology
             m_SurfaceHeights = ComputeSurfaceHeights(Grid, p.width, p.depth, m_ScanMinY, m_ScanMaxY, m_NoSurfaceHeight);
             Suitability = ComputeSuitability(p.width, p.depth, m_SurfaceHeights, Grid, m_NoSurfaceHeight);
             Vegetation = new VegetationField(p.width, p.depth);
+            Fear = new FearField(p.width, p.depth);
+            Prey = new PreyField(p.width, p.depth);
             SuitableCellCount = CountSuitableCells(Suitability, p.width, p.depth);
 
             RegisterField(Suitability);
             RegisterField(Vegetation);
+            RegisterField(Fear);
+            RegisterField(Prey);
         }
 
         /// <summary>適性 &gt; 0 のセル数（生成時の基準スケール）。</summary>

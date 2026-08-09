@@ -39,6 +39,59 @@ namespace BlockField.SimCore.Ecology
             public const int SettledTicks = 3000;
         }
 
+        /// <summary>場の平均値と最大値 (Demo 8 H4)。</summary>
+        public static (float mean, float max) FieldStats(ScalarField field)
+        {
+            float sum = 0f, max = 0f;
+            int n = field.Length;
+            for (int i = 0; i < n; i++)
+            {
+                float v = field.GetByIndex(i);
+                sum += v;
+                if (v > max) max = v;
+            }
+            return (n > 0 ? sum / n : 0f, max);
+        }
+
+        /// <summary>
+        /// 草食獣が恐怖場のどれくらい濃い所にいるか (Demo 8 M2 の指標)。
+        /// 「草食獣のいるセルの恐怖場の平均 ÷ 場全体の平均」で、1.0 未満なら薄い所を選んでいる。
+        ///
+        /// 【注意】この比だけでは回避の効果を切り分けられない。恐怖の濃い所にいた個体は
+        /// 捕食されて消えるため、回避していなくても生き残りは薄い所に偏る。
+        /// 実測でも w_fear=0 の対照が 0.34〜0.72 と 1.0 を大きく下回った。
+        /// あくまで「今どのくらい危険な場所にいるか」の目安として読むこと。
+        /// </summary>
+        public static float HerbivoreFearExposure(World world)
+        {
+            var (fieldMean, _) = FieldStats(world.Fear);
+            if (fieldMean <= 0f)
+            {
+                return 0f;
+            }
+
+            float sum = 0f;
+            int n = 0;
+            foreach (var e in world.Entities)
+            {
+                if (!e.IsHerbivore)
+                {
+                    continue;
+                }
+                sum += world.Fear.GetAtColumn(e.cell.x, e.cell.z);
+                n++;
+            }
+            return n > 0 ? sum / n / fieldMean : 0f;
+        }
+
+        /// <summary>
+        /// 狼の移動距離あたりの捕食成功率 (Demo 8 M5 の指標)。
+        /// 狼が何歩歩いて1匹捕らえたか＝場読みでの追跡がどれだけ効率的か。
+        /// 1000歩あたりの捕食回数で返す。
+        /// </summary>
+        public static float PredationPerKiloWolfStep(World world) =>
+            world.WolfStepCount > 0 ? 1000f * world.PredationCount / world.WolfStepCount : 0f;
+
         /// <summary>植物密度 = 植物数 / 適性セル数。</summary>
         public static float PlantDensity(World world) =>
             world.SuitableCellCount > 0 ? (float)world.PlantCount / world.SuitableCellCount : 0f;

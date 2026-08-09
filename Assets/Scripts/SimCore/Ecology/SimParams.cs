@@ -49,6 +49,51 @@ namespace BlockField.SimCore.Ecology
         /// </summary>
         public float vegetationFloor;
 
+        // --- Demo 8 第1段: 恐怖場と獲物場 ---
+        // 3つの場の違いは deposit 量と τ（拡散率・減衰率）だけで、
+        // τ の違いがそのまま「その情報がどれくらい長く価値を持つか」を表す。
+        //   植生 decay 0.02  … 植物は動かないので痕跡は長持ちしてよい
+        //   恐怖 decay 0.03  … 危険は移動するので古い情報は価値が下がる
+        //   獲物 decay 0.015 … **当初 0.05（鮮度重視）としたが実測で覆った。**
+        //     追跡に使える勾配を張るには匂いが数セル届く必要があり、
+        //     そのためには持続が要る。詳細は PreyField のコメント参照
+
+        /// <summary>恐怖場: 狼が通過セルへ毎ティック書き込む量（上限1.0）。</summary>
+        public float fearDeposit;
+
+        /// <summary>恐怖場: 4近傍平均へ寄せる拡散率。小さめ＝「道」の形を保つ。</summary>
+        public float fearDiffuse;
+
+        /// <summary>恐怖場: 毎ティックの減衰率（τ中）。</summary>
+        public float fearDecay;
+
+        /// <summary>獲物場: 草食獣が通過セルへ毎ティック書き込む量（上限1.0）。</summary>
+        public float preyDeposit;
+
+        /// <summary>獲物場: 拡散率。大きめ＝匂いが広がって狼が遠くから方向を掴める。</summary>
+        public float preyDiffuse;
+
+        /// <summary>獲物場: 毎ティックの減衰率。</summary>
+        public float preyDecay;
+
+        /// <summary>
+        /// 獲物場: 1ティックあたりの拡散パス数。
+        /// 匂いが届く距離は概ね sqrt(D/decay)（D は1パスあたり拡散率/4）で決まる。
+        /// 1パスでは1セル程度しか届かず、狼が方向を掴めない（実測で確認）。
+        /// パスを重ねて到達距離を伸ばす。
+        /// </summary>
+        public int preyDiffusePasses;
+
+        /// <summary>草食獣の移動評価: 植生場の重み（餌に寄る強さ）。</summary>
+        public float herbivoreVegetationWeight;
+
+        /// <summary>
+        /// 草食獣の移動評価: 恐怖場の重み（危険を避ける強さ）。
+        /// 植生の重みより大きくして危険回避を優先させる。両者の差が
+        /// 「腹は減っているが危険な場所にある草」という葛藤の強さになる。
+        /// </summary>
+        public float herbivoreFearWeight;
+
         /// <summary>動物: 毎ティックの抽選候補セル数（低頻度、基準スケールでの値）。</summary>
         public int animalSpawnCandidates;
 
@@ -91,6 +136,17 @@ namespace BlockField.SimCore.Ecology
             vegetationDiffuse = 0.15f,
             vegetationDecay = 0.02f,
             vegetationFloor = 0.02f,
+            fearDeposit = 0.5f,
+            fearDiffuse = 0.1f,
+            fearDecay = 0.03f,
+            // 獲物場は「匂いが届く距離」で決まる。L = sqrt(passes*diffuse/4 / decay) ≈ 7.3セル。
+            // 旧実装の視界半径6セルと同等になるよう選んだ（実測の根拠は prereg 追記を参照）
+            preyDeposit = 0.5f,
+            preyDiffuse = 0.8f,
+            preyDiffusePasses = 4,
+            preyDecay = 0.015f,
+            herbivoreVegetationWeight = 1f,
+            herbivoreFearWeight = 1.5f,
             animalSpawnCandidates = 2,
             animalSpawnChance = 0.5f,
             animalCap = 30,

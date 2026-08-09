@@ -203,8 +203,8 @@ public static class SceneBootstrap
         var canvas = canvasGo.AddComponent<Canvas>();
         canvas.renderMode = RenderMode.WorldSpace;
         var canvasRect = canvasGo.GetComponent<RectTransform>();
-        // Demo 5a で健全性の2行を追加したため 13 行 → 高さを広げる
-        canvasRect.sizeDelta = new Vector2(600f, 540f);
+        // Demo 8 で場の2行を追加したため 15 行 → 高さを広げる
+        canvasRect.sizeDelta = new Vector2(600f, 620f);
 
         var bgGo = new GameObject("Background");
         bgGo.transform.SetParent(canvasGo.transform, false);
@@ -265,6 +265,15 @@ public static class SceneBootstrap
 
         // 飢餓の色分け (Demo 5a) は診断モードのときだけ効かせる
         entityRenderer.roomView = roomView;
+
+        // 場のオーバーレイ (Demo 8 H4)。診断モード中に左手Yで 植生→恐怖→獲物→非表示 を巡回
+        var overlayGo = new GameObject("Field Overlay (H4)");
+        var overlay = overlayGo.AddComponent<BlockField.FieldOverlayView>();
+        overlay.builder = roomTerrain;
+        overlay.terrainField = terrainField;
+        overlay.roomView = roomView;
+        overlay.material = terrainMat;
+        panel.fieldOverlay = overlay;
 
         Directory.CreateDirectory("Assets/Scenes");
         if (!EditorSceneManager.SaveScene(scene, ScenePath))

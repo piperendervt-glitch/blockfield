@@ -166,24 +166,38 @@ namespace BlockField.Tests.EditMode
         [Test]
         public void Predation_WolfEatsNearbySheep()
         {
+            // Demo 8 で狼の追跡が「視界内の最近接へ直進」から「獲物場の勾配を追う」に
+            // 変わり、この筋書きの前提が2つ崩れた:
+            // 1. 旧実装の追跡 (ChaseStep) は moveChance を無視して動いていた。
+            //    このシナリオは moveChance=0 で移動を止めているため、新実装の狼は
+            //    通常の移動規則に従って**一歩も動けない**
+            // 2. 3セル離れた状態からの追跡成否は匂いの育ち方に左右され、
+            //    シードによって成功したりしなかったりする（実測 6シード中3成功）
+            //
+            // そこで本テストは**リファクタで保存された機構＝隣接捕食**の検証に絞る。
+            // 匂いを辿って接近できることは Demo8Tests の場読みテストと、
+            // M5（1000ティックあたり捕食回数が半減しない）で担保する。
             var world = World.Create(WorldParams(1u));
             var p = ScenarioParams();
             var (x, z) = FindFlatRun(world, 4);
             world.TrySpawn(EntityKind.Wolf, x, z, 0);
-            world.TrySpawn(EntityKind.Sheep, x + 3, z, 0);
+            world.TrySpawn(EntityKind.Sheep, x + 1, z, 0);
 
+            // 狼は hunger > 0.5（51ティック目）から捕食モードに入る。
+            // 羊が餓死する100ティックより前に捕食が起きること
             int predatedAt = -1;
             for (int t = 0; t < 100 && predatedAt < 0; t++)
             {
                 Simulation.Tick(world, world.Rng, p);
-                if (world.SheepCount == 0)
+                if (world.PredationCount > 0)
                 {
                     predatedAt = t;
                 }
             }
 
-            Assert.GreaterOrEqual(predatedAt, 0, "100ティック以内に羊が捕食されなかった");
-            Assert.GreaterOrEqual(world.PredationCount, 1, "捕食カウントが増えていない（餓死の可能性）");
+            Assert.GreaterOrEqual(predatedAt, 0, "100ティック以内に隣接する羊が捕食されなかった");
+            Assert.AreEqual(0, world.SheepCount, "羊が残っている");
+            Assert.AreEqual(0, world.StarvationCount, "餓死が起きている（捕食ではない可能性）");
         }
 
         [Test]

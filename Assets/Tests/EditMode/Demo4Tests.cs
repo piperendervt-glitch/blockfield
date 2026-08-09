@@ -184,7 +184,26 @@ namespace BlockField.Tests.EditMode
         [Test]
         public void M4_BreakingPlantBlocks_LowersVegetationAndNearbySpawns()
         {
-            var tp = WorldParams(5u);
+            // 近傍スポーンの差は1シードだと小さく（実測 seed5 で 9 対 7）、
+            // 個体の移動が変わるだけで符号が反転しうる。Demo 8 で草食獣が恐怖場を
+            // 読むようになったときに実際に反転した。複数シードの合計で見る
+            // （実測 8シード合計 98 対 17 = 0.17倍と効果自体は明確）。
+            int totalControlNear = 0, totalTestNear = 0;
+            foreach (uint seed in new uint[] { 5u, 1u, 3u })
+            {
+                var (c, t) = MeasureNearSpawnsAfterBreak(seed);
+                totalControlNear += c;
+                totalTestNear += t;
+            }
+
+            Assert.Less(totalTestNear, totalControlNear,
+                $"破壊後の近傍スポーンが対照より少なくない (ctrl={totalControlNear}, test={totalTestNear})");
+        }
+
+        /// <summary>破壊あり/なしで、破壊列の近傍に湧いた植物数を数える。</summary>
+        static (int control, int test) MeasureNearSpawnsAfterBreak(uint seed)
+        {
+            var tp = WorldParams(seed);
             var sp = SimParams.Default;
 
             var control = World.Create(tp);
@@ -228,8 +247,7 @@ namespace BlockField.Tests.EditMode
                 testNear += TickAndCountNearSpawns(test, sp, broken, prevIds);
             }
 
-            Assert.Less(testNear, controlNear,
-                $"破壊後の近傍スポーンが対照より少なくない (ctrl={controlNear}, test={testNear})");
+            return (controlNear, testNear);
         }
 
         static int TickAndCountNearSpawns(World w, SimParams sp, List<Int3> centers, HashSet<int> scratch)
