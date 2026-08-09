@@ -25,6 +25,12 @@ namespace BlockField
         /// <summary>2面目以降（積もらせなかった面）の塗り色。</summary>
         static readonly Color32 k_UnusedFill = new Color32(60, 120, 240, 255);
 
+        /// <summary>通行不可セル (G4) の塗り色。壁としてラスタライズされた列。</summary>
+        static readonly Color32 k_BlockedFill = new Color32(245, 240, 90, 255);
+
+        /// <summary>通行不可セル (G4) の枠色。</summary>
+        static readonly Color32 k_BlockedFrame = new Color32(70, 60, 20, 255);
+
         /// <summary>内側の塗りがセル幅に占める比率。</summary>
         const float k_FillRatio = 0.6f;
 
@@ -73,6 +79,8 @@ namespace BlockField
                 for (int x = 0; x < observation.Width; x++)
                 {
                     int count = observation.GetHitCount(x, z);
+                    bool blocked = observation.IsBlocked(x, z);
+
                     for (int i = 0; i < count; i++)
                     {
                         var hit = observation.GetHit(x, z, i);
@@ -83,11 +91,16 @@ namespace BlockField
                         float cx = x * cellSize;
                         float cz = z * cellSize;
 
+                        // 壁セル (G4) は積もらせず壁を立てるので、採用/不採用とは別色にする
+                        var frameColor = blocked && adopted ? k_BlockedFrame : GetLabelColor(hit.label);
+                        var fillColor = blocked && adopted
+                            ? k_BlockedFill
+                            : (adopted ? k_AdoptedFill : k_UnusedFill);
+
                         AddQuad(vertices, normals, colors, triangles,
-                            cx, hit.worldY + k_FrameLift, cz, frameHalf, GetLabelColor(hit.label));
+                            cx, hit.worldY + k_FrameLift, cz, frameHalf, frameColor);
                         AddQuad(vertices, normals, colors, triangles,
-                            cx, hit.worldY + k_FillLift, cz, fillHalf,
-                            adopted ? k_AdoptedFill : k_UnusedFill);
+                            cx, hit.worldY + k_FillLift, cz, fillHalf, fillColor);
                     }
                 }
             }

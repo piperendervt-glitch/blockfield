@@ -86,6 +86,12 @@ namespace BlockField
 
             /// <summary>アンカー原点が取れていたか（取れていなければワールド直置きにフォールバック）。</summary>
             public bool HasOriginPose;
+
+            /// <summary>
+            /// 壁面の水平フットプリント (Demo 4.5 G4)。WallFace ラベルの平面を
+            /// XZ 平面上の線分に落としたもの。通行不可セルのラスタライズに使う。
+            /// </summary>
+            public List<WallSegment> Walls;
         }
 
         /// <summary>この秒数を過ぎてもメッシュが0なら警告を1回出す。</summary>
@@ -272,6 +278,7 @@ namespace BlockField
                 LabelResolver = (wx, wy, wz) => ResolveLabel(planes, wx, wy, wz),
                 OriginPoseAtScan = originPose,
                 HasOriginPose = hasOrigin,
+                Walls = BuildWallSegments(planes),
             };
 
             Debug.Log($"[RoomScanner] スキャン完了: {stopwatch.ElapsedMilliseconds}ms " +
@@ -375,12 +382,15 @@ namespace BlockField
             public readonly Vector3 center;
             public readonly Vector2 extents;
             public readonly SurfaceLabel label;
+            /// <summary>平面ローカルX軸のワールド方向（壁の水平方向）。</summary>
+            public readonly Vector3 right;
 
-            public PlaneInfo(Vector3 center, Vector2 extents, SurfaceLabel label)
+            public PlaneInfo(Vector3 center, Vector2 extents, SurfaceLabel label, Vector3 right)
             {
                 this.center = center;
                 this.extents = extents;
                 this.label = label;
+                this.right = right;
             }
         }
 
@@ -394,9 +404,37 @@ namespace BlockField
 
             foreach (var plane in m_PlaneManager.trackables)
             {
-                result.Add(new PlaneInfo(plane.center, plane.extents, MapLabel(plane.classifications)));
+                result.Add(new PlaneInfo(
+                    plane.center, plane.extents, MapLabel(plane.classifications), plane.transform.right));
             }
             return result;
+        }
+
+        /// <summary>
+        /// 壁面平面を XZ 平面上の線分へ落とす (G4)。壁は鉛直なので、
+        /// ローカルX軸（extents.x 方向）を水平に投影したものが壁の走る向きになる。
+        /// </summary>
+        static List<WallSegment> BuildWallSegments(List<PlaneInfo> planes)
+        {
+            var walls = new List<WallSegment>();
+            foreach (var p in planes)
+            {
+                if (p.label != SurfaceLabel.WallFace)
+                {
+                    continue;
+                }
+
+                var horizontal = new Vector2(p.right.x, p.right.z);
+                if (horizontal.sqrMagnitude < 1e-6f)
+                {
+                    continue; // ローカルX軸が鉛直（想定外の姿勢）— 線分にできない
+                }
+                horizontal.Normalize();
+
+                walls.Add(new WallSegment(
+                    p.center.x, p.center.z, horizontal.x, horizontal.y, p.extents.x));
+            }
+            return walls;
         }
 
         /// <summary>

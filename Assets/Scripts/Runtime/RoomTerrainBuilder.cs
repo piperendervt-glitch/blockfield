@@ -62,6 +62,10 @@ namespace BlockField
                 scan.LabelResolver,
                 out var stats);
 
+            // 壁の Boundary 化 (G4)。観測データ側に通行不可セルとして立てる
+            // （セル単位の bool なので ContentHash に入れても M4 の保証を壊さない）
+            int wallCells = WallRasterizer.Rasterize(Observation, scan.Walls);
+
             stopwatch.Stop();
 
             Stats = stats;
@@ -76,6 +80,9 @@ namespace BlockField
 
             // 過検出の切り分け用（面数分布・除外理由の内訳・巻き順の計測）
             Debug.Log($"[RoomTerrain] 内訳: {stats}");
+
+            Debug.Log($"[RoomTerrain] 壁の Boundary 化 (G4): 壁平面={scan.Walls?.Count ?? 0} " +
+                $"通行不可セル={wallCells} (厚み={WallRasterizer.ThicknessMeters}m)");
 
             // 巻き順の確定: 符号ありが極端に少なければメッシュの巻き順が逆
             if (stats.UpwardSignedHits == 0 && stats.UpwardAbsHits > 0)

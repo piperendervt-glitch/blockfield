@@ -79,6 +79,19 @@ namespace BlockField.SimCore.Ecology
         public int WolfCount => m_KindCounts[(int)EntityKind.Wolf];
         public int AnimalCount => SheepCount + PigCount + WolfCount;
 
+        /// <summary>
+        /// 表層高さ探索の下限・上限（セルY）と、面が無い柱に入れる値。
+        /// 箱庭 (Demo 1-4) は 0..maxHeight-1 で「面なし=0」。
+        /// 部屋地形 (Demo 4.5) はセルYが負にも 50 超にもなり、0 も正当な高さなので
+        /// 「面なし」に極端な負値を入れて、隣接判定 (|Δh| &lt;= 1) が必ず失敗するようにする。
+        /// </summary>
+        readonly int m_ScanMinY;
+        readonly int m_ScanMaxY;
+        readonly int m_NoSurfaceHeight;
+
+        /// <summary>面を持たない柱の表層高さ（部屋地形用の番兵）。減算しても溢れない大きさにする。</summary>
+        public const int NoSurfaceHeight = int.MinValue / 4;
+
         World(TerrainParams p)
         {
             Params = p;
@@ -87,8 +100,41 @@ namespace BlockField.SimCore.Ecology
             PopulationLog = new PopulationLog();
             EventLog = new EventLog();
 
-            m_SurfaceHeights = ComputeSurfaceHeights(Grid, p);
-            Suitability = ComputeSuitability(p, m_SurfaceHeights, Grid);
+            m_ScanMinY = 0;
+            m_ScanMaxY = p.maxHeight - 1;
+            m_NoSurfaceHeight = 0;
+
+            m_SurfaceHeights = ComputeSurfaceHeights(Grid, p.width, p.depth, m_ScanMinY, m_ScanMaxY, m_NoSurfaceHeight);
+            Suitability = ComputeSuitability(p.width, p.depth, m_SurfaceHeights, Grid, m_NoSurfaceHeight);
+            Vegetation = new VegetationField(p.width, p.depth);
+
+            RegisterField(Suitability);
+            RegisterField(Vegetation);
+        }
+
+        /// <summary>
+        /// 部屋地形の上にワールドを作る (Demo 4.5 G7 の下ごしらえ)。
+        /// 合成済みの部屋グリッドをそのままシムの舞台にする。
+        ///
+        /// 箱庭 (Demo 1-4) との違いは3点だけで、シムのルール自体は共通である:
+        /// - グリッドは生成せず受け取る（TerrainGenerator は使わない）
+        /// - XZ の範囲は観測グリッドの寸法
+        /// - セルYが負にもなるため、表層高さの探索範囲と「面なし」の表現が異なる
+        /// </summary>
+        World(TerrainParams p, VoxelGrid grid, int scanMinY, int scanMaxY)
+        {
+            Params = p;
+            Grid = grid;
+            Rng = new Mulberry32(p.seed ^ k_SimSeedSalt);
+            PopulationLog = new PopulationLog();
+            EventLog = new EventLog();
+
+            m_ScanMinY = scanMinY;
+            m_ScanMaxY = scanMaxY;
+            m_NoSurfaceHeight = NoSurfaceHeight;
+
+            m_SurfaceHeights = ComputeSurfaceHeights(Grid, p.width, p.depth, m_ScanMinY, m_ScanMaxY, m_NoSurfaceHeight);
+            Suitability = ComputeSuitability(p.width, p.depth, m_SurfaceHeights, Grid, m_NoSurfaceHeight);
             Vegetation = new VegetationField(p.width, p.depth);
 
             RegisterField(Suitability);
@@ -121,6 +167,32 @@ namespace BlockField.SimCore.Ecology
         public static World Create(TerrainParams terrainParams)
         {
             return new World(terrainParams);
+        }
+
+        /// <summary>
+        /// 観測から部屋地形を合成し、その上にワールドを作る (Demo 4.5 G4/G5/G7)。
+        /// 入力は整数の観測データとシードのみなので、同一観測からは同一ワールドになる。
+        /// </summary>
+        public static World CreateFromRoom(
+            RoomObservation observation, TerrainParams terrainParams, SnowfallParams snowParams,
+            out SnowfallResult composed)
+        {
+            if (observation == null)
+            {
+                throw new ArgumentNullException(nameof(observation));
+            }
+
+            composed = SnowfallComposer.Compose(observation, snowParams);
+
+            // XZ の範囲は観測グリッドに合わせる（maxHeight は表層探索に使わない）
+            var p = terrainParams;
+            p.width = observation.Width;
+            p.depth = observation.Depth;
+
+            // 探索範囲は合成結果の実レンジ。面が1つも無ければ空のワールドになる
+            int minY = composed.BlockCount > 0 ? composed.MinCellY : 0;
+            int maxY = composed.BlockCount > 0 ? composed.MaxCellY : 0;
+            return new World(p, composed.Grid, minY, maxY);
         }
 
         public bool InBounds(int x, int z) => x >= 0 && x < Width && z >= 0 && z < Depth;
@@ -303,8 +375,8 @@ namespace BlockField.SimCore.Ecology
         /// <summary>指定列の表層高さキャッシュを再計算する。</summary>
         void UpdateColumnHeight(int x, int z)
         {
-            int h = 0;
-            for (int y = Params.maxHeight - 1; y >= 0; y--)
+            int h = m_NoSurfaceHeight;
+            for (int y = m_ScanMaxY; y >= m_ScanMinY; y--)
             {
                 if (Grid.Get(new Int3(x, y, z)) != BlockId.Air)
                 {
@@ -327,7 +399,7 @@ namespace BlockField.SimCore.Ecology
             }
 
             int h = GetSurfaceHeight(x, z);
-            if (h <= 0)
+            if (h == m_NoSurfaceHeight || h <= m_ScanMinY)
             {
                 Suitability.SetAtColumn(x, z, 0f);
                 return;
@@ -536,15 +608,16 @@ namespace BlockField.SimCore.Ecology
             }
         }
 
-        static int[] ComputeSurfaceHeights(VoxelGrid grid, TerrainParams p)
+        static int[] ComputeSurfaceHeights(
+            VoxelGrid grid, int width, int depth, int scanMinY, int scanMaxY, int noSurfaceHeight)
         {
-            var heights = new int[p.width * p.depth];
-            for (int z = 0; z < p.depth; z++)
+            var heights = new int[width * depth];
+            for (int z = 0; z < depth; z++)
             {
-                for (int x = 0; x < p.width; x++)
+                for (int x = 0; x < width; x++)
                 {
-                    int h = 0;
-                    for (int y = p.maxHeight - 1; y >= 0; y--)
+                    int h = noSurfaceHeight;
+                    for (int y = scanMaxY; y >= scanMinY; y--)
                     {
                         if (grid.Get(new Int3(x, y, z)) != BlockId.Air)
                         {
@@ -552,7 +625,7 @@ namespace BlockField.SimCore.Ecology
                             break;
                         }
                     }
-                    heights[x + p.width * z] = h;
+                    heights[x + width * z] = h;
                 }
             }
             return heights;
@@ -562,17 +635,27 @@ namespace BlockField.SimCore.Ecology
         /// 適性場 (D3)。地形から一度だけ計算する静的な場:
         /// 表層 Grass かつ 4近傍との高低差1以下 → 1.0 / Grass だが起伏あり → 0.5 / それ以外 → 0.0。
         /// </summary>
-        static SuitabilityField ComputeSuitability(TerrainParams p, int[] heights, VoxelGrid grid)
+        static SuitabilityField ComputeSuitability(
+            int width, int depth, int[] heights, VoxelGrid grid, int noSurfaceHeight)
         {
-            var field = new SuitabilityField(p.width, p.depth);
-            for (int z = 0; z < p.depth; z++)
+            var field = new SuitabilityField(width, depth);
+            for (int z = 0; z < depth; z++)
             {
-                for (int x = 0; x < p.width; x++)
+                for (int x = 0; x < width; x++)
                 {
-                    int h = heights[x + p.width * z];
+                    int h = heights[x + width * z];
+                    if (h == noSurfaceHeight)
+                    {
+                        // 面が無い柱（部屋地形の穴）。適性0
+                        field.SetAtColumn(x, z, 0f);
+                        continue;
+                    }
+
+                    // 表面場: 適性は「その柱の最上面」に付随する。h-1 が表層セル
                     var surface = grid.Get(new Int3(x, h - 1, z));
                     if (surface != BlockId.Grass)
                     {
+                        // 壁 (Stone/Reality)・岩 (Stone) の上には湧かない
                         field.SetAtColumn(x, z, 0f);
                         continue;
                     }
@@ -587,11 +670,12 @@ namespace BlockField.SimCore.Ecology
 
                     void Check(int nx, int nz)
                     {
-                        if (nx < 0 || nx >= p.width || nz < 0 || nz >= p.depth)
+                        if (nx < 0 || nx >= width || nz < 0 || nz >= depth)
                         {
                             return;
                         }
-                        if (Math.Abs(heights[nx + p.width * nz] - h) > 1)
+                        int nh = heights[nx + width * nz];
+                        if (nh == noSurfaceHeight || Math.Abs(nh - h) > 1)
                         {
                             flat = false;
                         }

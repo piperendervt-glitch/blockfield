@@ -120,9 +120,16 @@ namespace BlockField
             int snowBlocks = m_RoomView != null ? m_RoomView.SnowBlockCount : 0;
             long composeMs = m_RoomView != null ? m_RoomView.ComposeMs : 0;
 
+            var biome = m_RoomView != null ? m_RoomView.BiomeHistogram : null;
+            string biomeText = biome != null && biome.Length >= 3
+                ? $"{biome[0]}/{biome[1]}/{biome[2]}"
+                : "-/-/-";
+            int walls = m_RoomView != null ? m_RoomView.WallCellCount : 0;
+
             return
                 $"Room[B]: {mode}   Surf: {surfaces} (avg {avg:F2})\n" +
-                $"Dist1/2/3+: {dist}   Snow: {snowBlocks} ({composeMs}ms)\n";
+                $"Dist1/2/3+: {dist}   Snow: {snowBlocks} ({composeMs}ms)\n" +
+                $"Biome P/H/M: {biomeText}   Wall: {walls}\n";
         }
     }
 }

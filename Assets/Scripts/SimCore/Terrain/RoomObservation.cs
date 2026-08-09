@@ -87,6 +87,9 @@ namespace BlockField.SimCore.Terrain
         // セルごとの積もり面リスト（高さ昇順）。密配列だが、面を持たないセルは空。
         readonly List<SurfaceHit>[] m_Hits;
 
+        // 通行不可セル (Demo 4.5 G4)。壁面平面をラスタライズした結果。
+        readonly bool[] m_Blocked;
+
         public RoomObservation(int width, int depth, float cellSize, float originWorldX, float originWorldZ)
         {
             if (width <= 0 || depth <= 0)
@@ -100,6 +103,27 @@ namespace BlockField.SimCore.Terrain
             OriginWorldX = originWorldX;
             OriginWorldZ = originWorldZ;
             m_Hits = new List<SurfaceHit>[width * depth];
+            m_Blocked = new bool[width * depth];
+        }
+
+        /// <summary>
+        /// 通行不可セル (G4) を立てる。壁面のラスタライズ結果であり、
+        /// セル単位の bool なので ContentHash に含めても M4 の保証を壊さない。
+        /// </summary>
+        public void SetBlocked(int x, int z) => m_Blocked[ToIndex(x, z)] = true;
+
+        /// <summary>通行不可セルか (G4)。</summary>
+        public bool IsBlocked(int x, int z) => m_Blocked[ToIndex(x, z)];
+
+        /// <summary>通行不可セルの総数（統計用）。</summary>
+        public int CountBlocked()
+        {
+            int n = 0;
+            for (int i = 0; i < m_Blocked.Length; i++)
+            {
+                if (m_Blocked[i]) n++;
+            }
+            return n;
         }
 
         /// <summary>セルの積もり面を追加する（高さ昇順を維持）。</summary>
@@ -210,12 +234,14 @@ namespace BlockField.SimCore.Terrain
                 for (int x = 0; x < Width; x++)
                 {
                     int count = GetHitCount(x, z);
-                    if (count == 0)
+                    bool blocked = IsBlocked(x, z);
+                    if (count == 0 && !blocked)
                     {
                         continue;
                     }
                     hash = Fold(hash, (uint)x, prime);
                     hash = Fold(hash, (uint)z, prime);
+                    unchecked { hash = (hash ^ (blocked ? 1UL : 0UL)) * prime; }
                     for (int i = 0; i < count; i++)
                     {
                         var hit = GetHit(x, z, i);

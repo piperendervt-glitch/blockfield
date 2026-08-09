@@ -320,7 +320,8 @@ namespace BlockField.Tests.EditMode
             {
                 for (int x = 0; x < 81; x++)
                 {
-                    int layers = SnowfallComposer.ComputeLayers(p, noise, x, z);
+                    // 最大振幅（山岳）でレンジ全体を使えることを見る
+                    int layers = SnowfallComposer.ComputeLayers(p, noise, x, z, SurfaceBiome.Mountains);
                     if (layers < min) min = layers;
                     if (layers > max) max = layers;
                 }
@@ -352,6 +353,195 @@ namespace BlockField.Tests.EditMode
             Assert.AreEqual(a.Grid.ComputeContentHash(), b.Grid.ComputeContentHash(),
                 "worldY を変えると地形が変わる — SnowfallComposer が worldY を読んでいる");
             Assert.AreEqual(a.BlockCount, b.BlockCount);
+        }
+
+        // ---- G4: 壁の Boundary 化 / G5: バイオーム ----
+
+        /// <summary>床(cellY=0)全面の観測。x &lt; wallWidth の列を壁にする。</summary>
+        static RoomObservation BuildRoomWithWall(int size, int wallWidth)
+        {
+            var obs = new RoomObservation(size, size, k_Cell, 0f, 0f);
+            for (int z = 0; z < size; z++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    obs.AddHit(x, z, new SurfaceHit(0, 0.01f, 0, SurfaceLabel.Floor));
+                    if (x < wallWidth)
+                    {
+                        obs.SetBlocked(x, z);
+                    }
+                }
+            }
+            return obs;
+        }
+
+        [Test]
+        public void Wall_CreatesImpassableHeightDifference()
+        {
+            var obs = BuildRoomWithWall(40, 2);
+            var world = World.CreateFromRoom(obs, TerrainParams.Default, SnowfallParams.Default, out var composed);
+
+            Assert.Greater(composed.WallCellCount, 0, "壁ブロックが積まれていない");
+
+            // 壁の隣の床セルと壁セルの高低差が2以上 = 徘徊AIの移動条件を満たさない
+            int wallH = world.GetSurfaceHeight(1, 20);
+            int floorH = world.GetSurfaceHeight(2, 20);
+            Assert.GreaterOrEqual(System.Math.Abs(wallH - floorH), 2,
+                $"壁({wallH})と床({floorH})の高低差が2未満。徘徊AIが壁に登れてしまう");
+
+            // 壁の上は Grass ではないので適性0（動物も植物も湧かない）
+            Assert.AreEqual(0f, world.Suitability.GetAtColumn(1, 20), 1e-6f, "壁の上の適性が0でない");
+        }
+
+        [Test]
+        public void Wall_EntitiesNeverEnterBlockedColumns()
+        {
+            var obs = BuildRoomWithWall(40, 2);
+            var world = World.CreateFromRoom(obs, TerrainParams.Default, SnowfallParams.Default, out _);
+
+            for (int t = 0; t < 200; t++)
+            {
+                Simulation.Tick(world, world.Rng);
+
+                foreach (var e in world.Entities)
+                {
+                    Assert.GreaterOrEqual(e.cell.x, 2,
+                        $"tick {t}: {e.kind} #{e.id} が壁セル ({e.cell.x},{e.cell.z}) に入った");
+                }
+            }
+
+            // 生態系が実際に動いていること（空のワールドで通っても意味がない）
+            Assert.Greater(world.Entities.Count, 0, "エンティティが1体も湧いていない — テストが空回りしている");
+        }
+
+        [Test]
+        public void Room_ColumnsWithoutSurface_AreImpassable()
+        {
+            // x=5 の列だけ面を持たない「穴」
+            var obs = new RoomObservation(10, 10, k_Cell, 0f, 0f);
+            for (int z = 0; z < 10; z++)
+            {
+                for (int x = 0; x < 10; x++)
+                {
+                    if (x != 5)
+                    {
+                        obs.AddHit(x, z, new SurfaceHit(0, 0.01f, 0, SurfaceLabel.Floor));
+                    }
+                }
+            }
+
+            var world = World.CreateFromRoom(obs, TerrainParams.Default, SnowfallParams.Default, out _);
+
+            Assert.AreEqual(World.NoSurfaceHeight, world.GetSurfaceHeight(5, 3),
+                "面が無い柱に番兵が入っていない（部屋地形では 0 も正当な高さなので 0 は使えない）");
+            Assert.AreEqual(0f, world.Suitability.GetAtColumn(5, 3), 1e-6f, "面が無い柱の適性が0でない");
+
+            long diff = System.Math.Abs((long)world.GetSurfaceHeight(4, 3) - world.GetSurfaceHeight(5, 3));
+            Assert.Greater(diff, 1, "面が無い柱へ移動できてしまう");
+        }
+
+        [Test]
+        public void Biome_LabelAndHeight_MapToExpectedBiome()
+        {
+            var p = SnowfallParams.Default;
+
+            Assert.AreEqual(SurfaceBiome.Plains,
+                SnowfallComposer.ClassifyBiome(p, new SurfaceHit(0, 0f, 0, SurfaceLabel.Floor), 0),
+                "Floor は平原");
+            Assert.AreEqual(SurfaceBiome.Hills,
+                SnowfallComposer.ClassifyBiome(p, new SurfaceHit(20, 0f, 0, SurfaceLabel.Table), 0),
+                "Table は丘陵");
+
+            // Other/Unknown は高さヒューリスティック（床から 30セル = 1.2m 以上で山岳）
+            Assert.AreEqual(SurfaceBiome.Hills,
+                SnowfallComposer.ClassifyBiome(p, new SurfaceHit(29, 0f, 0, SurfaceLabel.Unknown), 0),
+                "床から1.2m未満の Unknown は丘陵");
+            Assert.AreEqual(SurfaceBiome.Mountains,
+                SnowfallComposer.ClassifyBiome(p, new SurfaceHit(30, 0f, 0, SurfaceLabel.Unknown), 0),
+                "床から1.2m以上の Unknown は山岳");
+
+            // 基準セルYはオフセットされても相対で判定される
+            Assert.AreEqual(SurfaceBiome.Hills,
+                SnowfallComposer.ClassifyBiome(p, new SurfaceHit(30, 0f, 0, SurfaceLabel.Other), 10),
+                "基準セルY=10 なら cellY=30 は相対20セルなので丘陵");
+        }
+
+        [Test]
+        public void Biome_AmplitudeChangesMaxLayers()
+        {
+            var p = SnowfallParams.Default;
+            var noise = new ValueNoise(p.seed);
+
+            int MaxLayersOf(SurfaceBiome b)
+            {
+                int max = 0;
+                for (int z = 0; z < 66; z++)
+                {
+                    for (int x = 0; x < 81; x++)
+                    {
+                        int l = SnowfallComposer.ComputeLayers(p, noise, x, z, b);
+                        if (l > max) max = l;
+                    }
+                }
+                return max;
+            }
+
+            // 実測: 平原=2層まで / 丘陵=3層まで / 山岳=4層まで
+            int plains = MaxLayersOf(SurfaceBiome.Plains);
+            int hills = MaxLayersOf(SurfaceBiome.Hills);
+            int mountains = MaxLayersOf(SurfaceBiome.Mountains);
+
+            Assert.Less(plains, hills, $"平原({plains})が丘陵({hills})より起伏が小さくない");
+            Assert.Less(hills, mountains, $"丘陵({hills})が山岳({mountains})より起伏が小さくない");
+            Assert.AreEqual(p.maxLayers, mountains, "山岳が最大層数に届いていない");
+        }
+
+        [Test]
+        public void Room_WorldIsDeterministic()
+        {
+            var obs = BuildRoomWithWall(30, 2);
+
+            var a = World.CreateFromRoom(obs, TerrainParams.Default, SnowfallParams.Default, out _);
+            var b = World.CreateFromRoom(obs, TerrainParams.Default, SnowfallParams.Default, out _);
+            for (int t = 0; t < 30; t++)
+            {
+                Simulation.Tick(a, a.Rng);
+                Simulation.Tick(b, b.Rng);
+            }
+
+            Assert.AreEqual(a.ComputeContentHash(), b.ComputeContentHash(),
+                "同一観測から作った部屋ワールドのハッシュが不一致");
+        }
+
+        [Test]
+        public void Observation_BlockedCells_AffectContentHash()
+        {
+            var plain = BuildRoomWithWall(20, 0);
+            var walled = BuildRoomWithWall(20, 2);
+
+            Assert.AreNotEqual(plain.ComputeContentHash(), walled.ComputeContentHash(),
+                "通行不可セルがハッシュに反映されていない");
+        }
+
+        [Test]
+        public void WallRasterizer_MarksCellsAlongSegment()
+        {
+            var obs = new RoomObservation(50, 50, k_Cell, 0f, 0f);
+
+            // z=1.0m の位置に x 方向へ伸びる長さ 1.0m の壁
+            var walls = new System.Collections.Generic.List<WallSegment>
+            {
+                new WallSegment(1.0f, 1.0f, 1f, 0f, 0.5f),
+            };
+            int marked = WallRasterizer.Rasterize(obs, walls);
+
+            Assert.Greater(marked, 0, "壁セルが1つも立っていない");
+            Assert.AreEqual(marked, obs.CountBlocked());
+
+            // 線分の中心 (1.0, 1.0) → セル (25, 25)
+            Assert.IsTrue(obs.IsBlocked(25, 25), "線分中心のセルが通行不可になっていない");
+            // 線分の外（x=0.2m → セル5）は立たない
+            Assert.IsFalse(obs.IsBlocked(5, 25), "線分の外まで壁になっている");
         }
 
         [Test]

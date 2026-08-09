@@ -24,6 +24,15 @@ namespace BlockField
         [SerializeField] Material m_OriginMaterial;
         [SerializeField] Material m_ReticleMaterial;
 
+        /// <summary>
+        /// 原点マーカー（4cm の赤い立方体）を表示するか。
+        /// Demo 0 M1（机の角との照合）の判定用であり、その役目は終わっている。
+        /// 部屋地形モード (Demo 4.5) では現実の部屋の中に浮く赤箱になるため既定で隠す。
+        /// </summary>
+        [SerializeField] bool m_ShowMarker;
+
+        public bool showMarker { get => m_ShowMarker; set => m_ShowMarker = value; }
+
         public ARPlaneManager planeManager { get => m_PlaneManager; set => m_PlaneManager = value; }
         public ARAnchorManager anchorManager { get => m_AnchorManager; set => m_AnchorManager = value; }
         /// <summary>コントローラのローカルポーズをワールドへ変換する基準 (Camera Offset)。</summary>
@@ -301,12 +310,14 @@ namespace BlockField
             var originRoot = new GameObject("Diorama Origin");
             originRoot.transform.SetParent(anchor.transform, false);
 
-            // 原点マーカー: 4cm の赤い箱 (M1 の机の角との照合用)
+            // 原点マーカー: 4cm の赤い箱 (Demo 0 M1 の机の角との照合用)。
+            // 役目は終わっているので既定では隠す（m_ShowMarker）
             var marker = new GameObject("Origin Marker");
             marker.transform.SetParent(originRoot.transform, false);
             marker.transform.localScale = Vector3.one * 0.04f;
             marker.AddComponent<MeshFilter>().sharedMesh = PrimitiveMeshFactory.CreateCube();
             marker.AddComponent<MeshRenderer>().sharedMaterial = m_OriginMaterial;
+            marker.SetActive(m_ShowMarker);
 
             OriginTransform = originRoot.transform;
         }

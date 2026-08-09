@@ -104,6 +104,8 @@ public static class SceneBootstrap
         // ジオラマ原点＋ダミーボクセル (Demo 0 T2+T3)
         var dioramaGo = new GameObject("Diorama");
         var diorama = dioramaGo.AddComponent<BlockField.DioramaOrigin>();
+        // Demo 4.5: 原点マーカー（赤い立方体）は Demo 0 M1 判定用。役目は終わったので隠す
+        diorama.showMarker = false;
         diorama.planeManager = planeManager;
         diorama.anchorManager = anchorManager;
         diorama.trackingSpace = offsetGo.transform;
@@ -177,8 +179,8 @@ public static class SceneBootstrap
         var canvas = canvasGo.AddComponent<Canvas>();
         canvas.renderMode = RenderMode.WorldSpace;
         var canvasRect = canvasGo.GetComponent<RectTransform>();
-        // Demo 4.5 G3 で部屋地形の2行を追加したため 9 行 → 高さを広げる
-        canvasRect.sizeDelta = new Vector2(600f, 380f);
+        // Demo 4.5 G3/G4/G5 で部屋地形の3行を追加したため 10 行 → 高さを広げる
+        canvasRect.sizeDelta = new Vector2(600f, 420f);
 
         var bgGo = new GameObject("Background");
         bgGo.transform.SetParent(canvasGo.transform, false);

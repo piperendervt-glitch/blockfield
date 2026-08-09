@@ -62,6 +62,14 @@ namespace BlockField
         /// <summary>積もったブロック数。</summary>
         public int SnowBlockCount => m_Result?.BlockCount ?? 0;
 
+        /// <summary>バイオーム別の面数 (G5)。未合成なら null。</summary>
+        public int[] BiomeHistogram => m_Result?.BiomeHistogram;
+
+        /// <summary>壁として立てたセル数 (G4)。</summary>
+        public int WallCellCount => m_Result != null && m_Result.WallCellCount > 0
+            ? m_Result.WallCellCount / SnowfallParams.Default.wallLayers
+            : 0;
+
         /// <summary>合成＋メッシュ化にかかった時間 (ms)。</summary>
         public long ComposeMs { get; private set; }
 
@@ -183,6 +191,10 @@ namespace BlockField
                 $"チャンク={chunkCount} 層数[{m_Result.HistogramText()}] " +
                 $"cellY範囲={m_Result.MinCellY}..{m_Result.MaxCellY} " +
                 $"ハッシュ={m_Result.Grid.ComputeContentHash():X16}");
+            Debug.Log($"[RoomTerrain] バイオーム (G5): [{m_Result.BiomeText()}] " +
+                $"基準セルY={m_Result.BaseCellY} 山岳しきい値={p.mountainCellHeight}セル " +
+                $"({p.mountainCellHeight * cellSize:F2}m) / 壁 (G4): セル={m_Result.WallCellCount / p.wallLayers} " +
+                $"ブロック={m_Result.WallCellCount}");
             Debug.Log($"[RoomTerrain] 表示ルート: 親={m_Root.transform.parent?.name ?? "(ワールド)"} " +
                 $"local={m_Root.transform.localPosition:F3} world={m_Root.transform.position:F3} " +
                 $"cell={cellSize}m マーカー頂点={(m_MarkerMesh != null ? m_MarkerMesh.vertexCount : 0)}。" +
