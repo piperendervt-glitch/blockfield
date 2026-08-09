@@ -64,18 +64,34 @@ $pattern = "\[($tags)\]|E/|Exception|Error"
 
 # 子プロセス用のワーカースクリプト。StreamWriter の AutoFlush で
 # セッション中でもログが逐次書き出される（Out-File はバッファされるため使わない）
+#
+# 再接続ループ: adb logcat は HMD のスリープ/装着による USB 再列挙などで
+# 予告なく終了する（2026-08-09 のセッションで捕捉が7分で無言停止し、
+# アプリ起動を1行も記録できなかった）。パイプが切れたら再接続し、
+# 切断/再接続の時刻をマーカー行として残す。
 $workerPath = Join-Path $logsDir ".capture_worker.ps1"
 $worker = @"
-`$ErrorActionPreference = 'Stop'
+`$ErrorActionPreference = 'Continue'
 # adb の出力は UTF-8。既定のコンソールエンコーディング（日本語環境では CP932）で
 # 解釈すると日本語ログが文字化けするため、明示的に UTF-8 を指定する
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 `$OutputEncoding = [System.Text.Encoding]::UTF8
-`$writer = New-Object System.IO.StreamWriter('$logPath', `$false, (New-Object System.Text.UTF8Encoding(`$true)))
+# append=true: 再接続のたびに切り詰めないため（ファイル名は毎回新規）
+`$writer = New-Object System.IO.StreamWriter('$logPath', `$true, (New-Object System.Text.UTF8Encoding(`$true)))
 `$writer.AutoFlush = `$true
 try {
-    & '$adb' logcat -v time | ForEach-Object {
-        if (`$_ -match '$pattern') { `$writer.WriteLine(`$_) }
+    while (`$true) {
+        `$writer.WriteLine('--- capture: logcat 接続 ' + (Get-Date -Format 'HH:mm:ss') + ' ---')
+        try {
+            & '$adb' logcat -v time | ForEach-Object {
+                if (`$_ -match '$pattern') { `$writer.WriteLine(`$_) }
+            }
+        }
+        catch {
+            `$writer.WriteLine('--- capture: 例外 ' + `$_.Exception.Message + ' ---')
+        }
+        `$writer.WriteLine('--- capture: logcat 切断 ' + (Get-Date -Format 'HH:mm:ss') + '。3秒後に再接続 ---')
+        Start-Sleep -Seconds 3
     }
 }
 finally {
