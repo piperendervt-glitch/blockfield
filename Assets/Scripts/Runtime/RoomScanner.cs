@@ -68,10 +68,15 @@ namespace BlockField
             public System.Func<float, float, float, SurfaceLabel> LabelResolver;
         }
 
+        /// <summary>この秒数を過ぎてもメッシュが0なら警告を1回出す。</summary>
+        const float k_NoMeshWarnSeconds = 60f;
+
         float m_Elapsed;
         float m_NextPollTime = k_PollInterval;
         float m_StableSince = -1f;
         int m_LastVertexCount = -1;
+        bool m_LoggedSessionState;
+        bool m_WarnedNoMesh;
 
         void Update()
         {
@@ -87,10 +92,34 @@ namespace BlockField
             }
             m_NextPollTime += k_PollInterval;
 
+            // XROrigin / ARSession の状態は1回だけ出す（切り分け用）
+            if (!m_LoggedSessionState)
+            {
+                m_LoggedSessionState = true;
+                LogSessionState();
+            }
+
+            int meshCount = CountMeshes();
             int vertexCount = CountVertices();
+            var (planeCount, labelBreakdown) = SummarizePlanes();
+
+            // 無条件の生存ログ。メッシュ0でも必ず出す
+            // （出ないこと自体が「コンポーネントが動いていない」ことの証拠になる）
+            Debug.Log($"[RoomScanner] 待機中: meshes={meshCount} verts={vertexCount} planes={planeCount} " +
+                $"elapsed={m_Elapsed:F0}s meshMgr(enabled={IsMeshManagerEnabled()}, running={IsMeshSubsystemRunning()}) " +
+                $"labels=[{labelBreakdown}]");
+
             if (vertexCount == 0)
             {
-                return; // まだメッシュが来ていない
+                // 平面が取れていてメッシュだけ0なら ARMeshManager 固有の問題と切り分けられる
+                if (!m_WarnedNoMesh && m_Elapsed >= k_NoMeshWarnSeconds)
+                {
+                    m_WarnedNoMesh = true;
+                    Debug.LogWarning($"[RoomScanner] {k_NoMeshWarnSeconds:F0}秒経過してもメッシュが0件。" +
+                        $"planes={planeCount} なので、平面が取れていればメッシュ供給側 (ARMeshManager / " +
+                        $"Meta Quest: Meshing / Space Setup の room mesh) の問題として切り分けられる。");
+                }
+                return;
             }
 
             if (vertexCount != m_LastVertexCount)
@@ -108,6 +137,66 @@ namespace BlockField
 
             Debug.Log($"[RoomScanner] メッシュが安定 (頂点数={vertexCount}, {k_StableSeconds}秒変化なし)。スキャンを実行する。");
             RunScan();
+        }
+
+        void LogSessionState()
+        {
+            var origin = GetComponentInParent<Unity.XR.CoreUtils.XROrigin>();
+            string originInfo = origin != null
+                ? $"mode={origin.CurrentTrackingOriginMode} pos={origin.transform.position:F2}"
+                : "なし";
+            var session = FindAnyObjectByType<ARSession>();
+            string sessionInfo = session != null
+                ? $"enabled={session.enabled} state={ARSession.state}"
+                : "なし";
+            Debug.Log($"[RoomScanner] 起動状態: XROrigin({originInfo}) ARSession({sessionInfo})");
+        }
+
+        bool IsMeshManagerEnabled() => m_MeshManager != null && m_MeshManager.enabled;
+
+        /// <summary>メッシュ供給サブシステムが running か（ARMeshManager 固有問題の切り分け用）。</summary>
+        bool IsMeshSubsystemRunning()
+        {
+            var subsystem = m_MeshManager != null ? m_MeshManager.subsystem : null;
+            return subsystem != null && subsystem.running;
+        }
+
+        int CountMeshes()
+        {
+            var meshes = m_MeshManager != null ? m_MeshManager.meshes : null;
+            return meshes?.Count ?? 0;
+        }
+
+        /// <summary>平面数と classification 内訳（メッシュ以外の経路も同時に見るため）。</summary>
+        (int count, string breakdown) SummarizePlanes()
+        {
+            if (m_PlaneManager == null)
+            {
+                return (0, "planeMgr=null");
+            }
+
+            var counts = new Dictionary<SurfaceLabel, int>();
+            int total = 0;
+            foreach (var plane in m_PlaneManager.trackables)
+            {
+                total++;
+                var label = MapLabel(plane.classifications);
+                counts.TryGetValue(label, out int n);
+                counts[label] = n + 1;
+            }
+
+            if (total == 0)
+            {
+                return (0, "なし");
+            }
+
+            var parts = new List<string>();
+            foreach (var kv in counts)
+            {
+                parts.Add($"{kv.Key}:{kv.Value}");
+            }
+            parts.Sort(System.StringComparer.Ordinal); // 決定論的な並び
+            return (total, string.Join(" ", parts));
         }
 
         int CountVertices()

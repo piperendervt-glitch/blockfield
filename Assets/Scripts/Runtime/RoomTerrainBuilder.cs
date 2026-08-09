@@ -50,7 +50,8 @@ namespace BlockField
                 scan.Vertices, scan.Triangles, cellSize,
                 scan.Bounds.min.x, scan.Bounds.min.z,
                 width, depth,
-                scan.LabelResolver);
+                scan.LabelResolver,
+                out var stats);
 
             stopwatch.Stop();
 
@@ -60,6 +61,22 @@ namespace BlockField
                 $"grid={width}x{depth} (cell={cellSize}m) " +
                 $"面ありセル={cellsWithHits}/{width * depth} 総面数={totalHits} " +
                 $"平均面数={(cellsWithHits > 0 ? (float)totalHits / cellsWithHits : 0f):F2}");
+
+            // 過検出の切り分け用（面数分布・除外理由の内訳・巻き順の計測）
+            Debug.Log($"[RoomTerrain] 内訳: {stats}");
+
+            // 巻き順の確定: 符号ありが極端に少なければメッシュの巻き順が逆
+            if (stats.UpwardSignedHits == 0 && stats.UpwardAbsHits > 0)
+            {
+                Debug.LogWarning($"[RoomTerrain] 符号ありの上向き面が0件、絶対値では{stats.UpwardAbsHits}件。" +
+                    "メッシュの巻き順が逆の可能性が高い（法線の符号反転が必要）。");
+            }
+            else if (stats.UpwardAbsHits > 0)
+            {
+                float ratio = (float)stats.UpwardSignedHits / stats.UpwardAbsHits;
+                Debug.Log($"[RoomTerrain] 巻き順の計測: 符号あり/絶対値 = {stats.UpwardSignedHits}/{stats.UpwardAbsHits} " +
+                    $"({ratio:P0})。おおむね半分なら巻き順は正しく、上向き面のみが採用されている。");
+            }
 
             // 代表セル（最多面数）の面高さ — 多層化が効いているかを実機ログで確認する
             var most = Observation.FindCellWithMostHits();

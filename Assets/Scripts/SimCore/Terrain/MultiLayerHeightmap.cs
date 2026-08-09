@@ -20,14 +20,65 @@ namespace BlockField.SimCore.Terrain
     /// </summary>
     public static class MultiLayerHeightmap
     {
-        /// <summary>この値より法線 Y が小さい面は「積もり面」にしない（傾斜面・壁・天井を除外）。</summary>
+        /// <summary>
+        /// この値より法線 Y が小さい面は「積もり面」にしない。
+        /// **符号あり**で判定する（絶対値ではない）— 下向き面（天井の裏・机の裏）に
+        /// 雪は積もらないため。初版は絶対値で判定しており、実機で天井が積もり面として
+        /// 検出される過検出を起こした（2026-08-09 実測: 平均3.67面/セル）。
+        /// </summary>
         public const float UpwardNormalThreshold = 0.5f;
 
         /// <summary>この距離（m）以内の縦方向に近接するヒットは同一面としてマージする。</summary>
         public const float MergeDistanceMeters = 0.08f;
 
+        /// <summary>
+        /// 1セルあたりの積もり面の上限。表面場（Demo 4.5）では最上面しか使わないが、
+        /// デバッグと将来のフロア構造 (roadmap Demo 6 拡張点 (b)) のために数枚残す。
+        /// </summary>
+        public const int MaxSurfacesPerCell = 3;
+
         /// <summary>三角形のビンニング解像度（セル数）。性能のため XZ の粗いグリッドに分ける。</summary>
         const int k_BinSize = 8;
+
+        /// <summary>
+        /// 構築時の統計（ログ設計の補強）。過検出の原因を実機ログだけで切り分けられるようにする。
+        /// </summary>
+        public sealed class BuildStats
+        {
+            /// <summary>法線条件（上向きでない）で除外した面数。</summary>
+            public int RejectedByNormal;
+
+            /// <summary>ラベル（WallFace / Ceiling）で除外した面数。</summary>
+            public int RejectedByLabel;
+
+            /// <summary>セルあたり上限で切り捨てた面数。</summary>
+            public int TruncatedByCap;
+
+            /// <summary>近接マージで統合した面数。</summary>
+            public int MergedHits;
+
+            /// <summary>面数分布: 1面のセル数。</summary>
+            public int CellsWith1;
+
+            /// <summary>面数分布: 2面のセル数。</summary>
+            public int CellsWith2;
+
+            /// <summary>面数分布: 3面以上のセル数。</summary>
+            public int CellsWith3Plus;
+
+            /// <summary>計測用: 符号ありで上向き判定に通ったヒット数（巻き順の確定に使う）。</summary>
+            public int UpwardSignedHits;
+
+            /// <summary>計測用: 絶対値で判定に通ったヒット数（旧実装相当）。</summary>
+            public int UpwardAbsHits;
+
+            public override string ToString()
+            {
+                return $"分布[1面={CellsWith1} 2面={CellsWith2} 3面以上={CellsWith3Plus}] " +
+                    $"除外[法線={RejectedByNormal} ラベル={RejectedByLabel} 上限={TruncatedByCap} マージ={MergedHits}] " +
+                    $"計測[符号あり={UpwardSignedHits} 絶対値={UpwardAbsHits}]";
+            }
+        }
 
         /// <summary>
         /// メッシュ（頂点配列＋三角形インデックス、ワールド座標）から観測データを構築する。
@@ -46,6 +97,21 @@ namespace BlockField.SimCore.Terrain
             int width, int depth,
             Func<float, float, float, SurfaceLabel> labelResolver = null)
         {
+            return Build(vertices, triangles, cellSize, minWorldX, minWorldZ, width, depth,
+                labelResolver, out _);
+        }
+
+        /// <summary>統計付きの構築（ログ・テスト用）。</summary>
+        public static RoomObservation Build(
+            float[] vertices,
+            int[] triangles,
+            float cellSize,
+            float minWorldX, float minWorldZ,
+            int width, int depth,
+            Func<float, float, float, SurfaceLabel> labelResolver,
+            out BuildStats stats)
+        {
+            stats = new BuildStats();
             if (vertices == null) throw new ArgumentNullException(nameof(vertices));
             if (triangles == null) throw new ArgumentNullException(nameof(triangles));
             if (cellSize <= 0f) throw new ArgumentOutOfRangeException(nameof(cellSize));
@@ -80,7 +146,7 @@ namespace BlockField.SimCore.Terrain
 
                     // 高い順に並べ、近接ヒットをマージしてから面として記録する
                     hits.Sort((a, b) => b.worldY.CompareTo(a.worldY));
-                    EmitSurfaces(observation, x, z, hits, cellSize, labelResolver, rayX, rayZ);
+                    EmitSurfaces(observation, x, z, hits, cellSize, labelResolver, rayX, rayZ, stats);
                 }
             }
 
@@ -96,30 +162,61 @@ namespace BlockField.SimCore.Terrain
             List<(float worldY, float normalY)> sortedHits,
             float cellSize,
             Func<float, float, float, SurfaceLabel> labelResolver,
-            float rayX, float rayZ)
+            float rayX, float rayZ,
+            BuildStats stats)
         {
             float lastEmittedY = float.PositiveInfinity;
-            int floorId = 0;
+            int emitted = 0;
 
             foreach (var (worldY, normalY) in sortedHits)
             {
-                // 上向き面のみ（傾斜面・壁・天井の裏は積もらない）
-                if (normalY < UpwardNormalThreshold)
+                // 計測: 巻き順の確定用に両規約のヒット数を数える
+                // （符号ありが 0 に近ければメッシュの巻き順が逆ということ）
+                if (normalY > UpwardNormalThreshold) stats.UpwardSignedHits++;
+                if (Math.Abs(normalY) > UpwardNormalThreshold) stats.UpwardAbsHits++;
+
+                // (1) 上向き面のみ（符号あり）。下向き面＝天井の裏・机の裏には積もらない
+                if (normalY <= UpwardNormalThreshold)
                 {
+                    stats.RejectedByNormal++;
                     continue;
                 }
+
                 // 近接ヒットのマージ（薄板の表裏など）
                 if (lastEmittedY - worldY < MergeDistanceMeters)
                 {
+                    stats.MergedHits++;
+                    continue;
+                }
+
+                var label = labelResolver != null ? labelResolver(rayX, worldY, rayZ) : SurfaceLabel.Unknown;
+
+                // (2) ラベルによる除外。壁面と天井には積もらせない
+                // （Floor / Table / Other / Unknown は採用。棚は Other に落ちるため残す）
+                if (label == SurfaceLabel.WallFace || label == SurfaceLabel.Ceiling)
+                {
+                    stats.RejectedByLabel++;
+                    continue;
+                }
+
+                // (3) セルあたりの上限。高い順に走査しているので上位 N 面が残る
+                if (emitted >= MaxSurfacesPerCell)
+                {
+                    stats.TruncatedByCap++;
                     continue;
                 }
 
                 lastEmittedY = worldY;
                 int cellY = FloorToInt(worldY / cellSize);
-                var label = labelResolver != null ? labelResolver(rayX, worldY, rayZ) : SurfaceLabel.Unknown;
-                observation.AddHit(x, z, new SurfaceHit(cellY, worldY, floorId, label));
-                floorId++;
+                // floorId は上から数える（0 = 最上面）
+                observation.AddHit(x, z, new SurfaceHit(cellY, worldY, emitted, label));
+                emitted++;
             }
+
+            // (4) 面数分布
+            if (emitted == 1) stats.CellsWith1++;
+            else if (emitted == 2) stats.CellsWith2++;
+            else if (emitted >= 3) stats.CellsWith3Plus++;
         }
 
         /// <summary>真下向きレイと三角形の交差を集める（Möller–Trumbore）。</summary>
@@ -149,7 +246,8 @@ namespace BlockField.SimCore.Terrain
         /// <summary>
         /// 真下向き（0,-1,0）のレイと三角形の交差判定 (Möller–Trumbore)。
         /// 原点は (rayX, +∞, rayZ) 相当なので、交差した場合の y をそのまま返す。
-        /// 戻り値の normalY は三角形法線の Y 成分（正規化済み）。
+        /// 戻り値の normalY は三角形法線の Y 成分（正規化済み、**符号あり**）。
+        /// 呼び出し側が上向き/下向きを区別できるよう絶対値は取らない。
         /// </summary>
         public static bool TryIntersectDownRay(
             float ax, float ay, float az,
@@ -206,7 +304,7 @@ namespace BlockField.SimCore.Terrain
             {
                 return false; // 退化三角形
             }
-            normalY = Math.Abs(ny / len); // 表裏は問わない（法線の向きはメッシュ依存のため）
+            normalY = ny / len; // 符号を保持する（上向き/下向きの区別に使う）
             return true;
         }
 

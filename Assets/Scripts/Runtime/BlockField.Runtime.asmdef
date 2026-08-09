@@ -4,6 +4,7 @@
         "BlockField.SimCore",
         "Unity.XR.ARFoundation",
         "Unity.XR.ARSubsystems",
+        "Unity.XR.CoreUtils",
         "Unity.InputSystem",
         "UnityEngine.UI"
     ]

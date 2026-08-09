@@ -20,7 +20,22 @@ namespace BlockField.Tests.EditMode
             return (v.ToArray(), t.ToArray());
         }
 
+        /// <summary>
+        /// 上向き（法線 +Y）の水平四角形。巻き順 (0,2,1)/(0,3,2) で ny &gt; 0 になる
+        /// （検証: e1×e2 の Y 成分が正）。積もり面として検出されるべき面に使う。
+        /// </summary>
         static void AddQuad(List<float> v, List<int> t, float x0, float z0, float x1, float z1, float y)
+        {
+            int b = v.Count / 3;
+            v.AddRange(new[] { x0, y, z0, x1, y, z0, x1, y, z1, x0, y, z1 });
+            t.AddRange(new[] { b, b + 2, b + 1, b, b + 3, b + 2 });
+        }
+
+        /// <summary>
+        /// 下向き（法線 -Y）の水平四角形。天井の裏側を模す。
+        /// 積もり面として検出されてはならない（初版は絶対値判定で誤検出していた）。
+        /// </summary>
+        static void AddDownwardQuad(List<float> v, List<int> t, float x0, float z0, float x1, float z1, float y)
         {
             int b = v.Count / 3;
             v.AddRange(new[] { x0, y, z0, x1, y, z0, x1, y, z1, x0, y, z1 });
@@ -82,6 +97,80 @@ namespace BlockField.Tests.EditMode
             // (1.7, 0.2) → セル (42, 5): 傾斜面の真下だが、積もり面は床のみ
             Assert.AreEqual(1, obs.GetHitCount(42, 5), "傾斜面は積もり面にならない");
             Assert.AreEqual(0, obs.GetHit(42, 5, 0).cellY);
+        }
+
+        [Test]
+        public void Heightmap_DownwardFacingSurface_IsRejected()
+        {
+            // 実機で天井が積もり面として検出された過検出の回帰テスト。
+            // 下向き面（天井の裏）は法線条件で除外されなければならない。
+            var v = new List<float>();
+            var t = new List<int>();
+            AddQuad(v, t, 0f, 0f, 2f, 2f, 0f);              // 床（上向き）
+            AddDownwardQuad(v, t, 0f, 0f, 2f, 2f, 2.0f);    // 天井の裏（下向き）
+
+            var obs = MultiLayerHeightmap.Build(v.ToArray(), t.ToArray(), k_Cell, 0f, 0f, 50, 50,
+                null, out var stats);
+
+            Assert.AreEqual(1, obs.GetHitCount(25, 25), "下向き面が積もり面として検出された");
+            Assert.AreEqual(0, obs.GetHit(25, 25, 0).cellY, "残るのは床のみ");
+            Assert.Greater(stats.RejectedByNormal, 0, "法線条件での除外がカウントされていない");
+        }
+
+        [Test]
+        public void Heightmap_WallAndCeilingLabels_AreRejected()
+        {
+            // ラベル除外: WallFace / Ceiling の面は積もり面にしない
+            var v = new List<float>();
+            var t = new List<int>();
+            AddQuad(v, t, 0f, 0f, 2f, 2f, 0f);      // 床（Floor 相当）
+            AddQuad(v, t, 0f, 0f, 2f, 2f, 1.0f);    // 中間の面（WallFace とラベルする）
+
+            // 高さ 1.0 付近を WallFace、それ以外を Floor として解決する
+            SurfaceLabel Resolver(float wx, float wy, float wz)
+                => wy > 0.5f ? SurfaceLabel.WallFace : SurfaceLabel.Floor;
+
+            var obs = MultiLayerHeightmap.Build(v.ToArray(), t.ToArray(), k_Cell, 0f, 0f, 50, 50,
+                Resolver, out var stats);
+
+            Assert.AreEqual(1, obs.GetHitCount(25, 25), "WallFace ラベルの面が除外されていない");
+            Assert.AreEqual(SurfaceLabel.Floor, obs.GetHit(25, 25, 0).label);
+            Assert.Greater(stats.RejectedByLabel, 0, "ラベル除外がカウントされていない");
+        }
+
+        [Test]
+        public void Heightmap_SurfaceCountPerCell_IsCapped()
+        {
+            // セルあたり上限 (MaxSurfacesPerCell=3)。高い順に上位N面が残る
+            var v = new List<float>();
+            var t = new List<int>();
+            for (int i = 0; i < 6; i++)
+            {
+                AddQuad(v, t, 0f, 0f, 2f, 2f, i * 0.5f); // 0.0 / 0.5 / ... / 2.5 の6面
+            }
+
+            var obs = MultiLayerHeightmap.Build(v.ToArray(), t.ToArray(), k_Cell, 0f, 0f, 50, 50,
+                null, out var stats);
+
+            Assert.AreEqual(MultiLayerHeightmap.MaxSurfacesPerCell, obs.GetHitCount(25, 25),
+                "セルあたりの面数が上限を超えている");
+            Assert.Greater(stats.TruncatedByCap, 0, "上限での切り捨てがカウントされていない");
+
+            // 高い順に残るので、最上面は 2.5m
+            var top = obs.GetHit(25, 25, obs.GetHitCount(25, 25) - 1);
+            Assert.AreEqual(2.5f, top.worldY, 1e-4f, "上位N面が残っていない");
+        }
+
+        [Test]
+        public void Heightmap_Stats_ReportsSurfaceCountDistribution()
+        {
+            // ログ設計の補強: 1面 / 2面 / 3面以上 の分布が取れること
+            var (verts, tris) = BuildFloorAndTable();
+            MultiLayerHeightmap.Build(verts, tris, k_Cell, 0f, 0f, 50, 50, null, out var stats);
+
+            Assert.Greater(stats.CellsWith1, 0, "1面のセルが数えられていない（床のみの領域）");
+            Assert.Greater(stats.CellsWith2, 0, "2面のセルが数えられていない（机の領域）");
+            Assert.AreEqual(0, stats.CellsWith3Plus, "床＋机だけなので3面以上は無いはず");
         }
 
         [Test]

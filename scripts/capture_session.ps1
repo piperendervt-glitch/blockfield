@@ -67,6 +67,10 @@ $pattern = "\[($tags)\]|E/|Exception|Error"
 $workerPath = Join-Path $logsDir ".capture_worker.ps1"
 $worker = @"
 `$ErrorActionPreference = 'Stop'
+# adb の出力は UTF-8。既定のコンソールエンコーディング（日本語環境では CP932）で
+# 解釈すると日本語ログが文字化けするため、明示的に UTF-8 を指定する
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+`$OutputEncoding = [System.Text.Encoding]::UTF8
 `$writer = New-Object System.IO.StreamWriter('$logPath', `$false, (New-Object System.Text.UTF8Encoding(`$true)))
 `$writer.AutoFlush = `$true
 try {
