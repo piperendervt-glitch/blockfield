@@ -23,8 +23,24 @@ namespace BlockField
         public RoomScanner scanner { get => m_Scanner; set => m_Scanner = value; }
         public TerrainField terrainField { get => m_TerrainField; set => m_TerrainField = value; }
 
-        /// <summary>構築された観測データ。未構築なら null。</summary>
+        /// <summary>
+        /// 構築された観測データ。未構築なら null。
+        ///
+        /// 【保持の契約】一度作ったら破棄しない。TerrainField がシード巡回のたびに
+        /// これを読み直して地形を作り直すほか、VRモード (Demo 4.5b) では現実の部屋を
+        /// 丸ごとボクセル化する入力として再利用する。
+        /// </summary>
         public RoomObservation Observation { get; private set; }
+
+        /// <summary>
+        /// スキャン結果（ワールド座標の生メッシュとアンカーポーズ）。未スキャンなら null。
+        ///
+        /// 【保持の契約】ARMeshManager はスキャン後に停止するが、頂点・三角形は
+        /// マネージド配列へコピー済みなので参照は生き続ける。
+        /// VRモードで観測グリッドより細かい／粗いボクセル化をやり直す際の入力になるため、
+        /// **CPU データを破棄しない**。scanner を辿らずに済むようここから公開する。
+        /// </summary>
+        public RoomScanner.ScanResult Scan { get; private set; }
 
         /// <summary>構築統計（面数分布・除外内訳）。未構築なら null。パネル表示に使う。</summary>
         public MultiLayerHeightmap.BuildStats Stats { get; private set; }
@@ -49,6 +65,7 @@ namespace BlockField
 
         void Build(RoomScanner.ScanResult scan)
         {
+            Scan = scan;
             var stopwatch = Stopwatch.StartNew();
 
             float cellSize = RoomScanner.CellSize;

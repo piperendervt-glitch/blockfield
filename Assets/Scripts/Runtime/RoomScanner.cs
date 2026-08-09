@@ -53,7 +53,13 @@ namespace BlockField
         /// <summary>スパシャルアンカー原点 (Demo 0 T2)。観測時のポーズを記録するために参照する。</summary>
         public DioramaOrigin origin { get => m_Origin; set => m_Origin = value; }
 
-        /// <summary>スキャン結果（ワールド座標のメッシュと平面ラベル）。未完了なら null。</summary>
+        /// <summary>
+        /// スキャン結果（ワールド座標のメッシュと平面ラベル）。未完了なら null。
+        ///
+        /// 【保持の契約】スキャン後に ARMeshManager は停止するが、この結果の
+        /// 頂点・三角形はマネージド配列へコピー済みで、**破棄しない**。
+        /// VRモード (Demo 4.5b) で部屋をボクセル化し直す入力として再利用する。
+        /// </summary>
         public ScanResult Result { get; private set; }
 
         /// <summary>スキャンが完了したか。</summary>

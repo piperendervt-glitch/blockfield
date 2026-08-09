@@ -47,7 +47,8 @@ public static class SceneBootstrap
         camGo.transform.SetParent(offsetGo.transform, false);
 
         var cam = camGo.AddComponent<Camera>();
-        // パススルー合成のため Solid Color 黒・アルファ0
+        // Clear Flags と背景色は PassthroughController が実行時に設定する（下で接続）。
+        // ここでの値はエディタで開いたときの見た目のための初期値にすぎない
         cam.clearFlags = CameraClearFlags.SolidColor;
         cam.backgroundColor = new Color(0f, 0f, 0f, 0f);
         cam.nearClipPlane = 0.05f;
@@ -67,7 +68,7 @@ public static class SceneBootstrap
         tpd.trackingStateInput = new InputActionProperty(trackingStateAction);
 
         camGo.AddComponent<ARCameraManager>();
-        camGo.AddComponent<ARCameraBackground>();
+        var cameraBackground = camGo.AddComponent<ARCameraBackground>();
 
         // Occlusion: Environment Depth = Fastest。
         // com.oculus.permission.USE_SCENE (XR_FB_scene) のランタイム権限取得前に
@@ -88,6 +89,13 @@ public static class SceneBootstrap
         var gateGo = new GameObject("Scene Permission Gate");
         var gate = gateGo.AddComponent<BlockField.ScenePermissionGate>();
         gate.occlusionManager = occlusion;
+
+        // パススルーの有効/無効を1箇所に集約 (Demo 4.5b VRモードの下ごしらえ)。
+        // 現時点では起動時にパススルー有効を適用するだけで挙動は変わらない
+        var passthrough = camGo.AddComponent<BlockField.PassthroughController>();
+        passthrough.targetCamera = cam;
+        passthrough.cameraBackground = cameraBackground;
+        passthrough.occlusionManager = occlusion;
 
         origin.Camera = cam;
         origin.CameraFloorOffsetObject = offsetGo;
