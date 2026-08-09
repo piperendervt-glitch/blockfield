@@ -85,6 +85,40 @@ namespace BlockField.SimCore.Ecology
         /// </summary>
         public int preyDiffusePasses;
 
+        // --- Demo 8 第2段: 死の場 ---
+
+        /// <summary>
+        /// 死の場: 餓死した個体が残す量。死骸がそのまま残るので大きい。
+        /// </summary>
+        public float deathDepositStarved;
+
+        /// <summary>
+        /// 死の場: 捕食された個体が残す量。
+        /// **餓死より小さい**理由: 食べられた個体は肉が持ち去られるので、
+        /// その場に残る養分は餓死体より少ない。死因で量を変えることで
+        /// 「どんな死が起きたか」まで場が記憶する。
+        /// </summary>
+        public float deathDepositPredated;
+
+        /// <summary>死の場: 拡散率。死骸は動かないので最小限にする。</summary>
+        public float deathDiffuse;
+
+        /// <summary>死の場: 拡散パス数。広げたいときは拡散率でなくこちらを増やす。</summary>
+        public int deathDiffusePasses;
+
+        /// <summary>
+        /// 死の場: 毎ティックの減衰率（τ特大＝長期記憶）。
+        /// 植生0.02・恐怖0.03・獲物0.05 より桁違いに遅い。土に還った養分は長く残る。
+        /// </summary>
+        public float deathDecay;
+
+        /// <summary>
+        /// 死の場が植物スポーンを後押しする強さ (Demo 8 第2段 I2)。
+        /// スポーン重み = suitability × max(植生, 床値) × (1 + k × 死の場)。
+        /// これが「死骸が養分になる」経路そのもの。
+        /// </summary>
+        public float deathNutrientBoost;
+
         /// <summary>草食獣の移動評価: 植生場の重み（餌に寄る強さ）。</summary>
         public float herbivoreVegetationWeight;
 
@@ -166,6 +200,15 @@ namespace BlockField.SimCore.Ecology
             preyDiffuse = 0.4f,
             preyDiffusePasses = 3,
             preyDecay = 0.05f,
+            deathDepositStarved = 1f,
+            deathDepositPredated = 0.3f,
+            deathDiffuse = 0.02f,
+            deathDiffusePasses = 1,
+            deathDecay = 0.003f,
+            // k=1 では効果が測定できなかった（死の場は全体の1%未満にしか立たず、
+            // 平均値が0.005程度なので重みがほぼ1倍のまま）。
+            // 掃引の結果 20。墓場セルの植物密度が対照(k=0)の0.30倍から0.98倍へ回復する
+            deathNutrientBoost = 20f,
             herbivoreVegetationWeight = 1f,
             herbivoreFearWeight = 1.5f,
             animalSpawnCandidates = 2,

@@ -17,6 +17,9 @@ namespace BlockField.SimCore.Ecology
         // 空腹・繁殖の定数 (Demo 3)。可変にする必要が出たものは SimParams へ昇格済み
         const float k_HungerActionThreshold = 0.5f;
         const float k_BreedCost = 0.3f;
+
+        /// <summary>この値以上の恐怖場を「避ける対象」とみなす (Demo 8 第2段 M3 の測定用)。</summary>
+        const float k_FearRelevantThreshold = 0.05f;
         const int k_BreedCooldownTicks = 20;
         // k_WolfSightRadius は Demo 8 H3 で削除した。
         // 「視界半径」という個体側の概念そのものが、獲物場の拡散距離に置き換わったため
@@ -73,7 +76,14 @@ namespace BlockField.SimCore.Ecology
                 int z = rng.Range(0, world.Depth);
                 float suitability = world.Suitability.GetAtColumn(x, z);
                 float vegetation = world.Vegetation.GetAtColumn(x, z);
-                float weight = suitability * Math.Max(vegetation, p.vegetationFloor);
+
+                // 死の場が養分として植物スポーンを後押しする (Demo 8 第2段 I2)。
+                // 案A（スポーン重みに直接掛ける）を採った。案B（植生場の deposit を
+                // 増やす）は場を経由するぶん間接的で効果が出るまで遅く、
+                // 「墓場に草が茂る」という因果が読み取りにくいため。
+                // ここは死が生を生む経路そのものなので、直接的な方が意図が伝わる
+                float nutrient = 1f + p.deathNutrientBoost * world.Death.GetAtColumn(x, z);
+                float weight = suitability * Math.Max(vegetation, p.vegetationFloor) * nutrient;
 
                 if (rng.NextFloat01() < weight)
                 {
@@ -167,6 +177,7 @@ namespace BlockField.SimCore.Ecology
                 {
                     dead.Add(e.id);
                     world.StarvationCount++;
+                    DepositDeath(world, p, e.cell, starved: true);
                     world.UpdateEntity(i, e);
                     continue;
                 }
@@ -190,17 +201,20 @@ namespace BlockField.SimCore.Ecology
                     {
                         // 場読み: 「餌に寄りたい」と「危険を避けたい」を1つのスコアで合成する
                         e.facing = FindForagingFacing(world, p, e.cell, e.facing);
-                        TryMove(world, rng, p, ref e, allowRandomTurnOnBlock: true);
+                        MoveHerbivore(world, rng, p, ref e);
                     }
                 }
                 else
                 {
-                    // 満腹: 従来のランダム徘徊
+                    // 満腹: ランダム徘徊。ただし**危険は空腹でなくても避ける** (Demo 8 第2段 I3)。
+                    // 第1段では恐怖場を摂食モードのときしか読まず、読む時間が半分しか
+                    // なかったことが迂回行動を定量できなかった最大の原因だった
                     if (rng.NextFloat01() < p.turnChance)
                     {
                         e.facing = rng.Range(0, 4);
                     }
-                    TryMove(world, rng, p, ref e, allowRandomTurnOnBlock: true);
+                    e.facing = FindWanderFacing(world, p, e.cell, e.facing);
+                    MoveHerbivore(world, rng, p, ref e);
                 }
 
                 // 獲物場への書き込み (Demo 8 H3)。移動後の位置に匂いを残す。
@@ -241,6 +255,7 @@ namespace BlockField.SimCore.Ecology
                 {
                     dead.Add(e.id);
                     world.StarvationCount++;
+                    DepositDeath(world, p, e.cell, starved: true);
                     world.UpdateEntity(i, e);
                     continue;
                 }
@@ -251,8 +266,10 @@ namespace BlockField.SimCore.Ecology
                     int preyIndex = FindAdjacentHerbivore(world, e.cell, dead);
                     if (preyIndex >= 0)
                     {
-                        dead.Add(world.Entities[preyIndex].id);
+                        var prey = world.Entities[preyIndex];
+                        dead.Add(prey.id);
                         world.PredationCount++;
+                        DepositDeath(world, p, prey.cell, starved: false);
                         e.hunger = 0f;
                     }
                     else
@@ -501,6 +518,103 @@ namespace BlockField.SimCore.Ecology
             // 恐怖場を入れた意味が無くなる（実測で M2 が不成立になった原因）。
             // 負の中の最大＝最も危険が薄い方向へ逃げる、が正しい振る舞い
             return found ? best : currentFacing;
+        }
+
+        /// <summary>
+        /// 死んだ場所に痕跡を残す (Demo 8 第2段 I1)。
+        /// 餓死は死骸がそのまま残るので大きく、被食は肉が持ち去られるので小さい。
+        /// 死因で量を変えることで「どんな死が起きたか」まで場が記憶する。
+        /// </summary>
+        static void DepositDeath(World world, SimParams p, Int3 cell, bool starved)
+        {
+            if (!world.InBounds(cell.x, cell.z))
+            {
+                return;
+            }
+            world.Death.Deposit(cell, starved ? p.deathDepositStarved : p.deathDepositPredated);
+        }
+
+        /// <summary>
+        /// 満腹時の徘徊方向 (Demo 8 第2段 I3)。
+        /// 今の向きを基本にしつつ、恐怖場の濃い方向だけは避ける。
+        ///
+        /// スコア = (今の向きなら wanderBias) − w_fear × 恐怖場。
+        /// 恐怖が薄いうちは今の向きが勝つ（＝従来どおりのランダム徘徊）が、
+        /// 恐怖が wanderBias / w_fear を超えると向きを変える。
+        /// 「空腹でなくても危険は避ける」を、徘徊の性質を壊さずに入れるための形。
+        /// </summary>
+        public static int FindWanderFacing(World world, SimParams p, Int3 cell, int currentFacing)
+        {
+            const float wanderBias = 0.15f;
+
+            int best = currentFacing;
+            float bestScore = float.NegativeInfinity;
+            for (int f = 0; f < FacingDirections.Length; f++)
+            {
+                var dir = FacingDirections[f];
+                int nx = cell.x + dir.x;
+                int nz = cell.z + dir.z;
+                if (!world.InBounds(nx, nz))
+                {
+                    continue;
+                }
+                float score = (f == currentFacing ? wanderBias : 0f)
+                    - p.herbivoreFearWeight * world.Fear.GetAtColumn(nx, nz);
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    best = f;
+                }
+            }
+            return best;
+        }
+
+        /// <summary>
+        /// 草食獣の移動。実際に動いたときだけ、恐怖場の高い方へ動いたか低い方へ動いたかを数える
+        /// (Demo 8 第2段 M3 の指標)。
+        ///
+        /// 「恐怖場が高いセルにいた割合」で測ると、動かなかったティックも、
+        /// 危険な場所で捕食されて消えた個体の分も混ざって回避の効果が埋もれる。
+        /// **移動が起きた瞬間だけ**を見れば、その1歩が危険を避ける方向だったかを直接測れる。
+        /// </summary>
+        static void MoveHerbivore(World world, Mulberry32 rng, SimParams p, ref Entity e)
+        {
+            var from = e.cell;
+            float fearFrom = world.Fear.GetAtColumn(from.x, from.z);
+
+            // 近傍に意味のある恐怖があるときだけ数える。
+            // 恐怖場は全体の1%未満にしか立たないので、全ての移動を数えると
+            // 「避けようのない移動」に薄められて効果が見えなくなる（実測で差1%以下）
+            bool nearFear = fearFrom >= k_FearRelevantThreshold;
+            if (!nearFear)
+            {
+                foreach (var d in FacingDirections)
+                {
+                    int nx = from.x + d.x, nz = from.z + d.z;
+                    if (world.InBounds(nx, nz) && world.Fear.GetAtColumn(nx, nz) >= k_FearRelevantThreshold)
+                    {
+                        nearFear = true;
+                        break;
+                    }
+                }
+            }
+
+            TryMove(world, rng, p, ref e, allowRandomTurnOnBlock: true);
+
+            if (e.cell == from || !nearFear)
+            {
+                return;
+            }
+
+            float fearTo = world.Fear.GetAtColumn(e.cell.x, e.cell.z);
+            if (fearTo < fearFrom)
+            {
+                world.HerbivoreMovesAwayFromFear++;
+            }
+            else if (fearTo > fearFrom)
+            {
+                world.HerbivoreMovesTowardFear++;
+            }
         }
 
         /// <summary>

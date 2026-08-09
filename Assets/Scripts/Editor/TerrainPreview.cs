@@ -33,7 +33,7 @@ public class TerrainPreview : EditorWindow
     /// 表示する場 (Demo 8)。実機に行く前に PC で「場と生き物の位置が合うか」を
     /// 目視できるようにするための切替。
     /// </summary>
-    enum FieldLayer { Vegetation = 0, Fear = 1, Prey = 2 }
+    enum FieldLayer { Vegetation = 0, Fear = 1, Prey = 2, Death = 3 }
 
     FieldLayer m_FieldLayer = FieldLayer.Vegetation;
 
@@ -352,12 +352,14 @@ public class TerrainPreview : EditorWindow
         {
             FieldLayer.Fear => m_World.Fear,
             FieldLayer.Prey => m_World.Prey,
+            FieldLayer.Death => m_World.Death,
             _ => m_World.Vegetation,
         };
         Color32 baseColor = m_FieldLayer switch
         {
             FieldLayer.Fear => new Color32(240, 60, 50, 0),
             FieldLayer.Prey => new Color32(70, 130, 245, 0),
+            FieldLayer.Death => new Color32(175, 70, 235, 0), // 紫。赤(恐怖)と取り違えないこと
             _ => new Color32(30, 220, 60, 0),
         };
 

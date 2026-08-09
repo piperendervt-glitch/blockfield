@@ -29,6 +29,9 @@ namespace BlockField.SimCore.Ecology
         /// <summary>獲物場 (Demo 8 第1段)。草食獣が書き、狼が追う。</summary>
         public PreyField Prey { get; }
 
+        /// <summary>死の場 (Demo 8 第2段)。死んだ場所に残り、養分として植生を高める。</summary>
+        public DeathField Death { get; }
+
         /// <summary>
         /// 場の一元管理 (Demo 4.5 作業1)。ContentHash 計算と更新ループが場の種類を
         /// 知らずに回るための辞書。決定論のため名前昇順で走査する（m_FieldOrder）。
@@ -77,6 +80,18 @@ namespace BlockField.SimCore.Ecology
         /// 「何歩歩いて1匹捕らえたか」を出すための分母。
         /// </summary>
         public int WolfStepCount { get; internal set; }
+
+        /// <summary>
+        /// 草食獣が実際に移動したうち、恐怖場の**低い**セルへ動いた回数 (Demo 8 第2段 M3)。
+        /// </summary>
+        public int HerbivoreMovesAwayFromFear { get; internal set; }
+
+        /// <summary>
+        /// 草食獣が実際に移動したうち、恐怖場の**高い**セルへ動いた回数 (Demo 8 第2段 M3)。
+        /// この2つの比が迂回行動の直接的な指標になる。移動が起きた瞬間だけを見るので、
+        /// 動かなかったティックや、危険地帯で捕食されて消えた個体の影響を受けない。
+        /// </summary>
+        public int HerbivoreMovesTowardFear { get; internal set; }
 
         readonly struct PendingAction
         {
@@ -143,12 +158,14 @@ namespace BlockField.SimCore.Ecology
             Vegetation = new VegetationField(p.width, p.depth);
             Fear = new FearField(p.width, p.depth);
             Prey = new PreyField(p.width, p.depth);
+            Death = new DeathField(p.width, p.depth);
             SuitableCellCount = CountSuitableCells(Suitability, p.width, p.depth);
 
             RegisterField(Suitability);
             RegisterField(Vegetation);
             RegisterField(Fear);
             RegisterField(Prey);
+            RegisterField(Death);
         }
 
         /// <summary>
@@ -177,12 +194,14 @@ namespace BlockField.SimCore.Ecology
             Vegetation = new VegetationField(p.width, p.depth);
             Fear = new FearField(p.width, p.depth);
             Prey = new PreyField(p.width, p.depth);
+            Death = new DeathField(p.width, p.depth);
             SuitableCellCount = CountSuitableCells(Suitability, p.width, p.depth);
 
             RegisterField(Suitability);
             RegisterField(Vegetation);
             RegisterField(Fear);
             RegisterField(Prey);
+            RegisterField(Death);
         }
 
         /// <summary>適性 &gt; 0 のセル数（生成時の基準スケール）。</summary>

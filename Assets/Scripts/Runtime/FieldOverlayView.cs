@@ -14,8 +14,8 @@ namespace BlockField
     /// 【切替の割り当て: 左手Y】
     /// 右手B＝診断モード、左手X＝MR/VR切替 で埋まっているため、空いている
     /// 左手Y (secondaryButton) を場の切替に使う。押すたびに
-    /// 植生（緑）→ 恐怖（赤）→ 獲物（青）→ 非表示 を巡回する。
-    /// 3つ同時に出すと色が混ざって読めないので1つずつ見る。
+    /// マーカー → 植生（緑）→ 恐怖（赤）→ 獲物（青）→ 死（紫）→ 非表示 を巡回する。
+    /// 同時に出すと色が混ざって読めないので1つずつ見る。
     ///
     /// 【表示と真実の分離】場を**読むだけ**で World には触らない。
     /// </summary>
@@ -48,11 +48,14 @@ namespace BlockField
             Fear = 2,
             Prey = 3,
 
+            /// <summary>死の場 (Demo 8 第2段)。紫。</summary>
+            Death = 4,
+
             /// <summary>何も出さない（地形と生き物だけを見る）。</summary>
-            None = 4,
+            None = 5,
         }
 
-        const int k_LayerCount = 5;
+        const int k_LayerCount = 6;
 
         [SerializeField] RoomTerrainBuilder m_Builder;
         [SerializeField] TerrainField m_TerrainField;
@@ -168,6 +171,7 @@ namespace BlockField
                 Layer.Vegetation => (ScalarField)world.Vegetation,
                 Layer.Fear => world.Fear,
                 Layer.Prey => world.Prey,
+                Layer.Death => world.Death,
                 _ => null,
             };
             if (field == null)
@@ -179,6 +183,9 @@ namespace BlockField
             {
                 Layer.Vegetation => new Color32(60, 230, 80, 255),
                 Layer.Fear => new Color32(240, 60, 50, 255),
+                // 死の場は紫。赤（恐怖）とも青（獲物）とも取り違えないよう、
+                // 明度を上げず彩度で分ける
+                Layer.Death => new Color32(175, 70, 235, 255),
                 _ => new Color32(70, 130, 245, 255),
             };
 

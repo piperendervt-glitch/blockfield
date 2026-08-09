@@ -92,6 +92,96 @@ namespace BlockField.SimCore.Ecology
         public static float PredationPerKiloWolfStep(World world) =>
             world.WolfStepCount > 0 ? 1000f * world.PredationCount / world.WolfStepCount : 0f;
 
+        /// <summary>
+        /// 迂回行動の指標 (Demo 8 第2段 M3)。
+        /// 草食獣が実際に動いた1歩のうち、恐怖場の低い方へ向かった割合。
+        /// 0.5 が「避けても寄りもしない」で、それより大きければ避けている。
+        ///
+        /// 移動が起きた瞬間だけを数えるので、動かなかったティックの希釈も、
+        /// 危険地帯で捕食されて消えた個体による生存者バイアスも入らない。
+        /// 第1段の「恐怖場が高いセルにいた割合」はこの2つに埋もれて符号が
+        /// 一定しなかったため、指標そのものを作り直したもの。
+        /// </summary>
+        public static float FearAvoidanceRatio(World world)
+        {
+            int total = world.HerbivoreMovesAwayFromFear + world.HerbivoreMovesTowardFear;
+            return total > 0 ? (float)world.HerbivoreMovesAwayFromFear / total : 0f;
+        }
+
+        /// <summary>
+        /// 「墓場」とみなす死の場の下限。
+        ///
+        /// 【0.02 の根拠】この閾値は「墓場が何セルになるか」を決める。標本が小さいと
+        /// 密度の推定が雑音に埋もれるので、実測で決めた（3000t・5シード）:
+        ///   閾値 0.05 → 35セル、比 1.01（ただし5シード中3つが 0.00。標本不足）
+        ///   閾値 0.02 → 103セル、比 0.86（ゼロのシード無し）  ← 採用
+        ///   閾値 0.01 → 205セル、比 0.64（薄いセルが混ざり効果が薄まる）
+        /// 0.02 が「安定して測れる最小の標本数」と「効果の濃さ」の折り合う点。
+        ///
+        /// なお拡散のパス数を増やして墓場を広げる手（Demo 8 第1段で確立した原則）は
+        /// ここでは効かない。死の総量は「死者数 × τ」で頭打ちなので、広げるほど
+        /// 1セルあたりの値が閾値を割り、かえって墓場が狭くなる（実測 passes 1→32 で
+        /// 35セル→3セル）。だから広げるのではなく閾値を場の実寸に合わせた。
+        /// </summary>
+        public const float GraveyardThreshold = 0.02f;
+
+        /// <summary>
+        /// 養分効果の指標 (Demo 8 第2段 M2)。
+        /// **墓場セル**（死の場が <see cref="GraveyardThreshold"/> 以上）と
+        /// **それ以外のセル**で植物密度を比べ、(墓場, それ以外) を返す。
+        ///
+        /// 【この比の読み方 — 1.0 が基準ではない】
+        /// 事前登録では「墓場の方が高ければ養分効果あり」としていたが、これは成立しない。
+        /// 餓死は**餌の乏しい場所で起きる**ので、墓場はもともと植物の少ない土地に偏る。
+        /// 実測で養分係数を0にした対照でも比は 0.33 しかない。
+        /// したがって判定は**対照 (deathNutrientBoost=0) との比較**で行う:
+        ///   k=0  → 0.33（交絡だけの値。ここが原点）
+        ///   k=20 → 0.86（採用値。約2.6倍まで回復）
+        /// k を上げれば 1.0 は超えられるが（k=160 で 1.03）、狼の最小個体数が0になり
+        /// Demo 5b の安定条件が壊れるため採らなかった。
+        ///
+        /// 事前登録の当初案「上位25%セルと下位25%セル」も棄却した。死の場は全体の
+        /// 数%にしか立たないため上位25%の閾値がほぼ0になり、墓場でないセルまで
+        /// 「上位」に入って比較が成立しなかった（実測で比0.05〜1.08と符号が定まらず）。
+        ///
+        /// まだ墓場が1つも無ければ (0, 0) を返す。
+        /// </summary>
+        public static (float graveyard, float elsewhere) PlantDensityByDeathField(World world)
+        {
+            int graveCells = 0, otherCells = 0;
+            for (int z = 0; z < world.Depth; z++)
+            {
+                for (int x = 0; x < world.Width; x++)
+                {
+                    if (world.Suitability.GetAtColumn(x, z) <= 0f)
+                    {
+                        continue; // そもそも植物が湧けないセルは分母から外す
+                    }
+                    if (world.Death.GetAtColumn(x, z) >= GraveyardThreshold) graveCells++;
+                    else otherCells++;
+                }
+            }
+            if (graveCells == 0)
+            {
+                return (0f, 0f);
+            }
+
+            int gravePlants = 0, otherPlants = 0;
+            foreach (var e in world.Entities)
+            {
+                if (!e.IsPlant)
+                {
+                    continue;
+                }
+                if (world.Death.GetAtColumn(e.cell.x, e.cell.z) >= GraveyardThreshold) gravePlants++;
+                else otherPlants++;
+            }
+
+            return (
+                (float)gravePlants / graveCells,
+                otherCells > 0 ? (float)otherPlants / otherCells : 0f);
+        }
+
         /// <summary>植物密度 = 植物数 / 適性セル数。</summary>
         public static float PlantDensity(World world) =>
             world.SuitableCellCount > 0 ? (float)world.PlantCount / world.SuitableCellCount : 0f;

@@ -114,11 +114,24 @@ namespace BlockField
                     var (fMean, fMax) = EcologyStats.FieldStats(world.Fear);
                     var (pMean, pMax) = EcologyStats.FieldStats(world.Prey);
                     var (vMean, vMax) = EcologyStats.FieldStats(world.Vegetation);
+                    var (dMean, dMax) = EcologyStats.FieldStats(world.Death);
                     Debug.Log($"[DebugPanel] 場: 植生 平均={vMean:F4} 最大={vMax:F3} / " +
-                        $"恐怖 平均={fMean:F4} 最大={fMax:F3} / 獲物 平均={pMean:F4} 最大={pMax:F3}");
+                        $"恐怖 平均={fMean:F4} 最大={fMax:F3} / 獲物 平均={pMean:F4} 最大={pMax:F3} / " +
+                        $"死 平均={dMean:F4} 最大={dMax:F3}");
                     Debug.Log($"[DebugPanel] 追跡: 狼の歩数={world.WolfStepCount} " +
                         $"捕食/1000歩={EcologyStats.PredationPerKiloWolfStep(world):F1} " +
                         $"草食獣の恐怖曝露={EcologyStats.HerbivoreFearExposure(world):F2}（1.0未満で薄い所にいる）");
+
+                    // Demo 8 第2段: 死の場の効果（M2）と迂回行動（M3）
+                    var (graveDensity, elseDensity) = EcologyStats.PlantDensityByDeathField(world);
+                    Debug.Log($"[DebugPanel] 死の場: 墓場セル(死≧{EcologyStats.GraveyardThreshold:F2})の植物密度=" +
+                        $"{graveDensity * 100:F2}% それ以外={elseDensity * 100:F2}% " +
+                        $"比={(elseDensity > 0f ? graveDensity / elseDensity : 0f):F2}" +
+                        $"（養分なしの対照は0.33。餓死は餌の乏しい所で起きるので1.0ではなく対照と比べる）");
+                    Debug.Log($"[DebugPanel] 迂回: 恐怖の低い方へ動いた割合=" +
+                        $"{EcologyStats.FearAvoidanceRatio(world) * 100:F1}% " +
+                        $"（w_fear=0の対照は55%）標本={world.HerbivoreMovesAwayFromFear}/" +
+                        $"{world.HerbivoreMovesAwayFromFear + world.HerbivoreMovesTowardFear}");
                 }
 
                 // 座標系ズレ（メタボタン長押しの再センタリング）の切り分け用。
@@ -205,6 +218,11 @@ namespace BlockField
             var (preyMean, preyMax) = EcologyStats.FieldStats(world.Prey);
             var (vegMean, vegMax) = EcologyStats.FieldStats(world.Vegetation);
 
+            // Demo 8 第2段: 死の場（紫）と、そこでの植物密度・迂回行動
+            var (deathMean, deathMax) = EcologyStats.FieldStats(world.Death);
+            var (graveDensity, elseDensity) = EcologyStats.PlantDensityByDeathField(world);
+            float graveRatio = elseDensity > 0f ? graveDensity / elseDensity : 0f;
+
             return
                 $"Dens P/A: {plantDensity * 100:F2}%/{animalDensity * 100:F2}% " +
                 $"(ref {EcologyStats.DioramaReference.PlantDensity * 100:F2}/" +
@@ -214,7 +232,11 @@ namespace BlockField
                 $"Starve/1k: {starvePerK:F2} " +
                 $"(ref {EcologyStats.DioramaReference.StarvationPerAnimalPerKiloTick:F2})\n" +
                 $"Fld avg/max V:{vegMean:F3}/{vegMax:F2} " +
-                $"F:{fearMean:F3}/{fearMax:F2} P:{preyMean:F3}/{preyMax:F2}\n" +
+                $"F:{fearMean:F3}/{fearMax:F2} P:{preyMean:F3}/{preyMax:F2} " +
+                $"D:{deathMean:F3}/{deathMax:F2}\n" +
+                $"Grave P: {graveDensity * 100:F2}% vs {elseDensity * 100:F2}% " +
+                $"= {graveRatio:F2} (ctrl 0.33)   " +
+                $"Avoid: {EcologyStats.FearAvoidanceRatio(world) * 100:F0}% (ctrl 55)\n" +
                 $"Pred/1k step: {EcologyStats.PredationPerKiloWolfStep(world):F1}   " +
                 $"FearExpo: {EcologyStats.HerbivoreFearExposure(world):F2}   " +
                 $"Ovl[Y]: {(m_FieldOverlay != null ? m_FieldOverlay.Current.ToString() : "-")}\n";
