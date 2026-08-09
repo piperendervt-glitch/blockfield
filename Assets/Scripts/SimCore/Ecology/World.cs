@@ -197,6 +197,15 @@ namespace BlockField.SimCore.Ecology
 
         public bool InBounds(int x, int z) => x >= 0 && x < Width && z >= 0 && z < Depth;
 
+        /// <summary>
+        /// 生き物が湧ける表層ブロックか (D3)。
+        /// Grass に加えて Snow を含める — 部屋地形 (Demo 4.5 G5) では山岳バイオームの
+        /// 表層が Snow になるため、Grass だけにすると棚の上など高所に一切湧かなくなる。
+        /// 「積もった地表」であることが条件であり、Stone（厚い柱の頂上・壁）は対象外。
+        /// 箱庭 (Demo 1-4) には Snow が存在しないので従来の挙動は変わらない。
+        /// </summary>
+        static bool IsFertileSurface(BlockId id) => id == BlockId.Grass || id == BlockId.Snow;
+
         /// <summary>柱の表層高さ（= 表層の上の空セルの y）。</summary>
         public int GetSurfaceHeight(int x, int z) => m_SurfaceHeights[x + Width * z];
 
@@ -406,7 +415,7 @@ namespace BlockField.SimCore.Ecology
             }
 
             var surfaceCell = new Int3(x, h - 1, z);
-            if (Grid.Get(surfaceCell) != BlockId.Grass || Grid.GetOrigin(surfaceCell) == BlockOrigin.Player)
+            if (!IsFertileSurface(Grid.Get(surfaceCell)) || Grid.GetOrigin(surfaceCell) == BlockOrigin.Player)
             {
                 Suitability.SetAtColumn(x, z, 0f);
                 return;
@@ -652,8 +661,7 @@ namespace BlockField.SimCore.Ecology
                     }
 
                     // 表面場: 適性は「その柱の最上面」に付随する。h-1 が表層セル
-                    var surface = grid.Get(new Int3(x, h - 1, z));
-                    if (surface != BlockId.Grass)
+                    if (!IsFertileSurface(grid.Get(new Int3(x, h - 1, z))))
                     {
                         // 壁 (Stone/Reality)・岩 (Stone) の上には湧かない
                         field.SetAtColumn(x, z, 0f);

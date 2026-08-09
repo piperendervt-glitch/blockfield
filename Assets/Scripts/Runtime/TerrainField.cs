@@ -11,12 +11,20 @@ using Debug = UnityEngine.Debug;
 namespace BlockField
 {
     /// <summary>
-    /// 実機の地形表示 (Demo 1 B2)。原点確定/復元後に TerrainGenerator で地形を生成し、
-    /// チャンクごとに ChunkMesher でメッシュ化して原点配下に表示する。
-    /// Aボタン: シード巡回 / 左手Xボタン: 地形表示トグル (M3モード互換)。
+    /// 地形とシムの実機接続 (Demo 1 B2 / Demo 4.5 G7)。
     ///
-    /// 注: 表示トグルは Demo 4 まで右手Bボタンだったが、Demo 4.5 G3 で B を
-    /// 部屋地形の表示モード切替 (RoomTerrainView) に譲り、左手Xへ移した。
+    /// 【2つのモード】
+    /// - 箱庭モード (Demo 1-4): TerrainGenerator で 50x50 の地形を生成し、原点中心に置く
+    /// - 部屋モード (Demo 4.5): <see cref="roomBuilder"/> がある場合。観測から部屋地形を
+    ///   合成し、World をその上に作る（<see cref="World.CreateFromRoom"/>）。
+    ///   箱庭グリッドは**生成しない**
+    ///
+    /// どちらのモードでもチャンクは <see cref="TerrainRoot"/> の配下に置き、
+    /// EntityRenderer も同じ親と同じ <see cref="CellToLocal"/> を使う。
+    /// 部屋モードのルートは観測時のアンカーポーズ基準に固定される（着脱で位置がずれない）。
+    ///
+    /// Aボタン: シード巡回（部屋モードでは積もり方のシード）。
+    /// 表示モードの切替（右手B）は RoomTerrainView の責務。
     /// </summary>
     public sealed class TerrainField : MonoBehaviour
     {
@@ -37,14 +45,13 @@ namespace BlockField
         [SerializeField] Material m_TerrainMaterial;
 
         /// <summary>
-        /// 起動時から箱庭地形を隠しておくか (Demo 4.5)。
-        /// 部屋地形モードでは箱庭が部屋地形と同じ空間を占めるため、
-        /// 起動直後に一瞬見えることも避ける。左手Xで表示できる。
+        /// 部屋モードの入力 (Demo 4.5 G7)。設定されている場合、箱庭グリッドは生成せず
+        /// 観測の到着を待って部屋地形の上に World を作る。
         /// </summary>
-        [SerializeField] bool m_StartHidden = true;
+        [SerializeField] RoomTerrainBuilder m_RoomBuilder;
 
         public DioramaOrigin origin { get => m_Origin; set => m_Origin = value; }
-        public bool startHidden { get => m_StartHidden; set => m_StartHidden = value; }
+        public RoomTerrainBuilder roomBuilder { get => m_RoomBuilder; set => m_RoomBuilder = value; }
         /// <summary>頂点色対応 BlockField/OcclusionUnlit (_VERTEX_COLOR 有効) の共有マテリアル。</summary>
         public Material terrainMaterial { get => m_TerrainMaterial; set => m_TerrainMaterial = value; }
 
@@ -57,25 +64,38 @@ namespace BlockField
         /// <summary>直近の生成時間 (地形生成＋全チャンクメッシュ化, ms)。</summary>
         public long GenerationMs { get; private set; }
 
-        /// <summary>地形の表示状態（M3モード時は false）。</summary>
+        /// <summary>地形の表示状態（診断モード時は false）。</summary>
         public bool FieldVisible => m_FieldVisible;
 
-        /// <summary>現在のワールド（シムの主体。D5 でエンティティ表示を載せる）。</summary>
+        /// <summary>現在のワールド（シムの主体）。</summary>
         public World CurrentWorld => m_World;
 
+        /// <summary>部屋モードか (Demo 4.5 G7)。</summary>
+        public bool IsRoomMode => m_RoomBuilder != null;
+
+        /// <summary>部屋地形の合成結果（部屋モードのみ。未合成なら null）。</summary>
+        public SnowfallResult RoomComposed { get; private set; }
+
+        /// <summary>チャンクとエンティティの共通の親。未生成なら null。</summary>
+        public Transform TerrainRoot => m_TerrainRoot != null ? m_TerrainRoot.transform : null;
+
+        /// <summary>セル→ローカルの中心オフセット (m)。箱庭は原点中心、部屋は 0。</summary>
+        public float OffsetX => m_OffsetX;
+        public float OffsetZ => m_OffsetZ;
+
         InputAction m_AButtonAction;
-        InputAction m_ToggleAction;
         World m_World;
+        GameObject m_TerrainRoot;
         float m_TickAccumulator;
         float m_CsvSaveTimer;
         uint[] m_Seeds;
         int m_SeedIndex;
         bool m_Built;
         bool m_SwitchRequested;
-        bool m_ToggleRequested;
         bool m_FieldVisible = true;
         float m_LastSwitchTime = float.NegativeInfinity;
-        float m_LastToggleTime = float.NegativeInfinity;
+        float m_OffsetX;
+        float m_OffsetZ;
         readonly List<GameObject> m_Chunks = new();
         readonly List<Mesh> m_Meshes = new();
         readonly Dictionary<Int3, GameObject> m_ChunkMap = new();
@@ -83,16 +103,9 @@ namespace BlockField
 
         void Awake()
         {
-            m_FieldVisible = !m_StartHidden;
-
             m_AButtonAction = new InputAction("RightHandAButton", InputActionType.Button,
                 "<XRController>{RightHand}/primaryButton");
             m_AButtonAction.performed += OnAButtonPerformed;
-
-            // 箱庭地形の表示トグルは左手X（右手Bは Demo 4.5 で部屋地形のモード切替に使う）
-            m_ToggleAction = new InputAction("LeftHandXButton", InputActionType.Button,
-                "<XRController>{LeftHand}/primaryButton");
-            m_ToggleAction.performed += OnTogglePerformed;
 
             // シード巡回: 既定 12345 → ランダム3種 → 既定 に戻る
             // (ランダムは起動時に Mulberry32 で決める。CLAUDE.md: System.Random 禁止)
@@ -103,28 +116,14 @@ namespace BlockField
         void OnDestroy()
         {
             m_AButtonAction.performed -= OnAButtonPerformed;
-            m_ToggleAction.performed -= OnTogglePerformed;
         }
 
-        void OnEnable()
-        {
-            m_AButtonAction.Enable();
-            m_ToggleAction.Enable();
-        }
-
-        void OnDisable()
-        {
-            m_AButtonAction.Disable();
-            m_ToggleAction.Disable();
-        }
+        void OnEnable() => m_AButtonAction.Enable();
+        void OnDisable() => m_AButtonAction.Disable();
 
         void OnAButtonPerformed(InputAction.CallbackContext _) => m_SwitchRequested = true;
-        void OnTogglePerformed(InputAction.CallbackContext _) => m_ToggleRequested = true;
 
-        /// <summary>
-        /// 箱庭地形の表示を設定する。Demo 4.5 では部屋地形が観察対象になるため、
-        /// RoomTerrainView が合成完了時にこれを呼んで箱庭を隠す。
-        /// </summary>
+        /// <summary>地形（とエンティティ）の表示を設定する。診断モード切替から呼ばれる。</summary>
         public void SetFieldVisible(bool visible)
         {
             m_FieldVisible = visible;
@@ -132,6 +131,15 @@ namespace BlockField
             {
                 chunk.SetActive(m_FieldVisible);
             }
+        }
+
+        /// <summary>セル座標 → <see cref="TerrainRoot"/> ローカル位置。EntityRenderer と共用する。</summary>
+        public Vector3 CellToLocal(Int3 cell)
+        {
+            return new Vector3(
+                cell.x * k_BlockSize - m_OffsetX,
+                (cell.y + 0.5f) * k_BlockSize,
+                cell.z * k_BlockSize - m_OffsetZ);
         }
 
         void Update()
@@ -143,8 +151,13 @@ namespace BlockField
 
             if (!m_Built)
             {
+                // 部屋モードは観測が届くまで何も作らない（箱庭グリッドは生成しない）
+                if (IsRoomMode && m_RoomBuilder.Observation == null)
+                {
+                    return;
+                }
                 m_Built = true;
-                BuildTerrain();
+                Build();
                 return;
             }
 
@@ -154,7 +167,7 @@ namespace BlockField
             {
                 m_LastSwitchTime = Time.unscaledTime;
                 m_SeedIndex = (m_SeedIndex + 1) % m_Seeds.Length;
-                BuildTerrain();
+                Build();
             }
 
             // シムティック駆動 (1Hz, フレームレート非依存)。RNG はワールド保持のものを使う
@@ -178,19 +191,9 @@ namespace BlockField
                 // 設置・破壊による変更チャンクの限定再メッシュ (Demo 4 F3)
                 RemeshDirtyChunks();
             }
-
-            bool toggleRequested = m_ToggleRequested;
-            m_ToggleRequested = false;
-            if (toggleRequested && Time.unscaledTime - m_LastToggleTime >= k_SwitchCooldown)
-            {
-                m_LastToggleTime = Time.unscaledTime;
-                SetFieldVisible(!m_FieldVisible);
-                Debug.Log($"[TerrainField] 箱庭地形の表示: {(m_FieldVisible ? "ON" : "OFF (M3モード)")}");
-                DebugPanel.Notify($"terrain {(m_FieldVisible ? "ON" : "OFF")}");
-            }
         }
 
-        void BuildTerrain()
+        void Build()
         {
             ClearChunks();
 
@@ -202,25 +205,28 @@ namespace BlockField
             p.depth = k_Depth;
             p.maxHeight = k_MaxHeight;
 
-            m_World = World.Create(p);
-            m_TickAccumulator = 0f;
-            var grid = m_World.Grid;
+            if (IsRoomMode)
+            {
+                BuildRoomWorld(p);
+            }
+            else
+            {
+                m_World = World.Create(p);
+                RoomComposed = null;
+                CreateDioramaRoot();
+            }
 
-            // 地形を原点中心に置くオフセット（セル単位）
-            var parent = m_Origin.OriginTransform;
-            float offsetX = k_Width * 0.5f * k_BlockSize;
-            float offsetZ = k_Depth * 0.5f * k_BlockSize;
+            m_TickAccumulator = 0f;
 
             int blockCount = 0;
-            foreach (var pair in grid.Chunks)
+            foreach (var pair in m_World.Grid.Chunks)
             {
-                var mesh = ChunkMesher.BuildChunkMesh(grid, pair.Key, pair.Value, k_BlockSize);
+                var mesh = ChunkMesher.BuildChunkMesh(m_World.Grid, pair.Key, pair.Value, k_BlockSize);
                 if (mesh != null)
                 {
-                    CreateChunkObject(pair.Key, mesh, parent);
+                    CreateChunkObject(pair.Key, mesh);
                 }
 
-                // 非Airブロック数
                 for (int i = 0; i < Chunk.VolumeLength; i++)
                 {
                     if (pair.Value.GetRaw(i) != 0)
@@ -234,23 +240,147 @@ namespace BlockField
             BlockCount = blockCount;
             GenerationMs = stopwatch.ElapsedMilliseconds;
 
-            Debug.Log($"[TerrainField] 地形生成完了: seed={p.seed}, {k_Width}x{k_Depth}x{k_MaxHeight}, " +
-                $"ブロック {blockCount} 個, チャンク {m_Chunks.Count} 個, {GenerationMs} ms");
+            if (IsRoomMode)
+            {
+                Debug.Log($"[TerrainField] 部屋地形の生成完了 (G7): seed={p.seed}, " +
+                    $"{m_World.Width}x{m_World.Depth}, ブロック {blockCount} 個, " +
+                    $"チャンク {m_Chunks.Count} 個, {GenerationMs} ms");
+                Debug.Log($"[TerrainField] 合成内訳: 積もり面={RoomComposed.SurfaceCount} " +
+                    $"層数[{RoomComposed.HistogramText()}] バイオーム[{RoomComposed.BiomeText()}] " +
+                    $"壁ブロック={RoomComposed.WallCellCount} cellY範囲={RoomComposed.MinCellY}..{RoomComposed.MaxCellY} " +
+                    $"ハッシュ={m_World.Grid.ComputeContentHash():X16}");
+                LogSuitabilitySummary();
+            }
+            else
+            {
+                Debug.Log($"[TerrainField] 地形生成完了: seed={p.seed}, {k_Width}x{k_Depth}x{k_MaxHeight}, " +
+                    $"ブロック {blockCount} 個, チャンク {m_Chunks.Count} 個, {GenerationMs} ms");
+            }
             DebugPanel.Notify($"terrain seed={p.seed} ({GenerationMs}ms)");
         }
 
-        void CreateChunkObject(Int3 chunkCoord, Mesh mesh, Transform parent)
+        /// <summary>部屋の観測から World を作り、表示ルートをアンカー相対に固定する (G7)。</summary>
+        void BuildRoomWorld(TerrainParams p)
         {
-            float offsetX = k_Width * 0.5f * k_BlockSize;
-            float offsetZ = k_Depth * 0.5f * k_BlockSize;
+            var observation = m_RoomBuilder.Observation;
+            var snow = SnowfallParams.Default;
+            snow.seed = p.seed;
 
+            m_World = World.CreateFromRoom(observation, p, snow, out var composed);
+            RoomComposed = composed;
+
+            // リプレイ入力として観測を記録する (G1)。World がこの観測から作られるので、
+            // 記録できるのは生成後のここだけ
+            m_World.RecordObservation(observation);
+            Debug.Log($"[TerrainField] 観測を EventLog へ記録 " +
+                $"(payloadIndex={m_World.EventLog.Observations.Count - 1}, " +
+                $"hash={observation.ComputeContentHash():X16})");
+
+            // 観測セル (x,z) のレイはセル中心 min + (x+0.5)*cell を通る。
+            // CellToLocal はセル (x,y,z) の中心を (x*cell, (y+0.5)*cell, z*cell) に置くので、
+            // ルートを半セルずらすと観測時のワールド座標に一致する（オフセットは 0）。
+            m_OffsetX = 0f;
+            m_OffsetZ = 0f;
+
+            float cell = observation.CellSize;
+            var scanWorldPose = new Pose(
+                new Vector3(
+                    observation.OriginWorldX + cell * 0.5f,
+                    0f,
+                    observation.OriginWorldZ + cell * 0.5f),
+                Quaternion.identity);
+
+            m_TerrainRoot = new GameObject("Room Terrain");
+            AttachToAnchor(m_TerrainRoot.transform, scanWorldPose);
+        }
+
+        void CreateDioramaRoot()
+        {
+            m_OffsetX = k_Width * 0.5f * k_BlockSize;
+            m_OffsetZ = k_Depth * 0.5f * k_BlockSize;
+
+            m_TerrainRoot = new GameObject("Diorama Terrain");
+            m_TerrainRoot.transform.SetParent(m_Origin.OriginTransform, false);
+        }
+
+        /// <summary>
+        /// 観測時のワールドポーズを保ったまま、アンカー原点の配下へ取り付ける (Demo 4.5)。
+        ///
+        /// ワールド座標は HMD の着脱による再ローカライズでずれるが、スパシャルアンカーは
+        /// 現実の部屋に貼り付いたままである（Demo 0 T2）。観測**と同じ瞬間**のポーズで
+        /// 換算するのは、スキャンから合成までの間の再ローカライズを取りこぼさないため。
+        ///
+        /// 変換するのは表示配置だけで、観測データ (cellY) は整数のまま。
+        /// M4 のリプレイ入力とコンテンツハッシュには影響しない。
+        /// </summary>
+        void AttachToAnchor(Transform target, Pose scanWorldPose)
+        {
+            var originTransform = m_Origin.OriginTransform;
+            var scan = m_RoomBuilder != null && m_RoomBuilder.scanner != null
+                ? m_RoomBuilder.scanner.Result
+                : null;
+
+            Pose anchorPose;
+            if (scan != null && scan.HasOriginPose)
+            {
+                anchorPose = scan.OriginPoseAtScan;
+            }
+            else
+            {
+                anchorPose = new Pose(originTransform.position, originTransform.rotation);
+                Debug.LogWarning("[TerrainField] 観測時のアンカーポーズが無い（原点確定前にスキャンした）。" +
+                    "現在のポーズで換算するため、その間に再ローカライズがあるとずれる。");
+            }
+
+            var inverseRotation = Quaternion.Inverse(anchorPose.rotation);
+            target.SetParent(originTransform, false);
+            target.localPosition = inverseRotation * (scanWorldPose.position - anchorPose.position);
+            target.localRotation = inverseRotation * scanWorldPose.rotation;
+        }
+
+        /// <summary>
+        /// 適性場の分布を高さ帯ごとに出す (G7 の確認用)。
+        /// 表面場の意味論どおり、床・机上・棚上のそれぞれに湧ける場所があるかを実機ログで見る。
+        /// </summary>
+        void LogSuitabilitySummary()
+        {
+            int baseCellY = RoomComposed.BaseCellY;
+            int lowCells = 0, midCells = 0, highCells = 0;   // 適性 > 0 のセル数
+            int lowTotal = 0, midTotal = 0, highTotal = 0;
+
+            for (int z = 0; z < m_World.Depth; z++)
+            {
+                for (int x = 0; x < m_World.Width; x++)
+                {
+                    int h = m_World.GetSurfaceHeight(x, z);
+                    if (h == World.NoSurfaceHeight)
+                    {
+                        continue;
+                    }
+                    int rel = h - baseCellY;
+                    bool ok = m_World.Suitability.GetAtColumn(x, z) > 0f;
+
+                    // 床 (< 0.4m) / 机の高さ (0.4〜1.2m) / 棚の高さ (>= 1.2m)
+                    if (rel < 10) { lowTotal++; if (ok) lowCells++; }
+                    else if (rel < 30) { midTotal++; if (ok) midCells++; }
+                    else { highTotal++; if (ok) highCells++; }
+                }
+            }
+
+            Debug.Log($"[TerrainField] 適性場の分布 (G7): " +
+                $"床帯 {lowCells}/{lowTotal} / 机帯 {midCells}/{midTotal} / 棚帯 {highCells}/{highTotal} " +
+                $"(適性>0 のセル数 / 面のあるセル数)。基準セルY={baseCellY}");
+        }
+
+        void CreateChunkObject(Int3 chunkCoord, Mesh mesh)
+        {
             m_Meshes.Add(mesh);
             var go = new GameObject($"Chunk {chunkCoord}");
-            go.transform.SetParent(parent, false);
+            go.transform.SetParent(m_TerrainRoot.transform, false);
             go.transform.localPosition = new Vector3(
-                chunkCoord.x * Chunk.Size * k_BlockSize - offsetX,
+                chunkCoord.x * Chunk.Size * k_BlockSize - m_OffsetX,
                 chunkCoord.y * Chunk.Size * k_BlockSize,
-                chunkCoord.z * Chunk.Size * k_BlockSize - offsetZ);
+                chunkCoord.z * Chunk.Size * k_BlockSize - m_OffsetZ);
             go.AddComponent<MeshFilter>().sharedMesh = mesh;
             go.AddComponent<MeshRenderer>().sharedMaterial = m_TerrainMaterial;
             go.SetActive(m_FieldVisible);
@@ -261,13 +391,12 @@ namespace BlockField
         /// <summary>変更のあったチャンクのみ再メッシュする (Demo 4 F3 / M5計測)。</summary>
         void RemeshDirtyChunks()
         {
-            if (m_Origin.OriginTransform == null || !m_World.ConsumeDirtyChunks(m_DirtyBuffer))
+            if (m_TerrainRoot == null || !m_World.ConsumeDirtyChunks(m_DirtyBuffer))
             {
                 return;
             }
 
             var stopwatch = Stopwatch.StartNew();
-            var parent = m_Origin.OriginTransform;
             int remeshed = 0;
 
             foreach (var chunkCoord in m_DirtyBuffer)
@@ -298,7 +427,7 @@ namespace BlockField
                 }
                 else if (newMesh != null)
                 {
-                    CreateChunkObject(chunkCoord, newMesh, parent);
+                    CreateChunkObject(chunkCoord, newMesh);
                     remeshed++;
                 }
             }
@@ -352,6 +481,12 @@ namespace BlockField
                 Destroy(mesh);
             }
             m_Meshes.Clear();
+
+            if (m_TerrainRoot != null)
+            {
+                Destroy(m_TerrainRoot);
+                m_TerrainRoot = null;
+            }
         }
     }
 }

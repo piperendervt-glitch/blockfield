@@ -49,6 +49,50 @@ namespace BlockField.SimCore.Terrain
         const float k_StepRatio = 0.4f;
 
         /// <summary>
+        /// 観測グリッドの最外周を無条件に通行不可にする (Demo 4.5 G4)。
+        ///
+        /// 【なぜ必要か】WallFace 平面だけでは壁が閉じない。実測の部屋では平面が4枚しかなく、
+        /// 窓・ドア・家具の陰・平面化されない壁で切れ目が生じた（2026-08-09 第3回セッション）。
+        /// M2 の目的は「動物が部屋の外に漏れないこと」なので、観測バウンズの外周そのものを
+        /// 柵にするのが確実である。平面由来の壁セルは部屋内部の仕切りに効くので併用する。
+        ///
+        /// 天井側は不要（動物は飛ばない）。立てたセル数を返す。
+        /// </summary>
+        public static int SealPerimeter(RoomObservation observation)
+        {
+            if (observation == null)
+            {
+                throw new ArgumentNullException(nameof(observation));
+            }
+
+            int marked = 0;
+            int w = observation.Width;
+            int d = observation.Depth;
+
+            for (int x = 0; x < w; x++)
+            {
+                marked += MarkOnce(observation, x, 0);
+                marked += MarkOnce(observation, x, d - 1);
+            }
+            for (int z = 0; z < d; z++)
+            {
+                marked += MarkOnce(observation, 0, z);
+                marked += MarkOnce(observation, w - 1, z);
+            }
+            return marked;
+        }
+
+        static int MarkOnce(RoomObservation observation, int x, int z)
+        {
+            if (observation.IsBlocked(x, z))
+            {
+                return 0;
+            }
+            observation.SetBlocked(x, z);
+            return 1;
+        }
+
+        /// <summary>
         /// 壁線分群を観測グリッドへラスタライズし、通行不可セルを立てる。
         /// 立てたセル数を返す。
         /// </summary>

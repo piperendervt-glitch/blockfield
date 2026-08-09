@@ -48,8 +48,6 @@ namespace BlockField
         World m_TrackedWorld;
         GameObject m_Root;
         Mesh m_CubeMesh;
-        float m_OffsetX;
-        float m_OffsetZ;
 
         void Awake()
         {
@@ -60,19 +58,20 @@ namespace BlockField
         void Update()
         {
             var world = m_TerrainField != null ? m_TerrainField.CurrentWorld : null;
-            var origin = m_TerrainField != null && m_TerrainField.origin != null
-                ? m_TerrainField.origin.OriginTransform
-                : null;
+            // 地形と同じ親に置く。部屋モード (Demo 4.5 G7) ではアンカー相対の部屋ルート、
+            // 箱庭モードでは原点配下の箱庭ルートになる
+            var root = m_TerrainField != null ? m_TerrainField.TerrainRoot : null;
 
-            if (world == null || origin == null)
+            if (world == null || root == null)
             {
                 return;
             }
 
             // シード切替などでワールドが差し替わったら表示を全リセット
-            if (world != m_TrackedWorld)
+            // （ルートも作り直されるので親が変わったときも作り直す）
+            if (world != m_TrackedWorld || m_Root == null || m_Root.transform.parent != root)
             {
-                ResetVisuals(world, origin);
+                ResetVisuals(world, root);
             }
 
             // 箱庭地形の表示トグル（左手X）に追従。地形と一緒にエンティティも非表示にする
@@ -85,7 +84,7 @@ namespace BlockField
             SyncEntities(world);
         }
 
-        void ResetVisuals(World world, Transform origin)
+        void ResetVisuals(World world, Transform root)
         {
             if (m_Root != null)
             {
@@ -94,11 +93,7 @@ namespace BlockField
             m_Visuals.Clear();
 
             m_Root = new GameObject("Entities");
-            m_Root.transform.SetParent(origin, false);
-
-            // TerrainField のチャンク配置と同じ「原点中心」オフセット
-            m_OffsetX = world.Width * 0.5f * k_BlockSize;
-            m_OffsetZ = world.Depth * 0.5f * k_BlockSize;
+            m_Root.transform.SetParent(root, false);
 
             m_TrackedWorld = world;
         }
@@ -232,13 +227,11 @@ namespace BlockField
             go.AddComponent<MeshRenderer>().sharedMaterial = material;
         }
 
-        Vector3 CellToLocal(Int3 cell)
-        {
-            return new Vector3(
-                cell.x * k_BlockSize - m_OffsetX,
-                (cell.y + 0.5f) * k_BlockSize,
-                cell.z * k_BlockSize - m_OffsetZ);
-        }
+        /// <summary>
+        /// セル座標 → ローカル位置。地形チャンクと同じ写像を使う必要があるため
+        /// TerrainField に委譲する（箱庭は原点中心オフセットあり、部屋はオフセットなし）。
+        /// </summary>
+        Vector3 CellToLocal(Int3 cell) => m_TerrainField.CellToLocal(cell);
 
         /// <summary>facing (0..3 = +X,+Z,-X,-Z) → yaw 回転。</summary>
         static Quaternion FacingToRotation(int facing)

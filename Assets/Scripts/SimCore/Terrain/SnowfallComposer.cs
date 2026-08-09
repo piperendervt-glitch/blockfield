@@ -174,18 +174,22 @@ namespace BlockField.SimCore.Terrain
                 for (int x = 0; x < observation.Width; x++)
                 {
                     int count = observation.GetHitCount(x, z);
-                    if (count == 0)
+                    bool blocked = observation.IsBlocked(x, z);
+                    if (count == 0 && !blocked)
                     {
                         continue;
                     }
 
-                    // 表面場: 最上面のみ（リストは cellY 昇順なので末尾が最上面）
-                    var top = observation.GetHit(x, z, count - 1);
+                    // 表面場: 最上面のみ（リストは cellY 昇順なので末尾が最上面）。
+                    // 面が無い壁セル（外周など、レイが何にも当たらなかった列）は床の高さを基準にする
+                    var top = count > 0
+                        ? observation.GetHit(x, z, count - 1)
+                        : new SurfaceHit(baseCellY, 0f, 0, SurfaceLabel.Unknown);
 
                     // G4: 壁セルは積もり面ではなく通行不可の壁として積む。
                     // 徘徊AIは「高低差2以上は移動しない」ので、周囲より確実に高くすれば
                     // 追加のルール無しに壁を避ける（Simulation.TryMove）。
-                    if (observation.IsBlocked(x, z))
+                    if (blocked)
                     {
                         for (int i = 1; i <= p.wallLayers; i++)
                         {
@@ -212,7 +216,15 @@ namespace BlockField.SimCore.Terrain
                         BlockId id;
                         if (i == layers)
                         {
-                            id = layers >= k_StoneTopLayers ? BlockId.Stone : BlockId.Grass;
+                            // G5: 山岳の表層は雪。それ以外は Demo 1 と同じ「厚い柱の表層は Stone」
+                            if (biome == SurfaceBiome.Mountains)
+                            {
+                                id = BlockId.Snow;
+                            }
+                            else
+                            {
+                                id = layers >= k_StoneTopLayers ? BlockId.Stone : BlockId.Grass;
+                            }
                         }
                         else
                         {

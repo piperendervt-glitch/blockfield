@@ -64,7 +64,13 @@ namespace BlockField
 
             // 壁の Boundary 化 (G4)。観測データ側に通行不可セルとして立てる
             // （セル単位の bool なので ContentHash に入れても M4 の保証を壊さない）
-            int wallCells = WallRasterizer.Rasterize(Observation, scan.Walls);
+            //
+            // 平面由来の壁は部屋内部の仕切りに効くが、それだけでは閉じない
+            // （実測: WallFace 平面が4枚しかなく、窓・ドア・家具の陰で切れ目ができた）。
+            // M2 の目的は「動物が部屋の外に漏れない」ことなので、外周そのものも柵にする。
+            int planeWallCells = WallRasterizer.Rasterize(Observation, scan.Walls);
+            int perimeterCells = WallRasterizer.SealPerimeter(Observation);
+            int wallCells = planeWallCells + perimeterCells;
 
             stopwatch.Stop();
 
@@ -82,7 +88,8 @@ namespace BlockField
             Debug.Log($"[RoomTerrain] 内訳: {stats}");
 
             Debug.Log($"[RoomTerrain] 壁の Boundary 化 (G4): 壁平面={scan.Walls?.Count ?? 0} " +
-                $"通行不可セル={wallCells} (厚み={WallRasterizer.ThicknessMeters}m)");
+                $"平面由来={planeWallCells} 外周={perimeterCells} 合計={wallCells} " +
+                $"(厚み={WallRasterizer.ThicknessMeters}m)");
 
             // 巻き順の確定: 符号ありが極端に少なければメッシュの巻き順が逆
             if (stats.UpwardSignedHits == 0 && stats.UpwardAbsHits > 0)
@@ -114,18 +121,10 @@ namespace BlockField
                 Debug.LogWarning("[RoomTerrain] 積もり面が1つも見つからなかった（上向き面の検出に失敗している可能性）");
             }
 
-            // 観測をイベントログへ記録（リプレイ入力。地形合成そのものは G3）
-            var world = m_TerrainField != null ? m_TerrainField.CurrentWorld : null;
-            if (world != null)
-            {
-                world.RecordObservation(Observation);
-                Debug.Log($"[RoomTerrain] 観測を EventLog へ記録 (payloadIndex={world.EventLog.Observations.Count - 1}, " +
-                    $"hash={Observation.ComputeContentHash():X16})");
-            }
-            else
-            {
-                Debug.Log("[RoomTerrain] World 未生成のため EventLog への記録はスキップ（原点未確定）");
-            }
+            // 観測の EventLog への記録は TerrainField が行う。
+            // 部屋モード (G7) では World そのものがこの観測から作られるため、
+            // World の生成前にここで記録することはできない。
+            Debug.Log($"[RoomTerrain] 観測ハッシュ={Observation.ComputeContentHash():X16}（記録は TerrainField）");
         }
     }
 }

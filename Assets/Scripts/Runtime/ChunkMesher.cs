@@ -83,6 +83,7 @@ namespace BlockField
                 case BlockId.Dirt: return new Color32(115, 82, 51, 255);
                 case BlockId.Stone: return new Color32(140, 140, 148, 255);
                 case BlockId.Sand: return new Color32(217, 199, 140, 255);
+                case BlockId.Snow: return new Color32(242, 246, 252, 255);
                 default: return new Color32(255, 0, 255, 255);
             }
         }

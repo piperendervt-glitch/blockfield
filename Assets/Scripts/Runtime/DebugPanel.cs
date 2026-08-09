@@ -117,14 +117,15 @@ namespace BlockField
                 ? $"{stats.CellsWith1}/{stats.CellsWith2}/{stats.CellsWith3Plus}"
                 : "-/-/-";
 
-            int snowBlocks = m_RoomView != null ? m_RoomView.SnowBlockCount : 0;
-            long composeMs = m_RoomView != null ? m_RoomView.ComposeMs : 0;
+            var composed = m_TerrainField != null ? m_TerrainField.RoomComposed : null;
+            int snowBlocks = composed?.BlockCount ?? 0;
+            long composeMs = m_TerrainField != null ? m_TerrainField.GenerationMs : 0;
 
-            var biome = m_RoomView != null ? m_RoomView.BiomeHistogram : null;
+            var biome = composed?.BiomeHistogram;
             string biomeText = biome != null && biome.Length >= 3
                 ? $"{biome[0]}/{biome[1]}/{biome[2]}"
                 : "-/-/-";
-            int walls = m_RoomView != null ? m_RoomView.WallCellCount : 0;
+            int walls = composed != null ? composed.WallCellCount : 0;
 
             return
                 $"Room[B]: {mode}   Surf: {surfaces} (avg {avg:F2})\n" +

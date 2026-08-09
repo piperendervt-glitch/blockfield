@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using BlockField.SimCore.Ecology;
 using BlockField.SimCore.Terrain;
+using BlockField.SimCore.Voxel;
 using NUnit.Framework;
 
 namespace BlockField.Tests.EditMode
@@ -296,12 +297,12 @@ namespace BlockField.Tests.EditMode
             Assert.Greater(CountColumn(result.Grid, 2, 2, 1, 4), 0, "床のみのセルに積もっていない");
         }
 
-        static int CountColumn(BlockField.SimCore.Voxel.VoxelGrid grid, int x, int z, int y0, int y1)
+        static int CountColumn(VoxelGrid grid, int x, int z, int y0, int y1)
         {
             int n = 0;
             for (int y = y0; y <= y1; y++)
             {
-                if (grid.Get(new BlockField.SimCore.Voxel.Int3(x, y, z)) != BlockField.SimCore.Voxel.BlockId.Air)
+                if (grid.Get(new Int3(x, y, z)) != BlockId.Air)
                 {
                     n++;
                 }
@@ -438,6 +439,86 @@ namespace BlockField.Tests.EditMode
 
             long diff = System.Math.Abs((long)world.GetSurfaceHeight(4, 3) - world.GetSurfaceHeight(5, 3));
             Assert.Greater(diff, 1, "面が無い柱へ移動できてしまう");
+        }
+
+        [Test]
+        public void Perimeter_AllEdgeCellsAreBlocked()
+        {
+            var obs = BuildRoomWithWall(20, 0);
+            int marked = WallRasterizer.SealPerimeter(obs);
+
+            // 外周セル数 = 2w + 2d - 4（角の重複を除く）
+            Assert.AreEqual(2 * 20 + 2 * 20 - 4, marked, "外周セル数が合わない");
+
+            for (int i = 0; i < 20; i++)
+            {
+                Assert.IsTrue(obs.IsBlocked(i, 0), $"({i},0) が Boundary でない");
+                Assert.IsTrue(obs.IsBlocked(i, 19), $"({i},19) が Boundary でない");
+                Assert.IsTrue(obs.IsBlocked(0, i), $"(0,{i}) が Boundary でない");
+                Assert.IsTrue(obs.IsBlocked(19, i), $"(19,{i}) が Boundary でない");
+            }
+            Assert.IsFalse(obs.IsBlocked(10, 10), "内部セルまで Boundary になっている");
+        }
+
+        [Test]
+        public void Perimeter_EntitiesNeverLeaveTheRoom()
+        {
+            // 平面由来の壁は無し。外周シールだけで閉じ込められることを見る
+            // （実機では WallFace 平面が4枚しかなく、窓・ドアで切れ目ができた）
+            var obs = BuildRoomWithWall(30, 0);
+            WallRasterizer.SealPerimeter(obs);
+
+            var world = World.CreateFromRoom(obs, TerrainParams.Default, SnowfallParams.Default, out _);
+
+            for (int t = 0; t < 200; t++)
+            {
+                Simulation.Tick(world, world.Rng);
+
+                foreach (var e in world.Entities)
+                {
+                    bool onEdge = e.cell.x == 0 || e.cell.z == 0 || e.cell.x == 29 || e.cell.z == 29;
+                    Assert.IsFalse(onEdge,
+                        $"tick {t}: {e.kind} #{e.id} が外周セル ({e.cell.x},{e.cell.z}) に出た");
+                }
+            }
+
+            Assert.Greater(world.Entities.Count, 0, "エンティティが1体も湧いていない — テストが空回りしている");
+        }
+
+        [Test]
+        public void Snow_MountainTopIsSnowAndStillFertile()
+        {
+            // 床(cellY=0) ＋ 棚(cellY=45 = 床から1.8m, Other) → 山岳バイオーム
+            var obs = new RoomObservation(20, 20, k_Cell, 0f, 0f);
+            for (int z = 0; z < 20; z++)
+            {
+                for (int x = 0; x < 20; x++)
+                {
+                    bool shelf = x >= 8 && x < 14 && z >= 8 && z < 14;
+                    if (shelf)
+                    {
+                        obs.AddHit(x, z, new SurfaceHit(45, 1.82f, 0, SurfaceLabel.Other));
+                    }
+                    obs.AddHit(x, z, new SurfaceHit(0, 0.01f, shelf ? 1 : 0, SurfaceLabel.Floor));
+                }
+            }
+
+            var world = World.CreateFromRoom(obs, TerrainParams.Default, SnowfallParams.Default, out var composed);
+
+            Assert.Greater(composed.BiomeHistogram[(int)SurfaceBiome.Mountains], 0, "山岳バイオームが出ていない");
+
+            int shelfH = world.GetSurfaceHeight(10, 10);
+            Assert.AreEqual(BlockId.Snow, world.Grid.Get(new Int3(10, shelfH - 1, 10)),
+                "山岳の表層が Snow でない");
+
+            // 床は従来どおり Grass
+            int floorH = world.GetSurfaceHeight(2, 2);
+            Assert.AreEqual(BlockId.Grass, world.Grid.Get(new Int3(2, floorH - 1, 2)),
+                "平原の表層が Grass でない");
+
+            // 雪面も「積もった地表」なので湧ける（Grass だけにすると高所に一切湧かない）
+            Assert.Greater(world.Suitability.GetAtColumn(10, 10), 0f,
+                "雪の上の適性が0 — 棚の上に何も湧かなくなる");
         }
 
         [Test]

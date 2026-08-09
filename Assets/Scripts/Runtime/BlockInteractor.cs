@@ -158,7 +158,7 @@ namespace BlockField
         {
             var world = m_TerrainField != null ? m_TerrainField.CurrentWorld : null;
             var origin = m_TerrainField != null && m_TerrainField.origin != null
-                ? m_TerrainField.origin.OriginTransform
+                ? m_TerrainField.TerrainRoot
                 : null;
 
             if (world == null || origin == null || !m_TerrainField.FieldVisible)
@@ -198,11 +198,12 @@ namespace BlockField
             m_RayStartWorld = worldPos;
             m_RayEndWorld = worldPos + worldDir * k_MaxRayDistanceMeters;
 
-            // ワールド → 原点ローカル → セル空間
+            // ワールド → 地形ルートのローカル → セル空間
+            // （オフセットは TerrainField が持つ。箱庭は原点中心、部屋はオフセット0）
             var lp = origin.InverseTransformPoint(worldPos);
             var ld = origin.InverseTransformDirection(worldDir);
-            float offsetX = world.Width * 0.5f * k_BlockSize;
-            float offsetZ = world.Depth * 0.5f * k_BlockSize;
+            float offsetX = m_TerrainField.OffsetX;
+            float offsetZ = m_TerrainField.OffsetZ;
             float cxf = (lp.x + offsetX) / k_BlockSize + 0.5f;
             float cyf = lp.y / k_BlockSize;
             float czf = (lp.z + offsetZ) / k_BlockSize + 0.5f;
@@ -373,15 +374,7 @@ namespace BlockField
             return go;
         }
 
-        Vector3 CellToLocal(Int3 cell)
-        {
-            var world = m_TerrainField.CurrentWorld;
-            float offsetX = world.Width * 0.5f * k_BlockSize;
-            float offsetZ = world.Depth * 0.5f * k_BlockSize;
-            return new Vector3(
-                cell.x * k_BlockSize - offsetX,
-                (cell.y + 0.5f) * k_BlockSize,
-                cell.z * k_BlockSize - offsetZ);
-        }
+        /// <summary>地形チャンクと同じ写像を使う必要があるため TerrainField に委譲する。</summary>
+        Vector3 CellToLocal(Int3 cell) => m_TerrainField.CellToLocal(cell);
     }
 }
