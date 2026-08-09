@@ -127,7 +127,7 @@ namespace BlockField
                     Debug.Log($"[DebugPanel] 死の場: 墓場セル(死≧{EcologyStats.GraveyardThreshold:F2})の植物密度=" +
                         $"{graveDensity * 100:F2}% それ以外={elseDensity * 100:F2}% " +
                         $"比={(elseDensity > 0f ? graveDensity / elseDensity : 0f):F2}" +
-                        $"（養分なしの対照は0.33。餓死は餌の乏しい所で起きるので1.0ではなく対照と比べる）");
+                        $"（養分なしの対照は0.35。餓死は餌の乏しい所で起きるので1.0ではなく対照と比べる）");
                     Debug.Log($"[DebugPanel] 迂回: 恐怖の低い方へ動いた割合=" +
                         $"{EcologyStats.FearAvoidanceRatio(world) * 100:F1}% " +
                         $"（w_fear=0の対照は55%）標本={world.HerbivoreMovesAwayFromFear}/" +
@@ -235,7 +235,7 @@ namespace BlockField
                 $"F:{fearMean:F3}/{fearMax:F2} P:{preyMean:F3}/{preyMax:F2} " +
                 $"D:{deathMean:F3}/{deathMax:F2}\n" +
                 $"Grave P: {graveDensity * 100:F2}% vs {elseDensity * 100:F2}% " +
-                $"= {graveRatio:F2} (ctrl 0.33)   " +
+                $"= {graveRatio:F2} (ctrl 0.35)   " +
                 $"Avoid: {EcologyStats.FearAvoidanceRatio(world) * 100:F0}% (ctrl 55)\n" +
                 $"Pred/1k step: {EcologyStats.PredationPerKiloWolfStep(world):F1}   " +
                 $"FearExpo: {EcologyStats.HerbivoreFearExposure(world):F2}   " +

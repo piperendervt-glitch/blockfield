@@ -207,7 +207,9 @@ namespace BlockField.SimCore.Ecology
             deathDecay = 0.003f,
             // k=1 では効果が測定できなかった（死の場は全体の1%未満にしか立たず、
             // 平均値が0.005程度なので重みがほぼ1倍のまま）。
-            // 掃引の結果 20。墓場セルの植物密度が対照(k=0)の0.30倍から0.98倍へ回復する
+            // 掃引の結果 20。48シード実測で墓場セルの植物密度の比が
+            // 対照(k=0)の 0.348 から 0.523 へ（約1.5倍）。k=0/4/20 で単調に上がる。
+            // ただし 1.0 は超えない（墓場はもともと餌の乏しい土地なので不利を背負う）
             deathNutrientBoost = 20f,
             herbivoreVegetationWeight = 1f,
             herbivoreFearWeight = 1.5f,

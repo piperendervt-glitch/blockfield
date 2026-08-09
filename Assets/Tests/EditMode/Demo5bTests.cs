@@ -39,6 +39,14 @@ namespace BlockField.Tests.EditMode
             return World.Create(tp);
         }
 
+        /// <summary>
+        /// 【この5シードで0件であることの意味 (Demo 8 第2段で判明)】
+        /// 48シードまで広げて測ると、狼の全滅は死の場を切った状態でも **3/48（約6%）**
+        /// 起きる。5シードで0件になるのは (1-0.06)^5 ≈ 74% の確率であり、
+        /// 事前登録の「狼の全滅が0/5シード」は**標本不足で絶滅率を0と誤読していた**。
+        /// このテストは「固定した5シードでの退行検出」として有効だが、
+        /// 「狼は決して全滅しない」と読んではいけない。
+        /// </summary>
         [Test]
         public void M1_WolvesSurviveOnEverySeed()
         {
@@ -100,7 +108,55 @@ namespace BlockField.Tests.EditMode
         [Test]
         public void M2_PopulationsDoNotCollapse()
         {
-            // 爆発の裏返し。個体数が0付近まで落ちて戻らない状態も判定装置として使えない
+            // 爆発の裏返し。個体数が0付近まで落ちて戻らない状態も判定装置として使えない。
+            //
+            // 【最終ティックだけを見ていた不備の修正 (Demo 8 第2段)】
+            // 以前はループ後の1点しか見ていなかったため、途中で草食獣が全滅して
+            // 野生スポーンで復活した場合を見逃した。最小値を通して見る。
+            //
+            // 【なぜ羊・豚を合算するのか】羊と豚は**行動が完全に同一**で、
+            // 湧くときのコイン投げと見た目だけが違う。したがってどちらが残るかは
+            // 中立浮動であり、片方が0になるのは生態系の破綻ではない
+            // （実測: 48シードで羊のみ絶滅6件・豚のみ絶滅3件。死の場を切っても同じ）。
+            // 種別に ≧1 を要求すると「ランダムウォークが0に触れないこと」を
+            // 要求することになり、パラメータでは達成できない。
+            // 破綻とみなすべきは**草食獣ギルド全体**が消えること（実測 0/48）。
+            foreach (uint seed in k_Seeds)
+            {
+                var world = MakeDiorama(seed);
+                int minHerbivores = int.MaxValue;
+                int minPlants = int.MaxValue;
+
+                for (int t = 0; t < k_Ticks; t++)
+                {
+                    Simulation.Tick(world, world.Rng);
+                    if (t < k_WarmupTicks)
+                    {
+                        continue;
+                    }
+                    int herbivores = world.SheepCount + world.PigCount;
+                    if (herbivores < minHerbivores) minHerbivores = herbivores;
+                    if (world.PlantCount < minPlants) minPlants = world.PlantCount;
+                }
+
+                Assert.Greater(minPlants, 0, $"seed {seed}: 植物が一度でも絶滅した");
+                Assert.Greater(minHerbivores, 0,
+                    $"seed {seed}: 草食獣ギルドが一度でも全滅した（最小 {minHerbivores}）");
+            }
+        }
+
+        /// <summary>
+        /// 羊と豚の消長が中立浮動であることを固定する。
+        ///
+        /// これが崩れる＝どちらかに有利な差ができたということで、
+        /// そのときは <see cref="M2_PopulationsDoNotCollapse"/> の
+        /// 「ギルドで見る」という判断そのものを見直す必要がある。
+        /// 実測 (16シード×3,000t): 羊合計226 / 豚合計183、羊が多かったシード 10/16。
+        /// </summary>
+        [Test]
+        public void SheepAndPigHaveNoSurvivalAdvantage()
+        {
+            int sheepWins = 0, sheepTotal = 0, pigTotal = 0;
             foreach (uint seed in k_Seeds)
             {
                 var world = MakeDiorama(seed);
@@ -108,10 +164,19 @@ namespace BlockField.Tests.EditMode
                 {
                     Simulation.Tick(world, world.Rng);
                 }
-
-                Assert.Greater(world.PlantCount, 0, $"seed {seed}: 植物が絶滅した");
-                Assert.Greater(world.SheepCount + world.PigCount, 0, $"seed {seed}: 草食獣が絶滅した");
+                sheepTotal += world.SheepCount;
+                pigTotal += world.PigCount;
+                if (world.SheepCount > world.PigCount) sheepWins++;
             }
+
+            int total = sheepTotal + pigTotal;
+            Assert.Greater(total, 0, "草食獣が1匹も残っていない");
+
+            // 5シードでは分布が粗いので、極端な偏り（9:1 以上）だけを退行として捕まえる
+            float sheepShare = (float)sheepTotal / total;
+            Assert.That(sheepShare, Is.InRange(0.1f, 0.9f),
+                $"羊と豚の生存に偏りが出ている（羊 {sheepTotal} / 豚 {pigTotal}）。" +
+                "行動に差が生じたなら、ギルド単位で見るという M5 の前提を見直すこと");
         }
 
         [Test]

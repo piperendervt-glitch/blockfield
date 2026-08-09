@@ -359,9 +359,16 @@ public class TerrainPreview : EditorWindow
         {
             FieldLayer.Fear => new Color32(240, 60, 50, 0),
             FieldLayer.Prey => new Color32(70, 130, 245, 0),
-            FieldLayer.Death => new Color32(175, 70, 235, 0), // 紫。赤(恐怖)と取り違えないこと
+            // マゼンタ。当初は紫 (175,70,235) にしたが、暗いうえに赤(恐怖)と
+            // 見分けにくかった。青成分を最大まで振って色相を赤から離す
+            FieldLayer.Death => new Color32(230, 40, 255, 0),
             _ => new Color32(30, 220, 60, 0),
         };
+
+        // 場ごとに値の桁が違うので、表示の濃さは場ごとの基準値で正規化する。
+        // 生値をそのまま不透明度にすると、死の場（中央値0.037）は
+        // 不透明度3%になって地形が透け、灰色に見える
+        float displayScale = EcologyStats.FieldDisplayScale(field.Name);
 
         for (int z = 0; z < m_World.Depth; z++)
         {
@@ -384,8 +391,11 @@ public class TerrainPreview : EditorWindow
                 vertices.Add(new Vector3(cx + half, y, cz + half));
                 vertices.Add(new Vector3(cx + half, y, cz - half));
 
+                // 下限90: 描かれたセルは必ず色として認識できる濃さにする。
+                // 「薄すぎて地形と区別できない」より「濃淡が飽和する」方がまし
+                float intensity = EcologyStats.FieldDisplayIntensity(v, displayScale);
                 var color = new Color32(baseColor.r, baseColor.g, baseColor.b,
-                    (byte)(Mathf.Clamp01(v) * 200f));
+                    (byte)(90f + 165f * intensity));
                 for (int i = 0; i < 4; i++)
                 {
                     colors.Add(color);

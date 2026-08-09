@@ -183,9 +183,10 @@ namespace BlockField
             {
                 Layer.Vegetation => new Color32(60, 230, 80, 255),
                 Layer.Fear => new Color32(240, 60, 50, 255),
-                // 死の場は紫。赤（恐怖）とも青（獲物）とも取り違えないよう、
-                // 明度を上げず彩度で分ける
-                Layer.Death => new Color32(175, 70, 235, 255),
+                // 死の場はマゼンタ。当初は紫 (175,70,235) にしたが、エディタ確認で
+                // 暗く沈んで灰色に見え、赤（恐怖）とも見分けにくかった。
+                // 青成分を最大まで振って色相を赤から離す
+                Layer.Death => new Color32(230, 40, 255, 255),
                 _ => new Color32(70, 130, 245, 255),
             };
 
@@ -221,12 +222,11 @@ namespace BlockField
             var colors = new List<Color32>();
             var triangles = new List<int>();
 
-            // 場の最大値で正規化して、薄い場でも形が見えるようにする
-            var (_, max) = EcologyStats.FieldStats(field);
-            if (max <= 0f)
-            {
-                max = 1f;
-            }
+            // 【最大値では正規化しない】死の場は飽和した数セル(0.955)と
+            // 大多数の薄いセル(0.037)の差が25倍あり、最大で割ると大多数が
+            // 明度0.35付近に潰れて黒く見える（エディタ確認で「灰色に見える」と
+            // 報告された症状）。場ごとに決めた基準値で正規化する
+            float displayScale = EcologyStats.FieldDisplayScale(field.Name);
 
             int width = Mathf.Min(observation.Width, field.Width);
             int depth = Mathf.Min(observation.Depth, field.Depth);
@@ -251,9 +251,11 @@ namespace BlockField
                     }
 
                     float localY = surfaceY * cell;
-                    float t = Mathf.Clamp01(v / max);
-                    // 0.35〜1.0 の明度に写す。薄い痕跡も見えるが、濃淡の差は残る
-                    float b = Mathf.Lerp(0.35f, 1f, t);
+                    float t = EcologyStats.FieldDisplayIntensity(v, displayScale);
+                    // 下限0.55: 描かれたセルは必ず色として認識できる明るさにする。
+                    // MRではアルファが使えない（パススルーと合成される）ので
+                    // 濃さは明度だけで表す。暗い側に振ると黒＝背景と区別できない
+                    float b = Mathf.Lerp(0.55f, 1f, t);
                     var c = new Color32(
                         (byte)(baseColor.r * b), (byte)(baseColor.g * b), (byte)(baseColor.b * b), 255);
 

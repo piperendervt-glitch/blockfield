@@ -37,7 +37,14 @@ namespace BlockField.Tests.EditMode
         /// 起きるので、墓場はもともと植物が少ない土地に偏るため
         /// （養分係数0の対照でも比は 0.33 しかない）。
         /// 係数を入れると同じ交絡のもとで比が上がる、という形でのみ効果を切り出せる。
-        /// 実測: 対照 0.33 → 採用値 0.86（約2.6倍）。
+        ///
+        /// 【効果の大きさ — 3シードでは過大に出る】
+        /// 48シードまで広げた実測は **対照 0.348 → k=20 で 0.523（約1.5倍）**。
+        /// k=0/4/20 で 0.348 / 0.442 / 0.523 と単調に上がる。
+        /// このテストが使う3シードでは 0.309 → 1.166（約3.8倍）と大きく出るが、
+        /// これは標本のばらつきであって真の効果ではない。
+        /// 閾値は真の効果 1.5倍 を下回る 1.2倍 に置き、
+        /// 「係数を外したら落ちる」ことだけを検出する。
         /// </summary>
         [Test]
         public void M2_NutrientBoostRaisesPlantDensityInGraveyardsVersusControl()
@@ -46,9 +53,9 @@ namespace BlockField.Tests.EditMode
             float control = PooledGraveyardRatio(0f);
 
             Assert.Greater(control, 0f, "対照の比が0。測定系が壊れている（墓場か植物が無い）");
-            Assert.Greater(withBoost, control * 1.5f,
+            Assert.Greater(withBoost, control * 1.2f,
                 $"養分係数が植物の分布を動かしていない: 係数あり {withBoost:F2} / 対照 {control:F2}。" +
-                "実測では 0.86 / 0.33 だった");
+                "この3シードでの実測は 1.17 / 0.31");
         }
 
         /// <summary>
@@ -150,6 +157,45 @@ namespace BlockField.Tests.EditMode
             Assert.LessOrEqual(EcologyStats.FearAvoidanceRatio(world), 1f);
         }
 
+        // ---- I4: 可視化 ----
+
+        /// <summary>
+        /// 死の場が「見える濃さ」で描かれること。
+        /// エディタ確認で死の場が灰色に見えた原因は、表示の濃さを場の生値に
+        /// 比例させていたこと。死の場は中央値 0.037 なので不透明度3%になり、
+        /// 下の地形が透けていた。場ごとの基準値で正規化して直した。
+        /// </summary>
+        [Test]
+        public void Display_DeathFieldIsVisibleAtItsTypicalValues()
+        {
+            float scale = EcologyStats.FieldDisplayScale(DeathField.FieldName);
+
+            // 実測の中央値 0.037 と 90%点 0.100
+            float median = EcologyStats.FieldDisplayIntensity(0.037f, scale);
+            float p90 = EcologyStats.FieldDisplayIntensity(0.100f, scale);
+
+            Assert.Greater(median, 0.5f,
+                $"死の場の中央値の濃さが {median:F2} しかない（薄すぎて地形と区別できない）");
+            Assert.AreEqual(1f, p90, 1e-4f, "90%点で最大の濃さに達していない");
+
+            // 墓場の閾値でも十分見えること
+            float atThreshold = EcologyStats.FieldDisplayIntensity(EcologyStats.GraveyardThreshold, scale);
+            Assert.Greater(atThreshold, 0.4f, $"墓場の閾値での濃さが {atThreshold:F2} しかない");
+        }
+
+        [Test]
+        public void Display_ScaleDiffersPerFieldBecauseValueRangesDiffer()
+        {
+            // 死の場は τ が大きく1セルの値が小さいので、他より低い基準にする。
+            // 全部同じにすると死の場だけ見えなくなる（元の不具合）
+            float death = EcologyStats.FieldDisplayScale(DeathField.FieldName);
+            float fear = EcologyStats.FieldDisplayScale(FearField.FieldName);
+            float vegetation = EcologyStats.FieldDisplayScale(VegetationField.FieldName);
+
+            Assert.Less(death, fear, "死の場の表示基準が恐怖場以上になっている");
+            Assert.Less(fear, vegetation, "恐怖場の表示基準が植生場以上になっている");
+        }
+
         // ---- M4: 決定論 ----
 
         [Test]
@@ -189,32 +235,49 @@ namespace BlockField.Tests.EditMode
         // ---- M5: Demo 5b の安定条件が生きていること ----
 
         /// <summary>
-        /// 死の場と養分効果を入れても狼が生き残ること。
-        /// 養分係数を上げすぎると植物が墓場へ偏って狼が落ちる（実測で k≧40 だと
-        /// 最小狼数が0になった）。k=20 を選んだのはこの制約があるため。
-        /// 詳細な安定条件は <see cref="Demo5bTests"/> 側で見ているので、
-        /// ここは「係数を上げると壊れる」という一点に絞る。
+        /// 死の場と養分効果を入れても生態系が保たれること。
+        ///
+        /// 【判定単位を「種」ではなく「ギルド」にした理由】
+        /// エディタ確認で「3,000ティック時点で Sheep: 0」が見つかったが、
+        /// 48シードで測ると羊のみ／豚のみの絶滅は**死の場を切っても同程度に起きる**
+        /// （k=0: 羊6・豚3 / k=20: 羊3・豚2、いずれも48シード中）。
+        /// 羊と豚は行動が同一なのでどちらが残るかは中立浮動であり、
+        /// 種別に ≧1 を課してもパラメータでは達成できない。
+        /// 一方、**草食獣ギルドの全滅は k=0/4/20 のいずれでも 0/48**。
+        /// 生態系の破綻はギルド単位で判定する。
+        ///
+        /// 狼は個体数上限4の別枠なのでギルド化できず、種のまま見る。
+        /// ただし狼の全滅は死の場が無くても 3/48（約6%）起きる
+        /// （<see cref="Demo5bTests.M1_WolvesSurviveOnEverySeed"/> の注記）。
+        /// ここで固定するのは「この3シードで退行しないこと」。
         /// </summary>
         [Test]
-        public void M5_WolvesStillSurviveWithNutrientBoost()
+        public void M5_EcosystemSurvivesWithNutrientBoost()
         {
             foreach (uint seed in k_Seeds)
             {
                 var world = MakeDiorama(seed);
                 var p = SimParams.Default;
                 int minWolves = int.MaxValue;
+                int minHerbivores = int.MaxValue;
 
                 for (int t = 0; t < 2000; t++)
                 {
                     Simulation.Tick(world, world.Rng, p);
-                    if (t >= 300 && world.WolfCount < minWolves)
+                    if (t < 300)
                     {
-                        minWolves = world.WolfCount;
+                        continue;
                     }
+                    if (world.WolfCount < minWolves) minWolves = world.WolfCount;
+                    int herbivores = world.SheepCount + world.PigCount;
+                    if (herbivores < minHerbivores) minHerbivores = herbivores;
                 }
 
+                Assert.Greater(minHerbivores, 0,
+                    $"seed {seed}: 草食獣ギルドが全滅した（最小 {minHerbivores}）。" +
+                    $"deathNutrientBoost={p.deathNutrientBoost}");
                 Assert.Greater(minWolves, 0,
-                    $"seed {seed}: 養分効果を入れたら狼が0になった（最小 {minWolves}）。" +
+                    $"seed {seed}: 狼が0になった（最小 {minWolves}）。" +
                     $"deathNutrientBoost={p.deathNutrientBoost} が高すぎる");
             }
         }
