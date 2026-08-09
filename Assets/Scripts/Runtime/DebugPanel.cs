@@ -17,6 +17,13 @@ namespace BlockField
     {
         const float k_RefreshInterval = 1f;
 
+        /// <summary>
+        /// FPS を logcat へ出す間隔（秒）。
+        /// Demo 4.5 の M6 は画面表示だけを見る運用にしていたため、セッション後に
+        /// ログから転記できず未取得になった。以降は capture_session が拾えるようにする。
+        /// </summary>
+        const float k_FpsLogInterval = 30f;
+
         [SerializeField] DioramaOrigin m_Diorama;
         [SerializeField] TerrainField m_TerrainField;
         [SerializeField] ARPlaneManager m_PlaneManager;
@@ -35,6 +42,7 @@ namespace BlockField
 
         float m_SmoothedDeltaTime;
         float m_NextRefresh;
+        float m_NextFpsLog;
 
         /// <summary>各コンポーネントが直近イベントを1行で通知する。</summary>
         public static void Notify(string message)
@@ -54,6 +62,17 @@ namespace BlockField
             m_NextRefresh = Time.unscaledTime + k_RefreshInterval;
 
             m_Text.text = BuildText();
+
+            if (Time.unscaledTime >= m_NextFpsLog)
+            {
+                m_NextFpsLog = Time.unscaledTime + k_FpsLogInterval;
+                float fps = m_SmoothedDeltaTime > 0.0001f ? 1f / m_SmoothedDeltaTime : 0f;
+                string mode = m_RoomView != null && m_RoomView.IsComposed
+                    ? (m_RoomView.Mode == RoomTerrainView.ViewMode.Normal ? "NORMAL" : "DIAG")
+                    : "-";
+                Debug.Log($"[DebugPanel] FPS={fps:F1} mode={mode} " +
+                    $"blocks={(m_TerrainField != null ? m_TerrainField.BlockCount : 0)}");
+            }
         }
 
         string BuildText()
