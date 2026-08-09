@@ -316,20 +316,14 @@ public class TerrainPreview : EditorWindow
                 (e.cell.y + 0.5f) * k_BlockSize,
                 e.cell.z * k_BlockSize);
 
-            if (e.IsPlant)
+            // 実機と**同じ形**を使う（EntityShape に集約）。
+            // 上から見た輪郭で3種を見分けられるかを、ここで実機に行く前に確認する
+            if (!e.IsPlant)
             {
-                go.transform.localScale = Vector3.one * (k_BlockSize * 0.5f);
+                go.transform.localRotation = BlockField.EntityShape.FacingToRotation(e.facing);
             }
-            else
-            {
-                // 動物: 直方体＋facing で向きを可視化 (0..3 = +X,+Z,-X,-Z)
-                go.transform.localScale = new Vector3(k_BlockSize, k_BlockSize * 0.7f, k_BlockSize * 1.3f);
-                float yaw = e.facing switch { 0 => 90f, 1 => 0f, 2 => 270f, _ => 180f };
-                go.transform.localRotation = Quaternion.Euler(0f, yaw, 0f);
-            }
-
-            go.AddComponent<MeshFilter>().sharedMesh = m_CubeMesh;
-            go.AddComponent<MeshRenderer>().sharedMaterial = m_EntityMaterials[e.kind];
+            BlockField.EntityShape.Build(
+                go.transform, e.kind, m_CubeMesh, m_EntityMaterials[e.kind], k_BlockSize);
         }
     }
 

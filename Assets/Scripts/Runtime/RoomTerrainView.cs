@@ -106,6 +106,14 @@ namespace BlockField
 
         void BuildMarkers(RoomObservation observation, Transform root)
         {
+            // 古いマーカーは必ず捨てる。以前はメッシュだけ捨てて GameObject を残していたため、
+            // 作り直しのたびに古い緑の板が積み残る可能性があった
+            // （実機で「非表示にしても緑の枠が残る」と報告された原因の一つ）
+            if (m_MarkerObject != null)
+            {
+                Destroy(m_MarkerObject);
+                m_MarkerObject = null;
+            }
             if (m_MarkerMesh != null)
             {
                 Destroy(m_MarkerMesh);

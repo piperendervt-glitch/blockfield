@@ -128,9 +128,18 @@ namespace BlockField
 
             if (!shouldShow)
             {
-                if (m_Object != null && m_Object.activeSelf)
+                // 非アクティブにするだけでなくメッシュも空にする。
+                // 「非表示」なのに前の描画が見えている、という状態を作らないため
+                if (m_Object != null)
                 {
-                    m_Object.SetActive(false);
+                    if (m_Object.activeSelf)
+                    {
+                        m_Object.SetActive(false);
+                    }
+                    if (m_Mesh != null && m_Mesh.vertexCount > 0)
+                    {
+                        m_Mesh.Clear();
+                    }
                 }
                 return;
             }

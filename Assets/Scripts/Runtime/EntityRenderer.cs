@@ -200,38 +200,13 @@ namespace BlockField
             root.transform.SetParent(m_Root.transform, false);
             root.transform.localPosition = CellToLocal(e.cell);
 
-            if (e.IsPlant)
+            // 形は EntityShape に集約（エディタプレビューと同じ形を使う）。
+            // 上から見た輪郭だけで3種を見分けられることを狙っている
+            if (!e.IsPlant)
             {
-                // 植物: 0.5ブロック大の立方体をセル中央に静的配置
-                var mat = e.kind == EntityKind.GrassTuft ? m_GrassTuftMaterial : m_FlowerMaterial;
-                AddCube(root.transform, Vector3.zero, Vector3.one * (k_BlockSize * 0.5f), mat);
-            }
-            else
-            {
-                // 動物: 胴＋頭のブロック組合せ (Sheep=白 / Pig=ピンク / Wolf=灰色・細長)
-                Material mat;
-                Vector3 bodyScale;
-                switch (e.kind)
-                {
-                    case EntityKind.Wolf:
-                        mat = m_WolfMaterial;
-                        bodyScale = new Vector3(k_BlockSize * 0.8f, k_BlockSize * 0.8f, k_BlockSize * 1.6f);
-                        break;
-                    case EntityKind.Sheep:
-                        mat = m_SheepMaterial;
-                        bodyScale = new Vector3(k_BlockSize * 0.9f, k_BlockSize * 0.9f, k_BlockSize * 1.4f);
-                        break;
-                    default:
-                        mat = m_PigMaterial;
-                        bodyScale = new Vector3(k_BlockSize * 0.9f, k_BlockSize * 0.9f, k_BlockSize * 1.4f);
-                        break;
-                }
-
                 root.transform.localRotation = FacingToRotation(e.facing);
-                AddCube(root.transform, new Vector3(0f, 0f, 0f), bodyScale, mat); // 胴
-                AddCube(root.transform, new Vector3(0f, k_BlockSize * 0.35f, bodyScale.z * 0.55f),
-                    Vector3.one * (k_BlockSize * 0.5f), mat); // 頭
             }
+            EntityShape.Build(root.transform, e.kind, m_CubeMesh, MaterialFor(e.kind), k_BlockSize);
 
             return new Visual
             {
@@ -264,11 +239,28 @@ namespace BlockField
                     continue;
                 }
 
-                var color = enabled ? HungerToColor(e.hunger) : Color.white;
                 foreach (var renderer in visual.root.GetComponentsInChildren<MeshRenderer>())
                 {
+                    if (!enabled)
+                    {
+                        // 【重要】白を書き込むのではなく**プロパティブロックごと外す**。
+                        // 白を入れるとマテリアルの _BaseColor（種の色）を上書きしてしまい、
+                        // 通常モードで全個体が白くなる（実機で発生した退行）
+                        renderer.SetPropertyBlock(null);
+                        continue;
+                    }
+
+                    // 種の色に飢餓の係数を**乗算**する。色を置き換えると種が分からなくなる
+                    var baseColor = renderer.sharedMaterial != null
+                        ? renderer.sharedMaterial.GetColor(k_BaseColorId)
+                        : Color.white;
+                    var tint = HungerToColor(e.hunger);
                     renderer.GetPropertyBlock(m_PropertyBlock);
-                    m_PropertyBlock.SetColor(k_BaseColorId, color);
+                    m_PropertyBlock.SetColor(k_BaseColorId, new Color(
+                        baseColor.r * tint.r,
+                        baseColor.g * tint.g,
+                        baseColor.b * tint.b,
+                        baseColor.a));
                     renderer.SetPropertyBlock(m_PropertyBlock);
                 }
             }
@@ -311,6 +303,16 @@ namespace BlockField
                 brightness * (1f - 0.85f * redness),
                 1f);
         }
+
+        /// <summary>種→マテリアル。飢餓の色分けはこの色に**乗算**する。</summary>
+        Material MaterialFor(EntityKind kind) => kind switch
+        {
+            EntityKind.GrassTuft => m_GrassTuftMaterial,
+            EntityKind.Flower => m_FlowerMaterial,
+            EntityKind.Sheep => m_SheepMaterial,
+            EntityKind.Wolf => m_WolfMaterial,
+            _ => m_PigMaterial,
+        };
 
         void AddCube(Transform parent, Vector3 localPos, Vector3 scale, Material material)
         {
