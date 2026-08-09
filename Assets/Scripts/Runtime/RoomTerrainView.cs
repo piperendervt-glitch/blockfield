@@ -38,10 +38,14 @@ namespace BlockField
 
         [SerializeField] RoomTerrainBuilder m_Builder;
         [SerializeField] TerrainField m_TerrainField;
+        [SerializeField] DioramaOrigin m_Origin;
         [SerializeField] Material m_Material;
 
         public RoomTerrainBuilder builder { get => m_Builder; set => m_Builder = value; }
         public TerrainField terrainField { get => m_TerrainField; set => m_TerrainField = value; }
+
+        /// <summary>スパシャルアンカー原点。部屋地形はこの配下に置いて再装着後のずれを防ぐ。</summary>
+        public DioramaOrigin origin { get => m_Origin; set => m_Origin = value; }
 
         /// <summary>頂点色対応 BlockField/OcclusionUnlit (_VERTEX_COLOR 有効) の共有マテリアル。</summary>
         public Material material { get => m_Material; set => m_Material = value; }
@@ -94,7 +98,10 @@ namespace BlockField
             if (m_Result == null)
             {
                 var observation = m_Builder != null ? m_Builder.Observation : null;
-                if (observation != null)
+
+                // アンカー原点が確定するまで待つ。ワールドに直置きすると HMD の着脱による
+                // 再ローカライズで部屋地形だけがずれる（2026-08-09 の実機セッションで発生）
+                if (observation != null && m_Origin != null && m_Origin.OriginTransform != null)
                 {
                     Compose(observation);
                 }
@@ -121,12 +128,17 @@ namespace BlockField
 
             // 観測セル (x,z) のレイはセル中心 min + (x+0.5)*cell を通る。
             // ChunkMesher はセル (x,y,z) の中心を (x*cell, (y+0.5)*cell, z*cell) に置くため、
-            // ルートを半セル分ずらすとワールド座標に一致する。Y は cellY*cell がそのままワールド。
+            // ルートを半セル分ずらすと観測時のワールド座標に一致する。
+            // Y は cellY*cell が観測時のワールド高さ。
+            var scanWorldPose = new Pose(
+                new Vector3(
+                    observation.OriginWorldX + cellSize * 0.5f,
+                    0f,
+                    observation.OriginWorldZ + cellSize * 0.5f),
+                Quaternion.identity);
+
             m_Root = new GameObject("Room Terrain");
-            m_Root.transform.position = new Vector3(
-                observation.OriginWorldX + cellSize * 0.5f,
-                0f,
-                observation.OriginWorldZ + cellSize * 0.5f);
+            AttachToAnchor(m_Root.transform, scanWorldPose);
 
             int chunkCount = 0;
             foreach (var pair in m_Result.Grid.Chunks)
@@ -171,18 +183,55 @@ namespace BlockField
                 $"チャンク={chunkCount} 層数[{m_Result.HistogramText()}] " +
                 $"cellY範囲={m_Result.MinCellY}..{m_Result.MaxCellY} " +
                 $"ハッシュ={m_Result.Grid.ComputeContentHash():X16}");
-            Debug.Log($"[RoomTerrain] 表示ルート: pos={m_Root.transform.position:F2} cell={cellSize}m " +
-                $"マーカー頂点={(m_MarkerMesh != null ? m_MarkerMesh.vertexCount : 0)}。" +
+            Debug.Log($"[RoomTerrain] 表示ルート: 親={m_Root.transform.parent?.name ?? "(ワールド)"} " +
+                $"local={m_Root.transform.localPosition:F3} world={m_Root.transform.position:F3} " +
+                $"cell={cellSize}m マーカー頂点={(m_MarkerMesh != null ? m_MarkerMesh.vertexCount : 0)}。" +
                 "Bボタンで 通常/診断 を切り替える。");
+        }
 
-            // Demo 4.5 の観察対象は部屋地形。原点上の箱庭地形 (Demo 1-4, 50x50) は
-            // 部屋地形と同じ空間を占めて観察の邪魔になるため、合成できた時点で1回だけ隠す
-            // （左手Xボタンで戻せる）。
-            if (m_TerrainField != null && m_TerrainField.FieldVisible)
+        /// <summary>
+        /// 観測時のワールドポーズを保ったまま、アンカー原点の配下へ取り付ける。
+        ///
+        /// 【なぜアンカー配下か】ワールド座標は HMD の着脱による再ローカライズでずれるが、
+        /// スパシャルアンカーは現実の部屋に貼り付いたままである（Demo 0 T2）。
+        /// アンカーの子にしておけば、再ローカライズでアンカーが動いても部屋地形は一緒に動き、
+        /// 現実の床・机との位置関係が保たれる。
+        ///
+        /// 【なぜ観測時のポーズを使うか】アンカーの現在ポーズで換算すると、スキャンから
+        /// 合成までの間に再ローカライズが起きた場合にその分だけずれる。
+        /// RoomScanner が観測と同じ瞬間に記録したポーズで換算する。
+        ///
+        /// 【M4 との関係】ここで扱うのは**表示配置だけ**である。観測データ (cellY) は
+        /// 整数のまま変換していないので、リプレイ入力とコンテンツハッシュには影響しない。
+        /// 部屋の向きに沿ったグリッド軸（観測時のワールド軸）もそのまま保たれる。
+        /// </summary>
+        void AttachToAnchor(Transform target, Pose scanWorldPose)
+        {
+            var originTransform = m_Origin != null ? m_Origin.OriginTransform : null;
+            if (originTransform == null)
             {
-                m_TerrainField.SetFieldVisible(false);
-                Debug.Log("[RoomTerrain] 箱庭地形 (Demo 1-4) を自動で非表示にした（左手Xボタンで再表示）。");
+                target.SetPositionAndRotation(scanWorldPose.position, scanWorldPose.rotation);
+                Debug.LogWarning("[RoomTerrain] アンカー原点が無いためワールド直置きにした。HMD 着脱で位置がずれる。");
+                return;
             }
+
+            var scan = m_Builder != null && m_Builder.scanner != null ? m_Builder.scanner.Result : null;
+            Pose anchorPose;
+            if (scan != null && scan.HasOriginPose)
+            {
+                anchorPose = scan.OriginPoseAtScan;
+            }
+            else
+            {
+                anchorPose = new Pose(originTransform.position, originTransform.rotation);
+                Debug.LogWarning("[RoomTerrain] 観測時のアンカーポーズが無い（原点確定前にスキャンした）。" +
+                    "現在のポーズで換算するため、その間に再ローカライズがあるとずれる。");
+            }
+
+            var inverseRotation = Quaternion.Inverse(anchorPose.rotation);
+            target.SetParent(originTransform, false);
+            target.localPosition = inverseRotation * (scanWorldPose.position - anchorPose.position);
+            target.localRotation = inverseRotation * scanWorldPose.rotation;
         }
 
         void SetMode(ViewMode mode)

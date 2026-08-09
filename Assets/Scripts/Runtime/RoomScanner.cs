@@ -45,9 +45,13 @@ namespace BlockField
 
         [SerializeField] ARMeshManager m_MeshManager;
         [SerializeField] ARPlaneManager m_PlaneManager;
+        [SerializeField] DioramaOrigin m_Origin;
 
         public ARMeshManager meshManager { get => m_MeshManager; set => m_MeshManager = value; }
         public ARPlaneManager planeManager { get => m_PlaneManager; set => m_PlaneManager = value; }
+
+        /// <summary>スパシャルアンカー原点 (Demo 0 T2)。観測時のポーズを記録するために参照する。</summary>
+        public DioramaOrigin origin { get => m_Origin; set => m_Origin = value; }
 
         /// <summary>スキャン結果（ワールド座標のメッシュと平面ラベル）。未完了なら null。</summary>
         public ScanResult Result { get; private set; }
@@ -66,6 +70,22 @@ namespace BlockField
             public Bounds Bounds;         // ワールド空間バウンズ
             public int PlaneCount;
             public System.Func<float, float, float, SurfaceLabel> LabelResolver;
+
+            /// <summary>
+            /// **観測時点**のアンカー原点のワールドポーズ。観測結果をアンカー相対に固定するために使う。
+            ///
+            /// 【なぜ必要か】ワールド座標は HMD の着脱による再ローカライズでずれるが、
+            /// スパシャルアンカーは現実の部屋に貼り付いたままである（Demo 0 T2 で確立）。
+            /// 観測はワールド座標で行うため、そのままワールドに置くと再装着後にずれる
+            /// （2026-08-09 の実機セッションで発生）。
+            ///
+            /// 【なぜ観測時点か】合成時に読むとスキャン〜合成の間の再ローカライズを
+            /// 取りこぼす。観測と同じ瞬間のポーズで固定する。
+            /// </summary>
+            public Pose OriginPoseAtScan;
+
+            /// <summary>アンカー原点が取れていたか（取れていなければワールド直置きにフォールバック）。</summary>
+            public bool HasOriginPose;
         }
 
         /// <summary>この秒数を過ぎてもメッシュが0なら警告を1回出す。</summary>
@@ -234,6 +254,13 @@ namespace BlockField
             // c. 生メッシュのアーカイブ（M4 の保証対象外 — クラスコメント参照）
             ArchiveRawMesh(verts, tris);
 
+            // d. 観測時点のアンカーポーズを記録（再装着後の位置ずれ対策）
+            var originTransform = m_Origin != null ? m_Origin.OriginTransform : null;
+            bool hasOrigin = originTransform != null;
+            var originPose = hasOrigin
+                ? new Pose(originTransform.position, originTransform.rotation)
+                : Pose.identity;
+
             stopwatch.Stop();
 
             Result = new ScanResult
@@ -243,11 +270,24 @@ namespace BlockField
                 Bounds = bounds,
                 PlaneCount = planes.Count,
                 LabelResolver = (wx, wy, wz) => ResolveLabel(planes, wx, wy, wz),
+                OriginPoseAtScan = originPose,
+                HasOriginPose = hasOrigin,
             };
 
             Debug.Log($"[RoomScanner] スキャン完了: {stopwatch.ElapsedMilliseconds}ms " +
                 $"頂点数={verts.Length / 3} 三角形数={tris.Length / 3} 平面数={planes.Count} " +
                 $"bounds(center={bounds.center:F2}, size={bounds.size:F2})");
+
+            if (hasOrigin)
+            {
+                Debug.Log($"[RoomScanner] 観測時のアンカーポーズを記録: pos={originPose.position:F3} " +
+                    $"rot={originPose.rotation.eulerAngles:F1}。部屋地形はこのポーズ基準で固定する。");
+            }
+            else
+            {
+                Debug.LogWarning("[RoomScanner] アンカー原点が未確定のままスキャンした。" +
+                    "部屋地形はワールド直置きになり、HMD 着脱で位置がずれる。");
+            }
 
             // 恒久機能だが、スキャンは1回で足りるのでメッシュ供給は止める（性能影響を残さない）
             if (m_MeshManager != null)

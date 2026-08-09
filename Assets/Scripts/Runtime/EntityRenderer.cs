@@ -75,7 +75,8 @@ namespace BlockField
                 ResetVisuals(world, origin);
             }
 
-            // Bボタン: 地形と一緒にエンティティも非表示
+            // 箱庭地形の表示トグル（左手X）に追従。地形と一緒にエンティティも非表示にする
+            // （地形だけ隠すとエンティティが宙に浮いて見えるため）
             if (m_Root.activeSelf != m_TerrainField.FieldVisible)
             {
                 m_Root.SetActive(m_TerrainField.FieldVisible);

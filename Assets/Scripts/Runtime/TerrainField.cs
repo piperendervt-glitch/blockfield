@@ -36,7 +36,15 @@ namespace BlockField
         [SerializeField] DioramaOrigin m_Origin;
         [SerializeField] Material m_TerrainMaterial;
 
+        /// <summary>
+        /// 起動時から箱庭地形を隠しておくか (Demo 4.5)。
+        /// 部屋地形モードでは箱庭が部屋地形と同じ空間を占めるため、
+        /// 起動直後に一瞬見えることも避ける。左手Xで表示できる。
+        /// </summary>
+        [SerializeField] bool m_StartHidden = true;
+
         public DioramaOrigin origin { get => m_Origin; set => m_Origin = value; }
+        public bool startHidden { get => m_StartHidden; set => m_StartHidden = value; }
         /// <summary>頂点色対応 BlockField/OcclusionUnlit (_VERTEX_COLOR 有効) の共有マテリアル。</summary>
         public Material terrainMaterial { get => m_TerrainMaterial; set => m_TerrainMaterial = value; }
 
@@ -75,6 +83,8 @@ namespace BlockField
 
         void Awake()
         {
+            m_FieldVisible = !m_StartHidden;
+
             m_AButtonAction = new InputAction("RightHandAButton", InputActionType.Button,
                 "<XRController>{RightHand}/primaryButton");
             m_AButtonAction.performed += OnAButtonPerformed;

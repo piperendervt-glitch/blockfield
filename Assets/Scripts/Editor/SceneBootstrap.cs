@@ -120,6 +120,8 @@ public static class SceneBootstrap
         var terrainField = dioramaGo.AddComponent<BlockField.TerrainField>();
         terrainField.origin = diorama;
         terrainField.terrainMaterial = terrainMat;
+        // Demo 4.5: 箱庭は起動時から隠す（部屋地形と同じ空間を占めるため）。左手Xで表示できる
+        terrainField.startHidden = true;
 
         // エンティティ表示 (Demo 2 D5 / Demo 3 E0,E7)。
         // 面明度差キューブ (ShadedCube) の頂点色を効かせるため _VERTEX_COLOR を有効化する
@@ -151,6 +153,7 @@ public static class SceneBootstrap
         var roomScanner = scannerGo.AddComponent<BlockField.RoomScanner>();
         roomScanner.meshManager = meshManager;
         roomScanner.planeManager = planeManager;
+        roomScanner.origin = diorama; // 観測時のアンカーポーズを記録するため
 
         // 多層ハイトマップ化 (Demo 4.5 G2)。観測データの構築と統計ログのみ
         var roomTerrain = scannerGo.AddComponent<BlockField.RoomTerrainBuilder>();
@@ -158,11 +161,12 @@ public static class SceneBootstrap
         roomTerrain.terrainField = terrainField;
 
         // 雪積もり合成と診断表示 (Demo 4.5 G3)。右手Bで 通常/診断 を切り替える。
-        // 表示はワールド座標に直接置くので XR Origin の子にはしない（座標変換不要）
+        // 合成した地形はアンカー原点の配下に置く（HMD 着脱での位置ずれ対策）
         var roomViewGo = new GameObject("Room Terrain View (G3)");
         var roomView = roomViewGo.AddComponent<BlockField.RoomTerrainView>();
         roomView.builder = roomTerrain;
         roomView.terrainField = terrainField;
+        roomView.origin = diorama;
         roomView.material = terrainMat;
 
         // HMD内デバッグパネル (World Space Canvas、カメラ前下方 0.6m に固定)
