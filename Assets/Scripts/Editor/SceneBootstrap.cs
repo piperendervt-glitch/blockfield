@@ -275,6 +275,13 @@ public static class SceneBootstrap
         overlay.material = terrainMat;
         panel.fieldOverlay = overlay;
 
+        // 狼の軌跡 (Demo 8 H4)。診断モードで「今まさに恐怖場を書いている場所」を示す
+        var trailGo = new GameObject("Wolf Trail (H4)");
+        var trail = trailGo.AddComponent<BlockField.WolfTrailView>();
+        trail.terrainField = terrainField;
+        trail.roomView = roomView;
+        trail.material = terrainMat;
+
         Directory.CreateDirectory("Assets/Scenes");
         if (!EditorSceneManager.SaveScene(scene, ScenePath))
         {

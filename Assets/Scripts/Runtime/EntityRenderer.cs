@@ -53,6 +53,10 @@ namespace BlockField
         Mesh m_CubeMesh;
         MaterialPropertyBlock m_PropertyBlock;
         bool m_HungerTintApplied;
+        bool m_WolfEmphasisApplied;
+
+        /// <summary>診断モードでの狼の拡大率。書き手を見つけやすくするため。</summary>
+        const float k_WolfEmphasisScale = 1.6f;
         static readonly int k_BaseColorId = Shader.PropertyToID("_BaseColor");
 
         void Awake()
@@ -94,6 +98,18 @@ namespace BlockField
             {
                 ApplyHungerTint(world, diagnostic);
                 m_HungerTintApplied = diagnostic;
+            }
+
+            // 診断モードでは狼を大きくして目立たせる (Demo 8)。
+            // 場だけ見せても「誰が書いたか」が分からないため、書き手を見つけやすくする
+            if (diagnostic != m_WolfEmphasisApplied)
+            {
+                ApplyWolfEmphasis(world, diagnostic);
+                m_WolfEmphasisApplied = diagnostic;
+            }
+            else if (diagnostic)
+            {
+                ApplyWolfEmphasis(world, true); // 新しく湧いた狼にも適用する
             }
         }
 
@@ -255,6 +271,28 @@ namespace BlockField
                     m_PropertyBlock.SetColor(k_BaseColorId, color);
                     renderer.SetPropertyBlock(m_PropertyBlock);
                 }
+            }
+        }
+
+        /// <summary>
+        /// 診断モードで狼だけを拡大する (Demo 8)。
+        /// 恐怖場を書いているのが誰かを目で追えるようにするための表示だけの変更で、
+        /// 当たり判定もシムの状態も一切変わらない。
+        /// </summary>
+        void ApplyWolfEmphasis(World world, bool enabled)
+        {
+            float scale = enabled ? k_WolfEmphasisScale : 1f;
+            foreach (var e in world.Entities)
+            {
+                if (e.kind != EntityKind.Wolf)
+                {
+                    continue;
+                }
+                if (!m_Visuals.TryGetValue(e.id, out var visual) || visual.root == null)
+                {
+                    continue;
+                }
+                visual.root.transform.localScale = Vector3.one * scale;
             }
         }
 

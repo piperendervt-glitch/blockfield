@@ -44,6 +44,15 @@ namespace BlockField
         /// <summary>マーカーを作り終えたか（パネル表示用）。</summary>
         public bool IsComposed => m_MarkerObject != null;
 
+        /// <summary>積もり面マーカーの表示を切り替える（FieldOverlayView が巡回に合わせて呼ぶ）。</summary>
+        public void SetMarkersVisible(bool visible)
+        {
+            if (m_MarkerObject != null && m_MarkerObject.activeSelf != visible)
+            {
+                m_MarkerObject.SetActive(visible);
+            }
+        }
+
         InputAction m_ModeAction;
         GameObject m_MarkerObject;
         Mesh m_MarkerMesh;
@@ -135,9 +144,11 @@ namespace BlockField
                 m_TerrainField.SetFieldVisible(mode == ViewMode.Normal);
                 m_TerrainField.SetEntitiesVisible(true);
             }
-            if (m_MarkerObject != null)
+            // マーカーの表示は FieldOverlayView が巡回状態に応じて制御する
+            // （場と同時に出ると緑どうしが混ざって読めないため）。ここでは通常モードで消すだけ
+            if (m_MarkerObject != null && mode == ViewMode.Normal)
             {
-                m_MarkerObject.SetActive(mode == ViewMode.Diagnostic);
+                m_MarkerObject.SetActive(false);
             }
 
             Debug.Log($"[RoomTerrain] 表示モード: {(mode == ViewMode.Normal ? "0 通常" : "1 診断")}");

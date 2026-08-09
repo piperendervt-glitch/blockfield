@@ -29,6 +29,14 @@ public class TerrainPreview : EditorWindow
     bool m_AmbientOcclusion = true;
     bool m_ShowVegetation;
 
+    /// <summary>
+    /// 表示する場 (Demo 8)。実機に行く前に PC で「場と生き物の位置が合うか」を
+    /// 目視できるようにするための切替。
+    /// </summary>
+    enum FieldLayer { Vegetation = 0, Fear = 1, Prey = 2 }
+
+    FieldLayer m_FieldLayer = FieldLayer.Vegetation;
+
     World m_World;
     GameObject m_Root;
     GameObject m_EntityRoot;
@@ -63,10 +71,12 @@ public class TerrainPreview : EditorWindow
         m_FaceShading = EditorGUILayout.Toggle("面明度差 (D0)", m_FaceShading);
         m_AmbientOcclusion = EditorGUILayout.Toggle("頂点AO (E0)", m_AmbientOcclusion);
 
-        bool showVeg = EditorGUILayout.Toggle("植生場表示 (E1)", m_ShowVegetation);
-        if (showVeg != m_ShowVegetation)
+        bool showVeg = EditorGUILayout.Toggle("場を表示 (E1 / Demo 8)", m_ShowVegetation);
+        var layer = (FieldLayer)EditorGUILayout.EnumPopup("表示する場", m_FieldLayer);
+        if (showVeg != m_ShowVegetation || layer != m_FieldLayer)
         {
             m_ShowVegetation = showVeg;
+            m_FieldLayer = layer;
             if (m_World != null)
             {
                 UpdateVegetationOverlay();
@@ -342,11 +352,26 @@ public class TerrainPreview : EditorWindow
         var triangles = new List<int>();
         const float lift = 0.003f; // 地表とのZファイティング回避
 
+        // 表示する場を選ぶ。エンティティと同じ高さ規約（表層高さ）で敷くので、
+        // 場と生き物の位置が合っているかを PC 上で目視できる
+        ScalarField field = m_FieldLayer switch
+        {
+            FieldLayer.Fear => m_World.Fear,
+            FieldLayer.Prey => m_World.Prey,
+            _ => m_World.Vegetation,
+        };
+        Color32 baseColor = m_FieldLayer switch
+        {
+            FieldLayer.Fear => new Color32(240, 60, 50, 0),
+            FieldLayer.Prey => new Color32(70, 130, 245, 0),
+            _ => new Color32(30, 220, 60, 0),
+        };
+
         for (int z = 0; z < m_World.Depth; z++)
         {
             for (int x = 0; x < m_World.Width; x++)
             {
-                float v = m_World.Vegetation.GetAtColumn(x, z);
+                float v = field.GetAtColumn(x, z);
                 if (v < 0.02f)
                 {
                     continue;
@@ -363,7 +388,8 @@ public class TerrainPreview : EditorWindow
                 vertices.Add(new Vector3(cx + half, y, cz + half));
                 vertices.Add(new Vector3(cx + half, y, cz - half));
 
-                var color = new Color32(30, 220, 60, (byte)(Mathf.Clamp01(v) * 200f));
+                var color = new Color32(baseColor.r, baseColor.g, baseColor.b,
+                    (byte)(Mathf.Clamp01(v) * 200f));
                 for (int i = 0; i < 4; i++)
                 {
                     colors.Add(color);

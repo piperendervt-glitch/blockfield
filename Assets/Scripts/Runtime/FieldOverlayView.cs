@@ -32,13 +32,27 @@ namespace BlockField
         /// <summary>この値未満のセルは描かない（薄い所まで塗ると全面が染まって形が見えない）。</summary>
         const float k_MinValue = 0.02f;
 
+        /// <summary>
+        /// 診断モード中に見せるもの。左手Yで巡回する。
+        ///
+        /// <see cref="Markers"/> は積もり面の色分け（緑=採用面 / 青=2面目 / 枠=ラベル）で、
+        /// これが**場と同時に出ていると緑どうしが混ざって場が読めない**。
+        /// 実機で「非表示にしても緑の枠が残る」と報告されたのはこれが原因だったので、
+        /// マーカーも巡回の1状態にして、場を見るときは必ず消えるようにした。
+        /// </summary>
         public enum Layer
         {
-            None = 0,
+            /// <summary>積もり面のマーカーのみ（Demo 4.5 の診断表示）。</summary>
+            Markers = 0,
             Vegetation = 1,
             Fear = 2,
             Prey = 3,
+
+            /// <summary>何も出さない（地形と生き物だけを見る）。</summary>
+            None = 4,
         }
+
+        const int k_LayerCount = 5;
 
         [SerializeField] RoomTerrainBuilder m_Builder;
         [SerializeField] TerrainField m_TerrainField;
@@ -95,14 +109,22 @@ namespace BlockField
             if (requested && Time.unscaledTime - m_LastToggleTime >= k_ToggleCooldown)
             {
                 m_LastToggleTime = Time.unscaledTime;
-                Current = (Layer)(((int)Current + 1) % 4);
+                Current = (Layer)(((int)Current + 1) % k_LayerCount);
                 m_NextRefresh = 0f; // 次のフレームで描き直す
                 Debug.Log($"[FieldOverlay] 表示: {Current}");
                 DebugPanel.Notify($"field {Current}");
             }
 
             bool diagnostic = m_RoomView != null && m_RoomView.Mode == RoomTerrainView.ViewMode.Diagnostic;
-            bool shouldShow = diagnostic && Current != Layer.None;
+
+            // 積もり面マーカーは「マーカー」状態のときだけ出す。
+            // 場を見ているあいだ緑のマーカーが残っていると場が読めない
+            if (m_RoomView != null)
+            {
+                m_RoomView.SetMarkersVisible(diagnostic && Current == Layer.Markers);
+            }
+
+            bool shouldShow = diagnostic && Current != Layer.None && Current != Layer.Markers;
 
             if (!shouldShow)
             {
@@ -202,13 +224,17 @@ namespace BlockField
                     {
                         continue;
                     }
-                    int count = observation.GetHitCount(x, z);
-                    if (count == 0)
+                    // 【重要】高さは**ワールドの表層**を使う。観測面の worldY を使うと、
+                    // その上に積もった雪地形(1〜4ブロック)のぶんだけ下にずれ、
+                    // 地表に立つ動植物と一致して見えない（実機で「場と植物が合わない」
+                    // と報告された原因）。エンティティと同じ CellToLocal の規約に合わせる
+                    int surfaceY = world.GetSurfaceHeight(x, z);
+                    if (surfaceY == World.NoSurfaceHeight)
                     {
                         continue;
                     }
 
-                    float worldY = observation.GetHit(x, z, count - 1).worldY;
+                    float localY = surfaceY * cell;
                     float t = Mathf.Clamp01(v / max);
                     // 0.35〜1.0 の明度に写す。薄い痕跡も見えるが、濃淡の差は残る
                     float b = Mathf.Lerp(0.35f, 1f, t);
@@ -218,7 +244,7 @@ namespace BlockField
                     int i0 = vertices.Count;
                     float cx = x * cell;
                     float cz = z * cell;
-                    float cy = worldY + k_Lift;
+                    float cy = localY + k_Lift;
 
                     vertices.Add(new Vector3(cx - half, cy, cz - half));
                     vertices.Add(new Vector3(cx - half, cy, cz + half));
