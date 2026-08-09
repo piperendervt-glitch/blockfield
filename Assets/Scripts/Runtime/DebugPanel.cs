@@ -1,4 +1,6 @@
+using System.Collections.Generic;
 using System.IO;
+using BlockField.SimCore.Ecology;
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.XR.ARFoundation;
@@ -47,6 +49,14 @@ namespace BlockField
         float m_SmoothedDeltaTime;
         float m_NextRefresh;
         float m_NextFpsLog;
+
+        /// <summary>
+        /// 摂食成功率の窓（直近 k_FeedWindowTicks ティック）を取るためのスナップショット。
+        /// 窓は表示側の責務にして World には累計だけ持たせている。
+        /// </summary>
+        const int k_FeedWindowTicks = 100;
+        readonly Queue<(long tick, int attempts, int successes)> m_FeedHistory = new();
+        long m_LastFeedSampleTick = -1;
 
         /// <summary>各コンポーネントが直近イベントを1行で通知する。</summary>
         public static void Notify(string message)
@@ -135,7 +145,68 @@ namespace BlockField
                 BuildRoomText() +
                 $"Tick: {tick}  Plants: {plants}  Animals: {animals}  Wolves: {wolves}\n" +
                 $"Starve: {starved}  Pred: {predated}  Birth: {births}\n" +
+                BuildHealthText(world) +
                 $"Last: {s_LastEvent}";
+        }
+
+        /// <summary>
+        /// 生態系の健全性 (Demo 5a)。目測に頼らず数値で判定するための指標。
+        /// 括弧内は箱庭 (Demo 3 相当) を3,000ティック走らせた実測の参照値。
+        /// 5分のセッション（約300ティック）はまだ立ち上がり途中なので、
+        /// 参照値より低く出るのが正常（箱庭の t300 実測は 植物1.71% / 摂食0.025）。
+        /// </summary>
+        string BuildHealthText(World world)
+        {
+            if (world == null)
+            {
+                return "Dens: -   Feed: -   Starve/1k: -\n";
+            }
+
+            float plantDensity = EcologyStats.PlantDensity(world);
+            float animalDensity = EcologyStats.AnimalDensity(world);
+            float starvePerK = EcologyStats.StarvationPerAnimalPerKiloTick(world);
+            float feedRate = UpdateAndGetFeedRate(world);
+
+            return
+                $"Dens P/A: {plantDensity * 100:F2}%/{animalDensity * 100:F2}% " +
+                $"(ref {EcologyStats.DioramaReference.PlantDensity * 100:F2}/" +
+                $"{EcologyStats.DioramaReference.AnimalDensity * 100:F2})\n" +
+                $"Feed{k_FeedWindowTicks}: {feedRate * 100:F1}% " +
+                $"(ref {EcologyStats.DioramaReference.FeedSuccessRate * 100:F1})   " +
+                $"Starve/1k: {starvePerK:F2} " +
+                $"(ref {EcologyStats.DioramaReference.StarvationPerAnimalPerKiloTick:F2})\n";
+        }
+
+        /// <summary>
+        /// 直近 <see cref="k_FeedWindowTicks"/> ティックの摂食成功率。
+        /// World は累計しか持たないので、ここで過去のスナップショットとの差分を取る。
+        /// </summary>
+        float UpdateAndGetFeedRate(World world)
+        {
+            long tick = world.TickCount;
+
+            // Queue.Peek() は最古なので、直近に積んだティックは別に覚えて重複を防ぐ
+            if (m_FeedHistory.Count == 0 || tick != m_LastFeedSampleTick)
+            {
+                m_FeedHistory.Enqueue((tick, world.FeedAttemptCount, world.FeedSuccessCount));
+                m_LastFeedSampleTick = tick;
+            }
+
+            // 窓より古いスナップショットは、1つだけ残して捨てる（それが差分の基準になる）
+            while (m_FeedHistory.Count > 1)
+            {
+                var oldest = m_FeedHistory.Peek();
+                if (tick - oldest.tick <= k_FeedWindowTicks)
+                {
+                    break;
+                }
+                m_FeedHistory.Dequeue();
+            }
+
+            var baseline = m_FeedHistory.Peek();
+            return EcologyStats.FeedSuccessRateDelta(
+                world.FeedSuccessCount - baseline.successes,
+                world.FeedAttemptCount - baseline.attempts);
         }
 
         /// <summary>部屋地形 (Demo 4.5 G3) の常時表示項目。実機で状況を判断できるようにする。</summary>

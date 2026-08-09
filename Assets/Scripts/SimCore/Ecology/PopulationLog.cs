@@ -31,6 +31,36 @@ namespace BlockField.SimCore.Ecology
 
         public int Count => m_Rows.Count;
 
+        /// <summary>読み出し用の1点（表示・集計用。ログ自体は書き換えない）。</summary>
+        public readonly struct Sample
+        {
+            public readonly long tick;
+            public readonly int plants;
+            public readonly int herbivores;
+            public readonly int wolves;
+
+            public Sample(long tick, int plants, int herbivores, int wolves)
+            {
+                this.tick = tick;
+                this.plants = plants;
+                this.herbivores = herbivores;
+                this.wolves = wolves;
+            }
+
+            /// <summary>草食獣＋狼。</summary>
+            public int Animals => herbivores + wolves;
+        }
+
+        /// <summary>
+        /// i 番目の記録を読み出す (Demo 5a の診断表示)。
+        /// Sheep と Pig は表示上まとめて「草食獣」にする。
+        /// </summary>
+        public Sample GetSample(int index)
+        {
+            var r = m_Rows[index];
+            return new Sample(r.tick, r.plants, r.sheep + r.pigs, r.wolves);
+        }
+
         public void Record(World world)
         {
             m_Rows.Add(new Row(world.TickCount, world.PlantCount, world.SheepCount, world.PigCount, world.WolfCount));

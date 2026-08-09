@@ -174,8 +174,13 @@ namespace BlockField.SimCore.Ecology
                 {
                     // 摂食モード: 自セル＋4近傍の植物を固定順で探す
                     int plantIndex = FindAdjacentPlant(world, e.cell, eatenPlants);
+
+                    // 診断用の統計。導出値なので ContentHash には含めず、RNG も消費しない
+                    world.FeedAttemptCount++;
+
                     if (plantIndex >= 0)
                     {
+                        world.FeedSuccessCount++;
                         eatenPlants.Add(world.Entities[plantIndex].id);
                         dead.Add(world.Entities[plantIndex].id);
                         e.hunger = 0f; // 植生場は据え置き＝痕跡は残る

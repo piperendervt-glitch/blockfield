@@ -54,6 +54,18 @@ namespace BlockField.SimCore.Ecology
         public int PredationCount { get; internal set; }
         public int BirthCount { get; internal set; }
 
+        /// <summary>
+        /// 摂食モードに入った回数 (Demo 5a の診断表示)。空腹が閾値を超えて
+        /// 「食べ物を探した」回数であり、成否は問わない。
+        /// </summary>
+        public int FeedAttemptCount { get; internal set; }
+
+        /// <summary>
+        /// 摂食に成功した回数 (Demo 5a の診断表示)。
+        /// <see cref="FeedAttemptCount"/> との比が「餓死する前に食べられているか」の直接指標になる。
+        /// </summary>
+        public int FeedSuccessCount { get; internal set; }
+
         readonly struct PendingAction
         {
             public readonly SimEventType type;

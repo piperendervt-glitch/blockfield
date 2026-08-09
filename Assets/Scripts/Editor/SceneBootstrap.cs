@@ -203,8 +203,8 @@ public static class SceneBootstrap
         var canvas = canvasGo.AddComponent<Canvas>();
         canvas.renderMode = RenderMode.WorldSpace;
         var canvasRect = canvasGo.GetComponent<RectTransform>();
-        // Demo 4.5b で MR/VR 行を追加したため 11 行 → 高さを広げる
-        canvasRect.sizeDelta = new Vector2(600f, 460f);
+        // Demo 5a で健全性の2行を追加したため 13 行 → 高さを広げる
+        canvasRect.sizeDelta = new Vector2(600f, 540f);
 
         var bgGo = new GameObject("Background");
         bgGo.transform.SetParent(canvasGo.transform, false);
@@ -239,6 +239,32 @@ public static class SceneBootstrap
         panel.vrMode = vrMode;
         panel.shell = shell;
         panel.text = uiText;
+
+        // 個体数の時系列グラフ (Demo 5a)。パネルの真上に幅30cmで置く。
+        // Canvas のスケールが 0.0007 なので 430px ≒ 0.30m
+        var graphCanvasGo = new GameObject("Population Graph");
+        graphCanvasGo.transform.SetParent(camGo.transform, false);
+        graphCanvasGo.transform.localPosition = new Vector3(0f, -0.055f, 0.6f);
+        graphCanvasGo.transform.localScale = Vector3.one * 0.0007f;
+        var graphCanvas = graphCanvasGo.AddComponent<Canvas>();
+        graphCanvas.renderMode = RenderMode.WorldSpace;
+        var graphRect = graphCanvasGo.GetComponent<RectTransform>();
+        graphRect.sizeDelta = new Vector2(430f, 143f); // 300x100 のテクスチャと同じ比率
+
+        var graphImageGo = new GameObject("Graph Image");
+        graphImageGo.transform.SetParent(graphCanvasGo.transform, false);
+        var rawImage = graphImageGo.AddComponent<RawImage>();
+        rawImage.rectTransform.anchorMin = Vector2.zero;
+        rawImage.rectTransform.anchorMax = Vector2.one;
+        rawImage.rectTransform.offsetMin = Vector2.zero;
+        rawImage.rectTransform.offsetMax = Vector2.zero;
+
+        var graph = graphCanvasGo.AddComponent<BlockField.PopulationGraph>();
+        graph.terrainField = terrainField;
+        graph.image = rawImage;
+
+        // 飢餓の色分け (Demo 5a) は診断モードのときだけ効かせる
+        entityRenderer.roomView = roomView;
 
         Directory.CreateDirectory("Assets/Scenes");
         if (!EditorSceneManager.SaveScene(scene, ScenePath))

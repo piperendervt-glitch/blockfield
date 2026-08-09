@@ -17,6 +17,8 @@ namespace BlockField
         const float k_MoveDuration = 0.3f;
 
         [SerializeField] TerrainField m_TerrainField;
+        /// <summary>診断モードの判定に使う（飢餓の色分けは診断時のみ）。</summary>
+        [SerializeField] RoomTerrainView m_RoomView;
         [SerializeField] Material m_GrassTuftMaterial;
         [SerializeField] Material m_FlowerMaterial;
         [SerializeField] Material m_SheepMaterial;
@@ -24,6 +26,7 @@ namespace BlockField
         [SerializeField] Material m_WolfMaterial;
 
         public TerrainField terrainField { get => m_TerrainField; set => m_TerrainField = value; }
+        public RoomTerrainView roomView { get => m_RoomView; set => m_RoomView = value; }
         public Material grassTuftMaterial { get => m_GrassTuftMaterial; set => m_GrassTuftMaterial = value; }
         public Material flowerMaterial { get => m_FlowerMaterial; set => m_FlowerMaterial = value; }
         public Material sheepMaterial { get => m_SheepMaterial; set => m_SheepMaterial = value; }
@@ -48,6 +51,9 @@ namespace BlockField
         World m_TrackedWorld;
         GameObject m_Root;
         Mesh m_CubeMesh;
+        MaterialPropertyBlock m_PropertyBlock;
+        bool m_HungerTintApplied;
+        static readonly int k_BaseColorId = Shader.PropertyToID("_BaseColor");
 
         void Awake()
         {
@@ -74,14 +80,21 @@ namespace BlockField
                 ResetVisuals(world, root);
             }
 
-            // 箱庭地形の表示トグル（左手X）に追従。地形と一緒にエンティティも非表示にする
-            // （地形だけ隠すとエンティティが宙に浮いて見えるため）
-            if (m_Root.activeSelf != m_TerrainField.FieldVisible)
+            if (m_Root.activeSelf != m_TerrainField.EntitiesVisible)
             {
-                m_Root.SetActive(m_TerrainField.FieldVisible);
+                m_Root.SetActive(m_TerrainField.EntitiesVisible);
             }
 
             SyncEntities(world);
+
+            // 飢餓状態の色分けは診断モードのときだけ (Demo 5a)。
+            // 通常モードで適用すると公開映像で不自然になるため
+            bool diagnostic = m_RoomView != null && m_RoomView.Mode == RoomTerrainView.ViewMode.Diagnostic;
+            if (diagnostic || m_HungerTintApplied)
+            {
+                ApplyHungerTint(world, diagnostic);
+                m_HungerTintApplied = diagnostic;
+            }
         }
 
         void ResetVisuals(World world, Transform root)
@@ -215,6 +228,50 @@ namespace BlockField
                 targetRot = root.transform.localRotation,
                 moveStartTime = Time.time - k_MoveDuration, // 補間済み扱い
             };
+        }
+
+        /// <summary>
+        /// 動物の色を hunger で変調する (Demo 5a、診断モード限定)。
+        /// 満腹＝通常色 / 空腹＝暗く / 餓死寸前＝赤みを帯びる。
+        ///
+        /// MaterialPropertyBlock で個体ごとに _BaseColor を差し替えるだけなので、
+        /// 共有マテリアルは変更されず、World にも一切触らない（表示と真実の分離）。
+        /// </summary>
+        void ApplyHungerTint(World world, bool enabled)
+        {
+            m_PropertyBlock ??= new MaterialPropertyBlock();
+
+            foreach (var e in world.Entities)
+            {
+                if (!e.IsAnimal || !m_Visuals.TryGetValue(e.id, out var visual) || visual.root == null)
+                {
+                    continue;
+                }
+
+                var color = enabled ? HungerToColor(e.hunger) : Color.white;
+                foreach (var renderer in visual.root.GetComponentsInChildren<MeshRenderer>())
+                {
+                    renderer.GetPropertyBlock(m_PropertyBlock);
+                    m_PropertyBlock.SetColor(k_BaseColorId, color);
+                    renderer.SetPropertyBlock(m_PropertyBlock);
+                }
+            }
+        }
+
+        /// <summary>
+        /// hunger (0=満腹, 1=餓死) → 乗算色。
+        /// 0.0〜0.5 は明度を 1.0→0.5 へ落とし、0.5〜1.0 でさらに緑青を削って赤へ寄せる。
+        /// </summary>
+        public static Color HungerToColor(float hunger)
+        {
+            float h = Mathf.Clamp01(hunger);
+            float brightness = Mathf.Lerp(1f, 0.45f, Mathf.Clamp01(h * 2f));
+            float redness = Mathf.Clamp01((h - 0.5f) * 2f);
+            return new Color(
+                brightness,
+                brightness * (1f - 0.75f * redness),
+                brightness * (1f - 0.85f * redness),
+                1f);
         }
 
         void AddCube(Transform parent, Vector3 localPos, Vector3 scale, Material material)

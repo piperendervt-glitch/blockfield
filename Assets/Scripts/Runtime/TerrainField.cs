@@ -133,7 +133,11 @@ namespace BlockField
             m_SwitchRequested = true;
         }
 
-        /// <summary>地形（とエンティティ）の表示を設定する。診断モード切替から呼ばれる。</summary>
+        /// <summary>
+        /// 地形チャンクの表示を設定する。診断モード切替から呼ばれる。
+        /// エンティティは <see cref="EntitiesVisible"/> で別に制御する
+        /// （診断モードでは地形を隠しつつ、飢餓状態の色分けは見せたいため）。
+        /// </summary>
         public void SetFieldVisible(bool visible)
         {
             m_FieldVisible = visible;
@@ -142,6 +146,11 @@ namespace BlockField
                 chunk.SetActive(m_FieldVisible);
             }
         }
+
+        /// <summary>エンティティ（動植物）を表示するか。EntityRenderer が追従する。</summary>
+        public bool EntitiesVisible { get; private set; } = true;
+
+        public void SetEntitiesVisible(bool visible) => EntitiesVisible = visible;
 
         /// <summary>セル座標 → <see cref="TerrainRoot"/> ローカル位置。EntityRenderer と共用する。</summary>
         public Vector3 CellToLocal(Int3 cell)

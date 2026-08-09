@@ -113,6 +113,81 @@ namespace BlockField.Tests.EditMode
         }
 
         [Test]
+        public void Stats_DensitiesAreRelativeToSuitableCells()
+        {
+            var world = CreateAndTick(11u, 800, SimParams.Default);
+
+            Assert.Greater(world.PlantCount, 0, "植物が湧いていない（テストが空回りしている）");
+            Assert.AreEqual(
+                (float)world.PlantCount / world.SuitableCellCount,
+                EcologyStats.PlantDensity(world), 1e-6f);
+            Assert.AreEqual(
+                (float)world.AnimalCount / world.SuitableCellCount,
+                EcologyStats.AnimalDensity(world), 1e-6f);
+        }
+
+        [Test]
+        public void Stats_FeedCountersAreRecordedAndBounded()
+        {
+            var world = CreateAndTick(12u, 800, SimParams.Default);
+
+            Assert.Greater(world.FeedAttemptCount, 0, "摂食試行が記録されていない");
+            Assert.LessOrEqual(world.FeedSuccessCount, world.FeedAttemptCount,
+                "成功が試行を上回っている");
+
+            float rate = EcologyStats.FeedSuccessRate(world);
+            Assert.GreaterOrEqual(rate, 0f);
+            Assert.LessOrEqual(rate, 1f);
+            Assert.AreEqual((float)world.FeedSuccessCount / world.FeedAttemptCount, rate, 1e-6f);
+        }
+
+        [Test]
+        public void Stats_DiagnosticCountersDoNotAffectContentHash()
+        {
+            // 表示と真実の分離: 診断用の統計は導出値であり、決定論に影響しない。
+            // 同一シードの2ワールドでハッシュが一致し、かつ統計も同じ値になること
+            var a = CreateAndTick(13u, 300, SimParams.Default);
+            var b = CreateAndTick(13u, 300, SimParams.Default);
+
+            Assert.AreEqual(a.ComputeContentHash(), b.ComputeContentHash());
+            Assert.AreEqual(a.FeedAttemptCount, b.FeedAttemptCount);
+            Assert.AreEqual(a.FeedSuccessCount, b.FeedSuccessCount);
+            Assert.Greater(a.FeedAttemptCount, 0);
+        }
+
+        [Test]
+        public void Stats_StarvationIsNormalisedPerAnimal()
+        {
+            var world = CreateAndTick(14u, 1000, SimParams.Default);
+
+            // 分母は延べ生存ティック数（各ティックの動物数の総和）
+            long animalTicks = 0;
+            for (int i = 0; i < world.PopulationLog.Count; i++)
+            {
+                animalTicks += world.PopulationLog.GetSample(i).Animals;
+            }
+            Assert.Greater(animalTicks, 0);
+
+            Assert.AreEqual(
+                1000f * world.StarvationCount / animalTicks,
+                EcologyStats.StarvationPerAnimalPerKiloTick(world), 1e-4f);
+        }
+
+        [Test]
+        public void Stats_PopulationLogSampleSplitsHerbivoresAndWolves()
+        {
+            var world = CreateAndTick(15u, 200, SimParams.Default);
+            var last = world.PopulationLog.GetSample(world.PopulationLog.Count - 1);
+
+            Assert.AreEqual(world.TickCount, last.tick + 1,
+                "最後の記録はティック加算の直前に取られる");
+            Assert.AreEqual(world.PlantCount, last.plants);
+            Assert.AreEqual(world.SheepCount + world.PigCount, last.herbivores);
+            Assert.AreEqual(world.WolfCount, last.wolves);
+            Assert.AreEqual(world.AnimalCount, last.Animals);
+        }
+
+        [Test]
         public void Density_PlantDensityMatchesAcrossScales()
         {
             // Demo 5a の目的そのもの: 広さが変わっても定常の植物密度が同じになること。

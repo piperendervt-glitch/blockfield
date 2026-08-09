@@ -128,10 +128,12 @@ namespace BlockField
         {
             Mode = mode;
 
-            // 地形とエンティティは TerrainField が持つ。診断ではマーカーだけを見せる
+            // 地形は診断では隠す。エンティティは**両モードで見せる** —
+            // 診断モードの飢餓色分け (Demo 5a) は動物が見えていないと意味がないため
             if (m_TerrainField != null)
             {
                 m_TerrainField.SetFieldVisible(mode == ViewMode.Normal);
+                m_TerrainField.SetEntitiesVisible(true);
             }
             if (m_MarkerObject != null)
             {
