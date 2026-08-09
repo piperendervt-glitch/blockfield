@@ -67,7 +67,7 @@ public static class SceneBootstrap
         tpd.rotationInput = new InputActionProperty(rotationAction);
         tpd.trackingStateInput = new InputActionProperty(trackingStateAction);
 
-        camGo.AddComponent<ARCameraManager>();
+        var cameraManager = camGo.AddComponent<ARCameraManager>();
         var cameraBackground = camGo.AddComponent<ARCameraBackground>();
 
         // Occlusion: Environment Depth = Fastest。
@@ -94,6 +94,7 @@ public static class SceneBootstrap
         // 現時点では起動時にパススルー有効を適用するだけで挙動は変わらない
         var passthrough = camGo.AddComponent<BlockField.PassthroughController>();
         passthrough.targetCamera = cam;
+        passthrough.cameraManager = cameraManager;
         passthrough.cameraBackground = cameraBackground;
         passthrough.occlusionManager = occlusion;
 

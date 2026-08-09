@@ -64,7 +64,15 @@ namespace BlockField
             Clear();
 
             var stopwatch = Stopwatch.StartNew();
-            var result = RoomShellComposer.Compose(observation, terrainGrid, RoomShellParams.Default);
+
+            // スキャンした部屋メッシュ全体もボクセル化する（家具・棚の側面・机の脚）。
+            // 積もり面（真下レイキャスト）は上向きの面しか拾わないため、これが無いと
+            // VRモードで縦の面が丸ごと欠けて部屋の形が分からない
+            var scan = m_Builder.Scan;
+            var result = RoomShellComposer.Compose(
+                observation, terrainGrid, RoomShellParams.Default,
+                scan?.Vertices, scan?.Triangles);
+            long composeMs = stopwatch.ElapsedMilliseconds;
 
             m_Root = new GameObject("Room Shell");
             m_Root.transform.SetParent(parent, false);
@@ -97,9 +105,11 @@ namespace BlockField
 
             m_Root.SetActive(m_Visible);
 
-            Debug.Log($"[RoomShell] 外殻を生成: {stopwatch.ElapsedMilliseconds}ms " +
-                $"壁={result.WallBlocks} 天井={result.CeilingBlocks} 床下={result.UnderFloorBlocks} " +
-                $"計={result.TotalBlocks} チャンク={chunkCount} " +
+            Debug.Log($"[RoomShell] 外殻を生成: 合成{composeMs}ms メッシュ化{stopwatch.ElapsedMilliseconds - composeMs}ms " +
+                $"(計{stopwatch.ElapsedMilliseconds}ms) " +
+                $"メッシュ由来={result.MeshBlocks} 壁={result.WallBlocks} 天井={result.CeilingBlocks} " +
+                $"床下={result.UnderFloorBlocks} 計={result.TotalBlocks} チャンク={chunkCount} " +
+                $"三角形={(scan?.Triangles != null ? scan.Triangles.Length / 3 : 0)} " +
                 $"床cellY={result.FloorCellY} 天井cellY={result.CeilingCellY} " +
                 $"({(result.CeilingCellY - result.FloorCellY) * k_BlockSize:F2}m) " +
                 $"表示={(m_Visible ? "ON" : "OFF")}");

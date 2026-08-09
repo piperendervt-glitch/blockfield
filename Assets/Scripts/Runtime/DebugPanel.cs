@@ -75,7 +75,21 @@ namespace BlockField
                     ? (m_RoomView.Mode == RoomTerrainView.ViewMode.Normal ? "NORMAL" : "DIAG")
                     : "-";
                 Debug.Log($"[DebugPanel] FPS={fps:F1} mode={mode} " +
+                    $"vr={(m_VrMode != null ? (m_VrMode.IsVrMode ? "VR" : "MR") : "-")} " +
                     $"blocks={(m_TerrainField != null ? m_TerrainField.BlockCount : 0)}");
+
+                // 座標系ズレ（メタボタン長押しの再センタリング）の切り分け用。
+                // 再センタリングが起きるとアンカーのワールドポーズが動く。地形ルートは
+                // アンカーの子なので local は不変のまま world だけが追従するのが正しい姿。
+                // world が動かない／local が変わるなら親子付けが壊れている
+                var anchor = m_Diorama != null ? m_Diorama.OriginTransform : null;
+                var root = m_TerrainField != null ? m_TerrainField.TerrainRoot : null;
+                if (anchor != null && root != null)
+                {
+                    Debug.Log($"[DebugPanel] 座標系: アンカー world={anchor.position:F3} " +
+                        $"rotY={anchor.rotation.eulerAngles.y:F1} / " +
+                        $"地形ルート local={root.localPosition:F3} world={root.position:F3}");
+                }
             }
         }
 

@@ -58,9 +58,17 @@ Write-Host "logcat バッファをクリアしました"
 $stamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $logPath = Join-Path $logsDir "session_$stamp.log"
 
-# 捕捉対象: プロジェクトのログタグ行 ＋ 例外・エラー行
-$tags = "TerrainField|BlockInteractor|ScenePermissionGate|DioramaOrigin|MeshRecon|RoomScanner|RoomTerrain|EntityRenderer|DebugPanel"
-$pattern = "\[($tags)\]|E/|Exception|Error"
+# 捕捉対象: Unity からのログ全部 ＋ パススルー合成の証跡 ＋ 例外・エラー行。
+#
+# タグ列挙をやめた理由: Demo 4.5b で [VrMode] [Passthrough] [RoomShell] を
+# 追加したときにこの列挙を更新し忘れ、セッション後に「切替が呼ばれたのか」を
+# 判定できなかった（2026-08-09）。タグを増やすたびに更新が要る仕組みは
+# 同じ抜けを繰り返すので、Unity 行はまとめて拾う。
+#
+# パススルーは OpenXR のコンポジションレイヤーで、Meta OpenXR の
+# CameraSubsystem.Start/Stop が Create/DestroyPassthroughLayer を呼ぶ。
+# その package 側ログと、システム側の CameraStream [passthrough] も証跡として拾う。
+$pattern = "I/Unity|E/Unity|W/Unity|PassthroughLayer|\[passthrough\]|E/|Exception|Error"
 
 # 子プロセス用のワーカースクリプト。StreamWriter の AutoFlush で
 # セッション中でもログが逐次書き出される（Out-File はバッファされるため使わない）
@@ -110,6 +118,6 @@ Set-Content -Path $pidFile -Value @($proc.Id, $logPath) -Encoding ascii
 Write-Host ""
 Write-Host "捕捉を開始しました (PID $($proc.Id))"
 Write-Host "  出力先: $logPath"
-Write-Host "  対象タグ: $tags"
+Write-Host "  対象: Unity ログ全部 ＋ パススルー合成の証跡 ＋ エラー行"
 Write-Host "  終了: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\stop_capture.ps1"
 exit 0

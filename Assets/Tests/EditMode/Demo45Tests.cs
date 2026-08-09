@@ -674,13 +674,29 @@ namespace BlockField.Tests.EditMode
             Assert.AreEqual(20 * 20, shell.CeilingBlocks, "天井が部屋全体を覆っていない");
             Assert.AreEqual(BlockId.RoomShell, shell.Grid.Get(new Int3(10, 50, 10)));
 
-            // 床下は指定層数
-            Assert.AreEqual(20 * 20 * p.underFloorLayers, shell.UnderFloorBlocks, "床下の層数が合わない");
-            for (int i = 0; i < p.underFloorLayers; i++)
+            // 床下は全ての柱で指定層数ぶん埋まっている。
+            // 数え方の注意: 外周の柱は壁のループが先に floorCellY を埋めるため、
+            // その1セルは WallBlocks 側に計上される（二重計上を避けている）。
+            // ここは「実際に埋まっているか」で見る
+            int missing = 0;
+            for (int z = 0; z < 20; z++)
             {
-                Assert.AreEqual(BlockId.RoomShell, shell.Grid.Get(new Int3(10, -i, 10)),
-                    $"床下 {i} 層目が埋まっていない");
+                for (int x = 0; x < 20; x++)
+                {
+                    for (int i = 0; i < p.underFloorLayers; i++)
+                    {
+                        if (shell.Grid.Get(new Int3(x, -i, z)) == BlockId.Air)
+                        {
+                            missing++;
+                        }
+                    }
+                }
             }
+            Assert.AreEqual(0, missing, "床下に埋まっていないセルがある");
+
+            int perimeter = 2 * 20 + 2 * 20 - 4;
+            Assert.AreEqual(20 * 20 * p.underFloorLayers - perimeter, shell.UnderFloorBlocks,
+                "床下の計上数が合わない（外周の最下段は壁側に計上される）");
         }
 
         [Test]
@@ -740,6 +756,75 @@ namespace BlockField.Tests.EditMode
             Assert.AreEqual(p.fallbackCeilingMargin, shell.CeilingCellY,
                 "Ceiling 平面が無いときのフォールバック高さが違う");
             Assert.Greater(shell.CeilingBlocks, 0, "フォールバックでも天井が張られていない");
+        }
+
+        [Test]
+        public void MeshVoxelizer_FillsCellsAlongTriangles()
+        {
+            // 縦の壁1枚（x=0.4m の平面、y=0..0.4m）。積もり面（真下レイキャスト）では
+            // 一切拾えない向きの面が、メッシュのボクセル化なら埋まる
+            var v = new List<float>();
+            var t = new List<int>();
+            int b = 0;
+            v.AddRange(new[] { 0.4f, 0f, 0.2f, 0.4f, 0f, 0.6f, 0.4f, 0.4f, 0.6f, 0.4f, 0.4f, 0.2f });
+            t.AddRange(new[] { b, b + 1, b + 2, b, b + 2, b + 3 });
+
+            var grid = new VoxelGrid();
+            int filled = RoomMeshVoxelizer.Voxelize(
+                v.ToArray(), t.ToArray(), k_Cell, 0f, 0f, 30, 30, grid, null, BlockId.RoomShell);
+
+            Assert.Greater(filled, 0, "縦の面が1セルも埋まっていない");
+
+            // x=0.4m → セル10、y=0.2m → セル5、z=0.4m → セル10
+            Assert.AreEqual(BlockId.RoomShell, grid.Get(new Int3(10, 5, 10)),
+                "壁面の途中の高さが埋まっていない");
+            // 面から離れたセルは埋まらない
+            Assert.AreEqual(BlockId.Air, grid.Get(new Int3(20, 5, 10)), "面から離れたセルまで埋まっている");
+        }
+
+        [Test]
+        public void MeshVoxelizer_RespectsSkipGrid()
+        {
+            var v = new List<float>();
+            var t = new List<int>();
+            v.AddRange(new[] { 0.4f, 0f, 0.2f, 0.4f, 0f, 0.6f, 0.4f, 0.4f, 0.6f, 0.4f, 0.4f, 0.2f });
+            t.AddRange(new[] { 0, 1, 2, 0, 2, 3 });
+
+            var skip = new VoxelGrid();
+            skip.SetBlock(new Int3(10, 5, 10), BlockId.Grass, BlockOrigin.Terrain);
+
+            var grid = new VoxelGrid();
+            RoomMeshVoxelizer.Voxelize(
+                v.ToArray(), t.ToArray(), k_Cell, 0f, 0f, 30, 30, grid, skip, BlockId.RoomShell);
+
+            Assert.AreEqual(BlockId.Air, grid.Get(new Int3(10, 5, 10)),
+                "地形が埋めているセルを外殻が上書きしている（Z ファイトの原因）");
+        }
+
+        [Test]
+        public void Shell_WithRoomMesh_AddsVerticalSurfaces()
+        {
+            var obs = BuildSealedRoom(20, 50);
+            var world = World.CreateFromRoom(obs, TerrainParams.Default, SnowfallParams.Default, out var terrain);
+
+            // 室内に机の脚のような縦の面を1枚立てる（x=0.4m, z=0.4m 付近, 高さ0.2〜0.6m）
+            var v = new List<float>
+            {
+                0.4f, 0.2f, 0.4f, 0.4f, 0.2f, 0.6f, 0.4f, 0.6f, 0.6f, 0.4f, 0.6f, 0.4f,
+            };
+            var t = new List<int> { 0, 1, 2, 0, 2, 3 };
+
+            var without = RoomShellComposer.Compose(obs, terrain.Grid, RoomShellParams.Default);
+            var with = RoomShellComposer.Compose(
+                obs, terrain.Grid, RoomShellParams.Default, v.ToArray(), t.ToArray());
+
+            Assert.AreEqual(0, without.MeshBlocks);
+            Assert.Greater(with.MeshBlocks, 0, "メッシュ由来のセルが1つも増えていない");
+
+            // 縦の面の途中の高さ (y=0.4m → セル10) が、メッシュ由来でのみ埋まる
+            var probe = new Int3(10, 10, 10);
+            Assert.AreEqual(BlockId.Air, without.Grid.Get(probe), "メッシュ無しでも埋まっている（テストが無意味）");
+            Assert.AreEqual(BlockId.RoomShell, with.Grid.Get(probe), "縦の面が外殻に入っていない");
         }
 
         [Test]

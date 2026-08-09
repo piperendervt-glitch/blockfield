@@ -47,8 +47,8 @@ namespace BlockField
         InputAction m_ModeAction;
         GameObject m_MarkerObject;
         Mesh m_MarkerMesh;
+        Transform m_TrackedParent;
         bool m_ModeRequested;
-        bool m_Built;
         float m_LastModeTime = float.NegativeInfinity;
 
         void Awake()
@@ -71,16 +71,18 @@ namespace BlockField
 
         void Update()
         {
-            if (!m_Built)
+            // 地形ルートができてから作る（マーカーは地形と同じ親＝アンカー相対に置く）。
+            // シード巡回で地形が作り直されるとルートごと破棄されるため、親の入れ替わりを
+            // 検知して作り直す（初版は1回だけ作って終わりで、シード巡回後にマーカーが消えていた）
+            var observation = m_Builder != null ? m_Builder.Observation : null;
+            var root = m_TerrainField != null ? m_TerrainField.TerrainRoot : null;
+            if (observation == null || root == null)
             {
-                // 地形ルートができてから作る（マーカーは地形と同じ親＝アンカー相対に置く）
-                var observation = m_Builder != null ? m_Builder.Observation : null;
-                var root = m_TerrainField != null ? m_TerrainField.TerrainRoot : null;
-                if (observation != null && root != null)
-                {
-                    m_Built = true;
-                    BuildMarkers(observation, root);
-                }
+                return;
+            }
+            if (m_MarkerObject == null || m_TrackedParent != root)
+            {
+                BuildMarkers(observation, root);
                 return;
             }
 
@@ -95,6 +97,13 @@ namespace BlockField
 
         void BuildMarkers(RoomObservation observation, Transform root)
         {
+            if (m_MarkerMesh != null)
+            {
+                Destroy(m_MarkerMesh);
+                m_MarkerMesh = null;
+            }
+            m_TrackedParent = root;
+
             m_MarkerMesh = SurfaceMarkerMesher.Build(observation, observation.CellSize);
             if (m_MarkerMesh == null)
             {

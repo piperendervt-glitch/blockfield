@@ -54,7 +54,18 @@ namespace BlockField
         void OnEnable() => m_ToggleAction.Enable();
         void OnDisable() => m_ToggleAction.Disable();
 
-        void OnTogglePerformed(InputAction.CallbackContext _) => m_ToggleRequested = true;
+        void OnTogglePerformed(InputAction.CallbackContext context)
+        {
+            // usage が付いていないデバイスだと右手Aと取り違える恐れがあるため、左手からの
+            // 入力であることを確かめる。どのデバイスが発火したかは実機の切り分け用に必ず出す
+            bool isLeft = ControllerHand.IsLeft(context);
+            Debug.Log($"[VrMode] 入力: {ControllerHand.Describe(context)} 左手判定={isLeft}");
+            if (!isLeft)
+            {
+                return;
+            }
+            m_ToggleRequested = true;
+        }
 
         void Update()
         {

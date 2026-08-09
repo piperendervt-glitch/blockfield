@@ -121,7 +121,17 @@ namespace BlockField
         void OnEnable() => m_AButtonAction.Enable();
         void OnDisable() => m_AButtonAction.Disable();
 
-        void OnAButtonPerformed(InputAction.CallbackContext _) => m_SwitchRequested = true;
+        void OnAButtonPerformed(InputAction.CallbackContext context)
+        {
+            // 左手Xが VRモード切替に割り当ててあるので、右手からの入力だけを受ける
+            // （usage 未設定のデバイスだと両手のボタンが同じアクションに一致しうる）
+            if (!ControllerHand.IsRight(context))
+            {
+                Debug.Log($"[TerrainField] シード巡回を無視（右手以外）: {ControllerHand.Describe(context)}");
+                return;
+            }
+            m_SwitchRequested = true;
+        }
 
         /// <summary>地形（とエンティティ）の表示を設定する。診断モード切替から呼ばれる。</summary>
         public void SetFieldVisible(bool visible)

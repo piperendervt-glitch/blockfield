@@ -27,10 +27,14 @@ namespace BlockField.SimCore.Terrain
         public int WallBlocks;
         public int CeilingBlocks;
         public int UnderFloorBlocks;
+
+        /// <summary>スキャンした部屋メッシュ全体から埋めたセル数（家具・棚の側面など）。</summary>
+        public int MeshBlocks;
+
         public int CeilingCellY;
         public int FloorCellY;
 
-        public int TotalBlocks => WallBlocks + CeilingBlocks + UnderFloorBlocks;
+        public int TotalBlocks => WallBlocks + CeilingBlocks + UnderFloorBlocks + MeshBlocks;
     }
 
     /// <summary>
@@ -52,8 +56,17 @@ namespace BlockField.SimCore.Terrain
     /// </summary>
     public static class RoomShellComposer
     {
+        /// <summary>
+        /// 部屋の外殻を合成する。
+        /// </summary>
+        /// <param name="meshVertices">
+        /// スキャンした部屋メッシュ（ワールド座標）。渡すと家具・棚の側面・机の脚まで
+        /// ボクセル化する。**表示専用**であり M4 の保証対象外（生メッシュのアーカイブと同じ扱い）。
+        /// null なら壁・天井・床下だけを作る。
+        /// </param>
         public static RoomShellResult Compose(
-            RoomObservation observation, VoxelGrid terrainGrid, RoomShellParams p)
+            RoomObservation observation, VoxelGrid terrainGrid, RoomShellParams p,
+            float[] meshVertices = null, int[] meshTriangles = null)
         {
             if (observation == null)
             {
@@ -68,6 +81,17 @@ namespace BlockField.SimCore.Terrain
             int ceilingCellY = ResolveCeilingCellY(observation, p, floorCellY);
             result.FloorCellY = floorCellY;
             result.CeilingCellY = ceilingCellY;
+
+            // 部屋メッシュ全体の表面（家具・棚の側面・机の脚・荷物）。
+            // 壁や天井より先に埋めておくと、後段の TrySet が二重に数えない
+            if (meshVertices != null && meshTriangles != null)
+            {
+                result.MeshBlocks = RoomMeshVoxelizer.Voxelize(
+                    meshVertices, meshTriangles,
+                    observation.CellSize, observation.OriginWorldX, observation.OriginWorldZ,
+                    observation.Width, observation.Depth,
+                    grid, terrainGrid, BlockId.RoomShell);
+            }
 
             for (int z = 0; z < observation.Depth; z++)
             {
@@ -135,11 +159,18 @@ namespace BlockField.SimCore.Terrain
             return top + p.fallbackCeilingMargin;
         }
 
-        /// <summary>地形グリッドが既に埋めているセルは飛ばす（Z ファイト防止）。</summary>
+        /// <summary>
+        /// 地形グリッドが既に埋めているセルは飛ばす（Z ファイト防止）。
+        /// 外殻グリッド側で既に埋まっているセル（メッシュボクセル化の結果）も二重に数えない。
+        /// </summary>
         static bool TrySet(VoxelGrid grid, VoxelGrid terrainGrid, int x, int y, int z)
         {
             var cell = new Int3(x, y, z);
             if (terrainGrid != null && terrainGrid.Get(cell) != BlockId.Air)
+            {
+                return false;
+            }
+            if (grid.Get(cell) != BlockId.Air)
             {
                 return false;
             }
