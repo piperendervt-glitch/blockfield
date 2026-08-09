@@ -83,7 +83,7 @@ public static class SceneBootstrap
         // BlockField/OcclusionUnlit (XR_HARD_OCCLUSION 対応) を使うこと。
         // 本体は常時有効で問題ない: XR_HARD_OCCLUSION キーワードは AROcclusionManager が
         // 権限取得後に有効化されて深度フレームが届いて初めて点灯する。
-        camGo.AddComponent<ARShaderOcclusion>();
+        var shaderOcclusion = camGo.AddComponent<ARShaderOcclusion>();
 
         // USE_SCENE 権限フロー (Demo 0 T1)
         var gateGo = new GameObject("Scene Permission Gate");
@@ -97,6 +97,8 @@ public static class SceneBootstrap
         passthrough.cameraManager = cameraManager;
         passthrough.cameraBackground = cameraBackground;
         passthrough.occlusionManager = occlusion;
+        // VRモードで深度が凍結したまま遮蔽が効き続けるのを防ぐため、こちらも切る
+        passthrough.shaderOcclusion = shaderOcclusion;
 
         origin.Camera = cam;
         origin.CameraFloorOffsetObject = offsetGo;

@@ -34,6 +34,7 @@ namespace BlockField
         [SerializeField] ARCameraManager m_CameraManager;
         [SerializeField] ARCameraBackground m_CameraBackground;
         [SerializeField] AROcclusionManager m_OcclusionManager;
+        [SerializeField] ARShaderOcclusion m_ShaderOcclusion;
 
         /// <summary>
         /// VRモードの背景色（不透明）。パススルー無効時のみ使う。
@@ -47,6 +48,13 @@ namespace BlockField
         public ARCameraManager cameraManager { get => m_CameraManager; set => m_CameraManager = value; }
         public ARCameraBackground cameraBackground { get => m_CameraBackground; set => m_CameraBackground = value; }
         public AROcclusionManager occlusionManager { get => m_OcclusionManager; set => m_OcclusionManager = value; }
+
+        /// <summary>
+        /// 深度テクスチャとキーワードをシェーダーへ流す本体。
+        /// これを切らないと、AROcclusionManager を止めても最後の深度フレームが
+        /// 凍結したまま遮蔽が効き続ける（下記の説明を参照）。
+        /// </summary>
+        public ARShaderOcclusion shaderOcclusion { get => m_ShaderOcclusion; set => m_ShaderOcclusion = value; }
         public Color vrBackgroundColor { get => m_VrBackgroundColor; set => m_VrBackgroundColor = value; }
 
         /// <summary>パススルーが有効か。</summary>
@@ -54,6 +62,7 @@ namespace BlockField
 
         // VRへ入る直前のオクルージョン状態（MRへ戻すときに復元する）
         bool m_OcclusionWasEnabled;
+        bool m_ShaderOcclusionWasEnabled;
         bool m_OcclusionRestorePending;
 
         void Awake()
@@ -72,6 +81,22 @@ namespace BlockField
         /// （遮蔽する現実物体が描かれないのに深度だけが効き、仮想物体が消える）。
         /// 無効化する際に元の状態を覚えておき、MRへ戻すときに復元する
         /// （権限が下りていなければ元々 false なので、false のまま戻る）。
+        ///
+        /// 【AROcclusionManager だけでは足りない — 2026-08-09 の実機で判明】
+        /// 症状: VRへ切り替えた瞬間に**視野内だった方向だけ**が真っ黒になり、
+        /// 振り向いた先にはブロックが見えていた。ジオメトリは破棄されておらず
+        /// （再メッシュも破棄もログに無し）、描画時に捨てられていた。
+        ///
+        /// 原因: シェーダー側の遮蔽判定は <c>_IsOcclusionOn</c> で分岐する
+        /// （OcclusionComputation.hlsl）。この値と深度テクスチャ・
+        /// XR_HARD_OCCLUSION キーワードを流しているのは AROcclusionManager ではなく
+        /// **ARShaderOcclusion** である。AROcclusionManager を切っても
+        /// ARShaderOcclusion は生きたままなので、_IsOcclusionOn は 1 のまま、
+        /// 深度テクスチャは**切替時点のフレームで凍結**する。
+        /// その凍結フレームが覆う方向＝切替時の視野だけが遮蔽され続け、
+        /// 覆っていない方向は無事、という症状になる。
+        /// ARShaderOcclusion.OnDisable() が _IsOcclusionOn を 0 にするので、
+        /// これを切れば遮蔽ごと止まる。
         /// </summary>
         public void SetPassthroughEnabled(bool enabled)
         {
@@ -98,18 +123,34 @@ namespace BlockField
                 m_CameraManager.enabled = enabled;
             }
 
-            if (m_OcclusionManager != null)
+            if (!enabled)
             {
-                if (!enabled)
+                // VRへ: 現在の状態を覚えてから止める
+                if (m_OcclusionManager != null)
                 {
-                    // VRへ: 現在の状態を覚えてから止める
                     m_OcclusionWasEnabled = m_OcclusionManager.enabled;
                     m_OcclusionManager.enabled = false;
                 }
-                else if (m_OcclusionRestorePending)
+                // ここが2026-08-09 の実機で判明した本命。
+                // ARShaderOcclusion を止めないと _IsOcclusionOn が 1 のまま、
+                // 切替時点の深度テクスチャとキーワードが凍結して遮蔽が効き続ける
+                if (m_ShaderOcclusion != null)
                 {
-                    // MRへ戻る: VRに入る前の状態へ復元する
+                    m_ShaderOcclusionWasEnabled = m_ShaderOcclusion.enabled;
+                    m_ShaderOcclusion.enabled = false;
+                }
+            }
+            else if (m_OcclusionRestorePending)
+            {
+                // MRへ戻る: VRに入る前の状態へ復元する。
+                // 深度の供給元を先に戻してからシェーダー側を戻す
+                if (m_OcclusionManager != null)
+                {
                     m_OcclusionManager.enabled = m_OcclusionWasEnabled;
+                }
+                if (m_ShaderOcclusion != null)
+                {
+                    m_ShaderOcclusion.enabled = m_ShaderOcclusionWasEnabled;
                 }
             }
             m_OcclusionRestorePending = !enabled;
@@ -121,7 +162,8 @@ namespace BlockField
                 $"clear={(m_Camera != null ? m_Camera.clearFlags.ToString() : "未設定")} " +
                 $"bgA={(m_Camera != null ? m_Camera.backgroundColor.a.ToString("F2") : "-")} " +
                 $"hdr={(m_Camera != null ? m_Camera.allowHDR.ToString() : "-")} " +
-                $"occl={(m_OcclusionManager != null ? m_OcclusionManager.enabled.ToString() : "未設定")}");
+                $"occl={(m_OcclusionManager != null ? m_OcclusionManager.enabled.ToString() : "未設定")} " +
+                $"shaderOccl={(m_ShaderOcclusion != null ? m_ShaderOcclusion.enabled.ToString() : "未設定")}");
         }
     }
 }
