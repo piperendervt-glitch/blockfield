@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using BlockField.SimCore.Rng;
 using BlockField.SimCore.Terrain;
 using BlockField.SimCore.Voxel;
+// RoomObservation は SimCore.Terrain 名前空間（Demo 4.5 G1）
 
 namespace BlockField.SimCore.Ecology
 {
@@ -393,13 +394,32 @@ namespace BlockField.SimCore.Ecology
         }
 
         /// <summary>
-        /// リプレイ (Demo 4 F2 / M3): f(シード, イベントログ)。
-        /// events（tick昇順）を各ティックの先頭で注入しながら ticks 回 Tick する。
-        /// シードは terrainParams.seed。
+        /// 現実観測の記録 (Demo 4.5 G1)。観測データを EventLog の付随テーブルへ入れ、
+        /// payloadIndex を持つ Observation イベントを記録する。
+        /// 地形合成そのものは G3 で実装する（本メソッドは記録のみ）。
         /// </summary>
-        public static World Replay(TerrainParams terrainParams, SimParams simParams, IReadOnlyList<SimEvent> events, long ticks)
+        public void RecordObservation(RoomObservation observation)
+        {
+            if (observation == null)
+            {
+                throw new ArgumentNullException(nameof(observation));
+            }
+            int payloadIndex = EventLog.AddObservation(observation);
+            EventLog.Append(new SimEvent(TickCount, SimEventType.Observation, new Int3(0, 0, 0), 0, true, payloadIndex));
+        }
+
+        /// <summary>
+        /// リプレイ (Demo 4 F2 / M3, Demo 4.5 G1): f(シード, イベントログ)。
+        /// イベント列（tick昇順）を各ティックの先頭で注入しながら ticks 回 Tick する。
+        /// シードは terrainParams.seed。
+        ///
+        /// Observation イベントは付随テーブルごと再構築後のワールドへ引き継ぐ。
+        /// 観測からの地形合成は G3 で実装する（現時点では記録の引き継ぎのみ）。
+        /// </summary>
+        public static World Replay(TerrainParams terrainParams, SimParams simParams, EventLog log, long ticks)
         {
             var world = Create(terrainParams);
+            var events = log.Events;
             int next = 0;
             for (long t = 0; t < ticks; t++)
             {
@@ -408,7 +428,13 @@ namespace BlockField.SimCore.Ecology
                     var e = events[next++];
                     if (e.type == SimEventType.Observation)
                     {
-                        continue; // Demo 4.5 で実装
+                        // 付随テーブルの観測データを引き継ぐ（地形合成は G3）
+                        var obs = log.GetObservation(e.payloadIndex);
+                        if (obs != null)
+                        {
+                            world.RecordObservation(obs);
+                        }
+                        continue;
                     }
                     world.EnqueuePlayerAction(e.type, e.cell, (BlockId)e.blockId);
                 }

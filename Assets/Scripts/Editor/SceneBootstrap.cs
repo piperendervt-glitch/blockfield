@@ -142,14 +142,15 @@ public static class SceneBootstrap
         interactor.rayHitMaterial = GetOrCreateMaterial("RayHit", Color.white, k_OcclusionShader);
         interactor.rayMissMaterial = GetOrCreateMaterial("RayMiss", new Color(0.35f, 0.35f, 0.38f), k_OcclusionShader);
 
-        // メッシュ偵察 (Demo 3 E6)。ARMeshManager は XR Origin の子である必要がある
-        var meshReconGo = new GameObject("Mesh Recon (E6)");
-        meshReconGo.transform.SetParent(originGo.transform, false);
-        var meshManager = meshReconGo.AddComponent<ARMeshManager>();
+        // 部屋スキャン (Demo 4.5 G1)。ARMeshManager は XR Origin の子である必要がある
+        // （Demo 3 E6 の MeshRecon を恒久機能化したもの）
+        var scannerGo = new GameObject("Room Scanner (G1)");
+        scannerGo.transform.SetParent(originGo.transform, false);
+        var meshManager = scannerGo.AddComponent<ARMeshManager>();
         meshManager.meshPrefab = GetOrCreateReconMeshPrefab();
-        var meshRecon = meshReconGo.AddComponent<BlockField.MeshRecon>();
-        meshRecon.meshManager = meshManager;
-        meshRecon.diorama = diorama;
+        var roomScanner = scannerGo.AddComponent<BlockField.RoomScanner>();
+        roomScanner.meshManager = meshManager;
+        roomScanner.planeManager = planeManager;
 
         // HMD内デバッグパネル (World Space Canvas、カメラ前下方 0.6m に固定)
         var canvasGo = new GameObject("Debug Panel");

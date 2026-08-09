@@ -157,9 +157,8 @@ namespace BlockField.Tests.EditMode
             Assert.Less(applied, worldA.EventLog.Events.Count, "無効操作が1つもない（テスト前提が弱い）");
             Assert.IsTrue(plantBreakApplied, "有効な PlayerBreakPlant がイベント列に含まれていない");
 
-            // リプレイ: f(シード, イベントログ)
-            var events = new List<SimEvent>(worldA.EventLog.Events);
-            var worldB = World.Replay(tp, sp, events, 60);
+            // リプレイ: f(シード, イベントログ)。EventLog はイベント列＋付随テーブルの1オブジェクト
+            var worldB = World.Replay(tp, sp, worldA.EventLog, 60);
             Assert.AreEqual(worldA.ComputeContentHash(), worldB.ComputeContentHash(),
                 "同一シード＋同一イベント列のリプレイでハッシュが不一致");
         }
@@ -176,7 +175,7 @@ namespace BlockField.Tests.EditMode
                 Simulation.Tick(worldA, worldA.Rng, sp);
             }
 
-            var worldB = World.Replay(tp, sp, new List<SimEvent>(), 60);
+            var worldB = World.Replay(tp, sp, new EventLog(), 60);
             Assert.AreEqual(worldA.ComputeContentHash(), worldB.ComputeContentHash());
         }
 
