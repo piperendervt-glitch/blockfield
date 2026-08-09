@@ -88,6 +88,27 @@ namespace BlockField
                     $"vr={(m_VrMode != null ? (m_VrMode.IsVrMode ? "VR" : "MR") : "-")} " +
                     $"blocks={(m_TerrainField != null ? m_TerrainField.BlockCount : 0)}");
 
+                // 【規約】パネルに出す指標は必ずログにも出す（CLAUDE.md 実機テスト運用）。
+                // M6 の FPS と Demo 5a の密度指標で、同じ「パネルにしか無くて
+                // セッション後に転記できない」漏れを2回起こしている
+                var world = m_TerrainField != null ? m_TerrainField.CurrentWorld : null;
+                if (world != null)
+                {
+                    Debug.Log($"[DebugPanel] 生態: tick={world.TickCount} " +
+                        $"植物={world.PlantCount} 草食={world.SheepCount + world.PigCount} 狼={world.WolfCount} " +
+                        $"適性セル={world.SuitableCellCount}");
+                    Debug.Log($"[DebugPanel] 密度: 植物={EcologyStats.PlantDensity(world) * 100:F2}% " +
+                        $"動物={EcologyStats.AnimalDensity(world) * 100:F2}% " +
+                        $"摂食{k_FeedWindowTicks}={UpdateAndGetFeedRate(world) * 100:F1}% " +
+                        $"餓死/個体/1000t={EcologyStats.StarvationPerAnimalPerKiloTick(world):F2} " +
+                        $"| 参照(箱庭3000t) 植物={EcologyStats.DioramaReference.PlantDensity * 100:F2}% " +
+                        $"動物={EcologyStats.DioramaReference.AnimalDensity * 100:F2}% " +
+                        $"摂食={EcologyStats.DioramaReference.FeedSuccessRate * 100:F1}% " +
+                        $"餓死={EcologyStats.DioramaReference.StarvationPerAnimalPerKiloTick:F2}");
+                    Debug.Log($"[DebugPanel] 累計: 餓死={world.StarvationCount} 捕食={world.PredationCount} " +
+                        $"出生={world.BirthCount} 摂食成功={world.FeedSuccessCount}/{world.FeedAttemptCount}");
+                }
+
                 // 座標系ズレ（メタボタン長押しの再センタリング）の切り分け用。
                 // 再センタリングが起きるとアンカーのワールドポーズが動く。地形ルートは
                 // アンカーの子なので local は不変のまま world だけが追従するのが正しい姿。
