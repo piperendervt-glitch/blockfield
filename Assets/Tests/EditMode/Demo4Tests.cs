@@ -100,7 +100,7 @@ namespace BlockField.Tests.EditMode
 
             Assert.AreEqual(BlockId.Stone, world.Grid.Get(cell), "プレイヤー設置ブロックが変化した");
             Assert.AreEqual(BlockOrigin.Player, world.Grid.GetOrigin(cell), "出所属性が変化した");
-            Assert.AreEqual(0f, world.Suitability.Get(25, 25), "Player ブロックが表層のセルの suitability が 0 でない");
+            Assert.AreEqual(0f, world.Suitability.GetAtColumn(25, 25), "Player ブロックが表層のセルの suitability が 0 でない");
             Assert.IsFalse(world.Grid.TrySetBlockEcology(cell, BlockId.Air), "生態系書き込み口が Player セルを書き換えられてしまう");
         }
 
@@ -215,8 +215,8 @@ namespace BlockField.Tests.EditMode
             float vegControl = 0f, vegTest = 0f;
             foreach (var b in broken)
             {
-                vegControl += control.Vegetation.Values.Get(b.x, b.z);
-                vegTest += test.Vegetation.Values.Get(b.x, b.z);
+                vegControl += control.Vegetation.GetAtColumn(b.x, b.z);
+                vegTest += test.Vegetation.GetAtColumn(b.x, b.z);
             }
             Assert.Less(vegTest, vegControl * 0.75f, $"植生場が半減していない (ctrl={vegControl:F2}, test={vegTest:F2})");
 
@@ -283,7 +283,7 @@ namespace BlockField.Tests.EditMode
 
             // 1ティック回して植生場に書き込ませてから破壊
             Simulation.Tick(world, world.Rng, p);
-            float vegBefore = world.Vegetation.Values.Get(x, z);
+            float vegBefore = world.Vegetation.GetAtColumn(x, z);
             Assert.Greater(vegBefore, 0f, "テスト前提: 植生場に書き込みがあること");
 
             world.EnqueuePlayerAction(SimEventType.PlayerBreakPlant, plantCell, BlockId.Air);
@@ -292,7 +292,7 @@ namespace BlockField.Tests.EditMode
             Assert.AreEqual(0, world.PlantCount, "植物が消えていない");
             Assert.AreEqual(surfaceBlock, world.Grid.Get(surfaceCell), "地形が変更された（植物のみ消えるはず）");
             Assert.AreEqual(h, world.GetSurfaceHeight(x, z), "表層高さが変わった");
-            Assert.Less(world.Vegetation.Values.Get(x, z), vegBefore * 0.75f, "植生場が半減していない");
+            Assert.Less(world.Vegetation.GetAtColumn(x, z), vegBefore * 0.75f, "植生場が半減していない");
 
             var buffer = new List<Int3>();
             Assert.IsFalse(world.ConsumeDirtyChunks(buffer), "地形不変更なのに DirtyChunks が積まれた");
@@ -308,7 +308,7 @@ namespace BlockField.Tests.EditMode
                     int h = world.GetSurfaceHeight(x, z);
                     for (int i = 0; i < len; i++)
                     {
-                        if (world.Suitability.Get(x + i, z) < 1f || world.GetSurfaceHeight(x + i, z) != h)
+                        if (world.Suitability.GetAtColumn(x + i, z) < 1f || world.GetSurfaceHeight(x + i, z) != h)
                         {
                             ok = false;
                             break;

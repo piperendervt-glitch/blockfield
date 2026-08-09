@@ -92,8 +92,8 @@ namespace BlockField.Tests.EditMode
                 for (int x = 0; x + 2 <= world.Width; x++)
                 {
                     int h = world.GetSurfaceHeight(x, z);
-                    if (world.Suitability.Get(x, z) >= 1f
-                        && world.Suitability.Get(x + 1, z) >= 1f
+                    if (world.Suitability.GetAtColumn(x, z) >= 1f
+                        && world.Suitability.GetAtColumn(x + 1, z) >= 1f
                         && world.GetSurfaceHeight(x + 1, z) == h)
                     {
                         return (x, z);

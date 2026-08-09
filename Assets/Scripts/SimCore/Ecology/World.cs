@@ -19,8 +19,14 @@ namespace BlockField.SimCore.Ecology
         const uint k_SimSeedSalt = 0xB5297A4Du;
 
         public VoxelGrid Grid { get; }
-        public Field Suitability { get; }
+        public SuitabilityField Suitability { get; }
         public VegetationField Vegetation { get; }
+
+        /// <summary>
+        /// 場の一元管理 (Demo 4.5 作業1)。ContentHash 計算と更新ループが場の種類を
+        /// 知らずに回るための辞書。決定論のため名前昇順で走査する（m_FieldOrder）。
+        /// </summary>
+        public IReadOnlyDictionary<string, IField> Fields => m_Fields;
         public TerrainParams Params { get; }
         public Mulberry32 Rng { get; }
         public PopulationLog PopulationLog { get; }
@@ -56,6 +62,8 @@ namespace BlockField.SimCore.Ecology
         readonly List<Entity> m_Entities = new List<Entity>();
         readonly Dictionary<Int3, int> m_OccupiedCells = new Dictionary<Int3, int>();
         readonly Dictionary<int, int> m_IdToIndex = new Dictionary<int, int>();
+        readonly Dictionary<string, IField> m_Fields = new Dictionary<string, IField>();
+        readonly List<string> m_FieldOrder = new List<string>();
         readonly List<PendingAction> m_PendingActions = new List<PendingAction>();
         readonly HashSet<Int3> m_DirtyChunks = new HashSet<Int3>();
         readonly HashSet<int> m_FeedbackDeadScratch = new HashSet<int>();
@@ -81,6 +89,32 @@ namespace BlockField.SimCore.Ecology
             m_SurfaceHeights = ComputeSurfaceHeights(Grid, p);
             Suitability = ComputeSuitability(p, m_SurfaceHeights, Grid);
             Vegetation = new VegetationField(p.width, p.depth);
+
+            RegisterField(Suitability);
+            RegisterField(Vegetation);
+        }
+
+        /// <summary>
+        /// 場の登録。決定論のため名前昇順に並べ替えて保持する
+        /// （辞書の列挙順は不定なので、ContentHash と更新は m_FieldOrder を使う）。
+        /// </summary>
+        void RegisterField(ScalarField field)
+        {
+            m_Fields.Add(field.Name, field);
+            m_FieldOrder.Add(field.Name);
+            m_FieldOrder.Sort(StringComparer.Ordinal);
+
+            // 表面場の前提検証をデバッグビルドで有効化する
+            field.SurfaceHeightProvider = GetSurfaceHeight;
+        }
+
+        /// <summary>全ての場の毎ティック更新（種類を知らずに回る）。</summary>
+        internal void UpdateFields(SimParams p)
+        {
+            foreach (var name in m_FieldOrder)
+            {
+                m_Fields[name].Update(p);
+            }
         }
 
         public static World Create(TerrainParams terrainParams)
@@ -198,8 +232,9 @@ namespace BlockField.SimCore.Ecology
 
                         if (InBounds(action.cell.x, action.cell.z))
                         {
-                            float v = Vegetation.Values.Get(action.cell.x, action.cell.z);
-                            Vegetation.Values.Set(action.cell.x, action.cell.z, v * 0.5f);
+                            // 柱単位の操作（表面場のエスケープハッチ。IField のコメント参照）
+                            float v = Vegetation.GetAtColumn(action.cell.x, action.cell.z);
+                            Vegetation.SetAtColumn(action.cell.x, action.cell.z, v * 0.5f);
                         }
                         applied = true;
                     }
@@ -236,8 +271,10 @@ namespace BlockField.SimCore.Ecology
 
                 if (InBounds(cell.x, cell.z))
                 {
-                    float v = Vegetation.Values.Get(cell.x, cell.z);
-                    Vegetation.Values.Set(cell.x, cell.z, v * 0.5f);
+                    // 柱単位の操作: 破壊されたブロックの y は表層高さと一致しないため
+                    // Int3 API ではなくエスケープハッチを使う（IField のコメント参照）
+                    float v = Vegetation.GetAtColumn(cell.x, cell.z);
+                    Vegetation.SetAtColumn(cell.x, cell.z, v * 0.5f);
                 }
             }
 
@@ -291,14 +328,14 @@ namespace BlockField.SimCore.Ecology
             int h = GetSurfaceHeight(x, z);
             if (h <= 0)
             {
-                Suitability.Set(x, z, 0f);
+                Suitability.SetAtColumn(x, z, 0f);
                 return;
             }
 
             var surfaceCell = new Int3(x, h - 1, z);
             if (Grid.Get(surfaceCell) != BlockId.Grass || Grid.GetOrigin(surfaceCell) == BlockOrigin.Player)
             {
-                Suitability.Set(x, z, 0f);
+                Suitability.SetAtColumn(x, z, 0f);
                 return;
             }
 
@@ -307,7 +344,7 @@ namespace BlockField.SimCore.Ecology
             CheckNeighbor(x - 1, z);
             CheckNeighbor(x, z + 1);
             CheckNeighbor(x, z - 1);
-            Suitability.Set(x, z, flat ? 1f : 0.5f);
+            Suitability.SetAtColumn(x, z, flat ? 1f : 0.5f);
 
             void CheckNeighbor(int nx, int nz)
             {
@@ -437,14 +474,11 @@ namespace BlockField.SimCore.Ecology
 
             ulong hash = Grid.ComputeContentHash();
 
-            for (int i = 0; i < Suitability.Length; i++)
+            // 場は名前昇順で畳み込む（辞書の列挙順は不定なため）。
+            // 現行の順序は suitability → vegetation で、辞書化前と同一。
+            foreach (var name in m_FieldOrder)
             {
-                hash = FoldUInt(hash, (uint)BitConverter.SingleToInt32Bits(Suitability.GetByIndex(i)), prime);
-            }
-
-            for (int i = 0; i < Vegetation.Values.Length; i++)
-            {
-                hash = FoldUInt(hash, (uint)BitConverter.SingleToInt32Bits(Vegetation.Values.GetByIndex(i)), prime);
+                hash = m_Fields[name].AccumulateHash(hash, prime);
             }
 
             foreach (var e in m_Entities)
@@ -502,9 +536,9 @@ namespace BlockField.SimCore.Ecology
         /// 適性場 (D3)。地形から一度だけ計算する静的な場:
         /// 表層 Grass かつ 4近傍との高低差1以下 → 1.0 / Grass だが起伏あり → 0.5 / それ以外 → 0.0。
         /// </summary>
-        static Field ComputeSuitability(TerrainParams p, int[] heights, VoxelGrid grid)
+        static SuitabilityField ComputeSuitability(TerrainParams p, int[] heights, VoxelGrid grid)
         {
-            var field = new Field(p.width, p.depth);
+            var field = new SuitabilityField(p.width, p.depth);
             for (int z = 0; z < p.depth; z++)
             {
                 for (int x = 0; x < p.width; x++)
@@ -513,7 +547,7 @@ namespace BlockField.SimCore.Ecology
                     var surface = grid.Get(new Int3(x, h - 1, z));
                     if (surface != BlockId.Grass)
                     {
-                        field.Set(x, z, 0f);
+                        field.SetAtColumn(x, z, 0f);
                         continue;
                     }
 
@@ -523,7 +557,7 @@ namespace BlockField.SimCore.Ecology
                     Check(x, z + 1);
                     Check(x, z - 1);
 
-                    field.Set(x, z, flat ? 1f : 0.5f);
+                    field.SetAtColumn(x, z, flat ? 1f : 0.5f);
 
                     void Check(int nx, int nz)
                     {

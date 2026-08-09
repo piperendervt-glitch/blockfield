@@ -86,7 +86,7 @@ namespace BlockField.Tests.EditMode
                     continue;
                 }
                 animals++;
-                Assert.AreEqual(1f, world.Suitability.Get(e.cell.x, e.cell.z),
+                Assert.AreEqual(1f, world.Suitability.GetAtColumn(e.cell.x, e.cell.z),
                     $"動物 {e.kind} が suitability 1.0 以外のセル {e.cell} にスポーンした");
             }
             Assert.Greater(animals, 0, "検証対象の動物が湧いていない");

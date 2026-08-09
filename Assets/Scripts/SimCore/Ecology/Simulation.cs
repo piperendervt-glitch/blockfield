@@ -66,8 +66,8 @@ namespace BlockField.SimCore.Ecology
             {
                 int x = rng.Range(0, world.Width);
                 int z = rng.Range(0, world.Depth);
-                float suitability = world.Suitability.Get(x, z);
-                float vegetation = world.Vegetation.Values.Get(x, z);
+                float suitability = world.Suitability.GetAtColumn(x, z);
+                float vegetation = world.Vegetation.GetAtColumn(x, z);
                 float weight = suitability * Math.Max(vegetation, p.vegetationFloor);
 
                 if (rng.NextFloat01() < weight)
@@ -97,7 +97,7 @@ namespace BlockField.SimCore.Ecology
                 int x = rng.Range(0, world.Width);
                 int z = rng.Range(0, world.Depth);
 
-                if (world.Suitability.Get(x, z) >= 1f && rng.NextFloat01() < p.animalSpawnChance)
+                if (world.Suitability.GetAtColumn(x, z) >= 1f && rng.NextFloat01() < p.animalSpawnChance)
                 {
                     EntityKind kind;
                     if (rng.NextFloat01() < k_WolfSpawnShare)
@@ -123,17 +123,21 @@ namespace BlockField.SimCore.Ecology
             }
         }
 
-        /// <summary>植生場更新 (E1): 植物存在セルへ書き込み → 拡散 → 減衰。</summary>
+        /// <summary>
+        /// 場の更新 (E1): 植物存在セルへ書き込み → 全ての場を更新（拡散・減衰）。
+        /// 更新ループは World.UpdateFields が場の種類を知らずに回す（Demo 4.5 作業1）。
+        /// </summary>
         static void UpdateVegetation(World world, SimParams p)
         {
             foreach (var e in world.Entities)
             {
                 if (e.IsPlant)
                 {
-                    world.Vegetation.Deposit(e.cell.x, e.cell.z, p.vegetationDeposit);
+                    // エンティティのセルは表層の上のセル＝表面場の対象セル
+                    world.Vegetation.Deposit(e.cell, p.vegetationDeposit);
                 }
             }
-            world.Vegetation.Update(p.vegetationDiffuse, p.vegetationDecay);
+            world.UpdateFields(p);
         }
 
         /// <summary>
@@ -445,7 +449,7 @@ namespace BlockField.SimCore.Ecology
                 {
                     continue;
                 }
-                float v = world.Vegetation.Values.Get(nx, nz);
+                float v = world.Vegetation.GetAtColumn(nx, nz);
                 if (v > bestValue)
                 {
                     bestValue = v;

@@ -346,7 +346,7 @@ public class TerrainPreview : EditorWindow
         {
             for (int x = 0; x < m_World.Width; x++)
             {
-                float v = m_World.Vegetation.Values.Get(x, z);
+                float v = m_World.Vegetation.GetAtColumn(x, z);
                 if (v < 0.02f)
                 {
                     continue;

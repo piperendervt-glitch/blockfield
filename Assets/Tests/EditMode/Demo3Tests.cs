@@ -42,7 +42,7 @@ namespace BlockField.Tests.EditMode
                     int h = world.GetSurfaceHeight(x, z);
                     for (int i = 0; i < len; i++)
                     {
-                        if (world.Suitability.Get(x + i, z) < 1f || world.GetSurfaceHeight(x + i, z) != h)
+                        if (world.Suitability.GetAtColumn(x + i, z) < 1f || world.GetSurfaceHeight(x + i, z) != h)
                         {
                             ok = false;
                             break;
