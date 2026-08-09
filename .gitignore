@@ -109,3 +109,5 @@ InitTestScene*.unity*
 Logs/
 TestResults/
 Builds/
+# 実機から取り出した録画 (scripts/pull_recordings.ps1)。動画はリポジトリに入れない
+Recordings/
