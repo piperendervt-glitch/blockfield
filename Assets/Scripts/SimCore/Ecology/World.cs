@@ -39,6 +39,16 @@ namespace BlockField.SimCore.Ecology
         public int Width => Params.width;
         public int Depth => Params.depth;
 
+        /// <summary>
+        /// 生成時点で適性 &gt; 0 だったセル数 (Demo 5a)。個体数の上限・頻度を
+        /// このスケールに比例させる（<see cref="SimParams.Resolve"/>）。
+        ///
+        /// **生成時に1回だけ数えて固定する。** 設置・破壊で適性が局所再計算されても
+        /// 追随しない — これは「このワールドの広さ」を表す基準値であり、
+        /// ブロック1個の増減で上限が揺れると個体数が不安定になるため。
+        /// </summary>
+        public int SuitableCellCount { get; }
+
         // 統計（表示用の累計。導出値なので ContentHash には含めない）
         public int StarvationCount { get; internal set; }
         public int PredationCount { get; internal set; }
@@ -107,6 +117,7 @@ namespace BlockField.SimCore.Ecology
             m_SurfaceHeights = ComputeSurfaceHeights(Grid, p.width, p.depth, m_ScanMinY, m_ScanMaxY, m_NoSurfaceHeight);
             Suitability = ComputeSuitability(p.width, p.depth, m_SurfaceHeights, Grid, m_NoSurfaceHeight);
             Vegetation = new VegetationField(p.width, p.depth);
+            SuitableCellCount = CountSuitableCells(Suitability, p.width, p.depth);
 
             RegisterField(Suitability);
             RegisterField(Vegetation);
@@ -136,9 +147,27 @@ namespace BlockField.SimCore.Ecology
             m_SurfaceHeights = ComputeSurfaceHeights(Grid, p.width, p.depth, m_ScanMinY, m_ScanMaxY, m_NoSurfaceHeight);
             Suitability = ComputeSuitability(p.width, p.depth, m_SurfaceHeights, Grid, m_NoSurfaceHeight);
             Vegetation = new VegetationField(p.width, p.depth);
+            SuitableCellCount = CountSuitableCells(Suitability, p.width, p.depth);
 
             RegisterField(Suitability);
             RegisterField(Vegetation);
+        }
+
+        /// <summary>適性 &gt; 0 のセル数（生成時の基準スケール）。</summary>
+        static int CountSuitableCells(SuitabilityField field, int width, int depth)
+        {
+            int n = 0;
+            for (int z = 0; z < depth; z++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    if (field.GetAtColumn(x, z) > 0f)
+                    {
+                        n++;
+                    }
+                }
+            }
+            return n;
         }
 
         /// <summary>

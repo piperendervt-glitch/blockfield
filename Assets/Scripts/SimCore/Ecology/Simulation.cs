@@ -37,6 +37,10 @@ namespace BlockField.SimCore.Ecology
 
         public static void Tick(World world, Mulberry32 rng, SimParams p)
         {
+            // Demo 5a: 個体数まわりはワールドの広さ（適性セル数）に比例させる。
+            // 呼び出し側は基準スケールの値を渡すだけでよい。整数演算なので決定論は不変
+            p = p.Resolve(world.SuitableCellCount);
+
             // Demo 4 F2: プレイヤー操作はティック先頭で適用（RNG非消費 → リプレイ決定論を保つ）
             world.ApplyPendingActions();
 

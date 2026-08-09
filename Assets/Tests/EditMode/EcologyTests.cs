@@ -19,6 +19,15 @@ namespace BlockField.Tests.EditMode
             mountainAmplitude = 1f,
         };
 
+        /// <summary>適性セル数が2倍以上になる広いワールド（密度の比較用）。</summary>
+        static TerrainParams LargeWorldParams(uint seed)
+        {
+            var p = WorldParams(seed);
+            p.width = 80;
+            p.depth = 80;
+            return p;
+        }
+
         static World CreateAndTick(uint seed, int ticks, SimParams p)
         {
             var world = World.Create(WorldParams(seed));
@@ -54,8 +63,78 @@ namespace BlockField.Tests.EditMode
         {
             var p = SimParams.Default;
             var world = CreateAndTick(2u, 1000, p);
-            Assert.LessOrEqual(world.PlantCount, p.plantCap);
-            Assert.LessOrEqual(world.AnimalCount, p.animalCap);
+
+            // Demo 5a: 上限は基準スケールの値なので、ワールドの適性セル数へ換算してから比べる
+            var resolved = p.Resolve(world.SuitableCellCount);
+            Assert.LessOrEqual(world.PlantCount, resolved.plantCap);
+            Assert.LessOrEqual(world.AnimalCount, resolved.animalCap);
+        }
+
+        [Test]
+        public void Density_ResolveScalesWithSuitableCells()
+        {
+            var p = SimParams.Default;
+
+            // 基準スケールちょうどなら既定値そのまま（箱庭の従来挙動が変わらないことの担保）
+            var atReference = p.Resolve(SimParams.ReferenceSuitableCells);
+            Assert.AreEqual(p.plantCap, atReference.plantCap);
+            Assert.AreEqual(p.animalCap, atReference.animalCap);
+            Assert.AreEqual(p.plantSpawnCandidates, atReference.plantSpawnCandidates);
+
+            // 2倍の広さなら上限も頻度も2倍
+            var doubled = p.Resolve(SimParams.ReferenceSuitableCells * 2);
+            Assert.AreEqual(p.plantCap * 2, doubled.plantCap);
+            Assert.AreEqual(p.animalCap * 2, doubled.animalCap);
+            Assert.AreEqual(p.plantSpawnCandidates * 2, doubled.plantSpawnCandidates);
+
+            // 確率・速度は密度と無関係なので換算しない
+            Assert.AreEqual(p.moveChance, doubled.moveChance);
+            Assert.AreEqual(p.hungerPerTick, doubled.hungerPerTick);
+            Assert.AreEqual(p.vegetationDecay, doubled.vegetationDecay);
+        }
+
+        [Test]
+        public void Density_ZeroCandidatesStayZeroAndTinyWorldsKeepOne()
+        {
+            var frozen = SimParams.Default;
+            frozen.plantSpawnCandidates = 0;
+            frozen.animalSpawnCandidates = 0;
+
+            // 0 は「無効」の意味。スケールしても 0 のまま（テストがスポーンを止めるのに使う）
+            var big = frozen.Resolve(SimParams.ReferenceSuitableCells * 10);
+            Assert.AreEqual(0, big.plantSpawnCandidates);
+            Assert.AreEqual(0, big.animalSpawnCandidates);
+
+            // 0 より大きい値は、極端に小さいワールドでも 1 を下回らない
+            var tiny = SimParams.Default.Resolve(1);
+            Assert.AreEqual(1, tiny.plantSpawnCandidates);
+            Assert.AreEqual(1, tiny.plantCap);
+            Assert.AreEqual(1, tiny.animalCap);
+        }
+
+        [Test]
+        public void Density_PlantDensityMatchesAcrossScales()
+        {
+            // Demo 5a の目的そのもの: 広さが変わっても定常の植物密度が同じになること。
+            // 同一シード・同一地形で、適性セル数だけが違う2つのワールドを比べる
+            var small = World.Create(WorldParams(9u));
+            var large = World.Create(LargeWorldParams(9u));
+
+            for (int i = 0; i < 1500; i++)
+            {
+                Simulation.Tick(small, small.Rng, SimParams.Default);
+                Simulation.Tick(large, large.Rng, SimParams.Default);
+            }
+
+            Assert.Greater(large.SuitableCellCount, small.SuitableCellCount * 2,
+                "広い方が十分に広くない（テストが意味を成さない）");
+
+            double dSmall = (double)small.PlantCount / small.SuitableCellCount;
+            double dLarge = (double)large.PlantCount / large.SuitableCellCount;
+
+            // 上限に張り付く水準まで育つので、密度は 10% 以内に収まるはず
+            Assert.AreEqual(dSmall, dLarge, dSmall * 0.1,
+                $"植物密度がスケールで揃っていない: 小={dSmall:F4} 大={dLarge:F4}");
         }
 
         [Test]
@@ -72,24 +151,31 @@ namespace BlockField.Tests.EditMode
         [Test]
         public void Animals_SpawnOnlyOnFullSuitabilityCells()
         {
-            // 移動を無効化してスポーン位置だけを検証する
+            // 検証対象は「野生スポーン (SpawnAnimals) は suitability 1.0 のセルにしか湧かない」。
+            // スポーン位置だけを見たいので、そこから動く経路を全て塞ぐ:
+            // - moveChance/turnChance = 0 で徘徊を止める
+            // - breedChance = 0 で出生を止める（Breed は隣接空きセルへ高低差だけで
+            //   子を置くので、適性 0.5 のセルにも湧きうる。野生スポーンとは別の規則）
+            // 狼だけは除外する。捕食モードの ChaseStep は moveChance を見ずに動くため、
+            // 現在位置がスポーン位置とは限らない（Demo 5a で個体数が増えて顕在化した）。
             var p = SimParams.Default;
             p.moveChance = 0f;
             p.turnChance = 0f;
+            p.breedChance = 0f;
 
             var world = CreateAndTick(4u, 500, p);
-            int animals = 0;
+            int checkedAnimals = 0;
             foreach (var e in world.Entities)
             {
-                if (!e.IsAnimal)
+                if (!e.IsHerbivore)
                 {
                     continue;
                 }
-                animals++;
+                checkedAnimals++;
                 Assert.AreEqual(1f, world.Suitability.GetAtColumn(e.cell.x, e.cell.z),
                     $"動物 {e.kind} が suitability 1.0 以外のセル {e.cell} にスポーンした");
             }
-            Assert.Greater(animals, 0, "検証対象の動物が湧いていない");
+            Assert.Greater(checkedAnimals, 0, "検証対象の動物が湧いていない");
         }
 
         [Test]
