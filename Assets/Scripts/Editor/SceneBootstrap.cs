@@ -152,10 +152,18 @@ public static class SceneBootstrap
         roomScanner.meshManager = meshManager;
         roomScanner.planeManager = planeManager;
 
-        // 多層ハイトマップ化 (Demo 4.5 G2)。表示はまだ行わず、統計をログ出力するのみ
+        // 多層ハイトマップ化 (Demo 4.5 G2)。観測データの構築と統計ログのみ
         var roomTerrain = scannerGo.AddComponent<BlockField.RoomTerrainBuilder>();
         roomTerrain.scanner = roomScanner;
         roomTerrain.terrainField = terrainField;
+
+        // 雪積もり合成と診断表示 (Demo 4.5 G3)。右手Bで 通常/診断 を切り替える。
+        // 表示はワールド座標に直接置くので XR Origin の子にはしない（座標変換不要）
+        var roomViewGo = new GameObject("Room Terrain View (G3)");
+        var roomView = roomViewGo.AddComponent<BlockField.RoomTerrainView>();
+        roomView.builder = roomTerrain;
+        roomView.terrainField = terrainField;
+        roomView.material = terrainMat;
 
         // HMD内デバッグパネル (World Space Canvas、カメラ前下方 0.6m に固定)
         var canvasGo = new GameObject("Debug Panel");
@@ -165,7 +173,8 @@ public static class SceneBootstrap
         var canvas = canvasGo.AddComponent<Canvas>();
         canvas.renderMode = RenderMode.WorldSpace;
         var canvasRect = canvasGo.GetComponent<RectTransform>();
-        canvasRect.sizeDelta = new Vector2(600f, 300f);
+        // Demo 4.5 G3 で部屋地形の2行を追加したため 9 行 → 高さを広げる
+        canvasRect.sizeDelta = new Vector2(600f, 380f);
 
         var bgGo = new GameObject("Background");
         bgGo.transform.SetParent(canvasGo.transform, false);
@@ -195,6 +204,8 @@ public static class SceneBootstrap
         panel.diorama = diorama;
         panel.terrainField = terrainField;
         panel.planeManager = planeManager;
+        panel.roomBuilder = roomTerrain;
+        panel.roomView = roomView;
         panel.text = uiText;
 
         Directory.CreateDirectory("Assets/Scenes");

@@ -13,7 +13,10 @@ namespace BlockField
     /// <summary>
     /// 実機の地形表示 (Demo 1 B2)。原点確定/復元後に TerrainGenerator で地形を生成し、
     /// チャンクごとに ChunkMesher でメッシュ化して原点配下に表示する。
-    /// Aボタン: シード巡回 / Bボタン: 地形表示トグル (M3モード互換)。
+    /// Aボタン: シード巡回 / 左手Xボタン: 地形表示トグル (M3モード互換)。
+    ///
+    /// 注: 表示トグルは Demo 4 まで右手Bボタンだったが、Demo 4.5 G3 で B を
+    /// 部屋地形の表示モード切替 (RoomTerrainView) に譲り、左手Xへ移した。
     /// </summary>
     public sealed class TerrainField : MonoBehaviour
     {
@@ -53,7 +56,7 @@ namespace BlockField
         public World CurrentWorld => m_World;
 
         InputAction m_AButtonAction;
-        InputAction m_BButtonAction;
+        InputAction m_ToggleAction;
         World m_World;
         float m_TickAccumulator;
         float m_CsvSaveTimer;
@@ -76,9 +79,10 @@ namespace BlockField
                 "<XRController>{RightHand}/primaryButton");
             m_AButtonAction.performed += OnAButtonPerformed;
 
-            m_BButtonAction = new InputAction("RightHandBButton", InputActionType.Button,
-                "<XRController>{RightHand}/secondaryButton");
-            m_BButtonAction.performed += OnBButtonPerformed;
+            // 箱庭地形の表示トグルは左手X（右手Bは Demo 4.5 で部屋地形のモード切替に使う）
+            m_ToggleAction = new InputAction("LeftHandXButton", InputActionType.Button,
+                "<XRController>{LeftHand}/primaryButton");
+            m_ToggleAction.performed += OnTogglePerformed;
 
             // シード巡回: 既定 12345 → ランダム3種 → 既定 に戻る
             // (ランダムは起動時に Mulberry32 で決める。CLAUDE.md: System.Random 禁止)
@@ -89,23 +93,36 @@ namespace BlockField
         void OnDestroy()
         {
             m_AButtonAction.performed -= OnAButtonPerformed;
-            m_BButtonAction.performed -= OnBButtonPerformed;
+            m_ToggleAction.performed -= OnTogglePerformed;
         }
 
         void OnEnable()
         {
             m_AButtonAction.Enable();
-            m_BButtonAction.Enable();
+            m_ToggleAction.Enable();
         }
 
         void OnDisable()
         {
             m_AButtonAction.Disable();
-            m_BButtonAction.Disable();
+            m_ToggleAction.Disable();
         }
 
         void OnAButtonPerformed(InputAction.CallbackContext _) => m_SwitchRequested = true;
-        void OnBButtonPerformed(InputAction.CallbackContext _) => m_ToggleRequested = true;
+        void OnTogglePerformed(InputAction.CallbackContext _) => m_ToggleRequested = true;
+
+        /// <summary>
+        /// 箱庭地形の表示を設定する。Demo 4.5 では部屋地形が観察対象になるため、
+        /// RoomTerrainView が合成完了時にこれを呼んで箱庭を隠す。
+        /// </summary>
+        public void SetFieldVisible(bool visible)
+        {
+            m_FieldVisible = visible;
+            foreach (var chunk in m_Chunks)
+            {
+                chunk.SetActive(m_FieldVisible);
+            }
+        }
 
         void Update()
         {
@@ -157,12 +174,8 @@ namespace BlockField
             if (toggleRequested && Time.unscaledTime - m_LastToggleTime >= k_SwitchCooldown)
             {
                 m_LastToggleTime = Time.unscaledTime;
-                m_FieldVisible = !m_FieldVisible;
-                foreach (var chunk in m_Chunks)
-                {
-                    chunk.SetActive(m_FieldVisible);
-                }
-                Debug.Log($"[TerrainField] 地形表示: {(m_FieldVisible ? "ON" : "OFF (M3モード)")}");
+                SetFieldVisible(!m_FieldVisible);
+                Debug.Log($"[TerrainField] 箱庭地形の表示: {(m_FieldVisible ? "ON" : "OFF (M3モード)")}");
                 DebugPanel.Notify($"terrain {(m_FieldVisible ? "ON" : "OFF")}");
             }
         }

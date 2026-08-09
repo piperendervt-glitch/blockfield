@@ -11,7 +11,7 @@ namespace BlockField
     /// RoomScanner のスキャン完了を検知し、MultiLayerHeightmap で RoomObservation を構築して
     /// 統計を [RoomTerrain] タグでログ出力する。
     ///
-    /// 本コンポーネントは**表示を行わない**（雪積もり地形の合成は G3）。
+    /// 本コンポーネントは**表示を行わない**（雪積もり地形の合成と表示は RoomTerrainView / G3）。
     /// 出力される RoomObservation はセル単位の整数高さであり、これが M4 の保証対象となる
     /// リプレイ入力になる（生メッシュのアーカイブは M4 対象外 — RoomScanner のコメント参照）。
     /// </summary>
@@ -25,6 +25,15 @@ namespace BlockField
 
         /// <summary>構築された観測データ。未構築なら null。</summary>
         public RoomObservation Observation { get; private set; }
+
+        /// <summary>構築統計（面数分布・除外内訳）。未構築なら null。パネル表示に使う。</summary>
+        public MultiLayerHeightmap.BuildStats Stats { get; private set; }
+
+        /// <summary>面を持つセル数（パネル表示用）。</summary>
+        public int CellsWithHits { get; private set; }
+
+        /// <summary>検出した面の総数（パネル表示用）。</summary>
+        public int TotalHits { get; private set; }
 
         bool m_Built;
 
@@ -55,8 +64,11 @@ namespace BlockField
 
             stopwatch.Stop();
 
+            Stats = stats;
             int cellsWithHits = Observation.CountCellsWithHits();
             int totalHits = Observation.CountHits();
+            CellsWithHits = cellsWithHits;
+            TotalHits = totalHits;
             Debug.Log($"[RoomTerrain] ハイトマップ構築: {stopwatch.ElapsedMilliseconds}ms " +
                 $"grid={width}x{depth} (cell={cellSize}m) " +
                 $"面ありセル={cellsWithHits}/{width * depth} 総面数={totalHits} " +

@@ -257,5 +257,118 @@ namespace BlockField.Tests.EditMode
             // 観測は現時点でワールド状態を変えないため、従来どおりハッシュも一致する
             Assert.AreEqual(worldA.ComputeContentHash(), worldB.ComputeContentHash());
         }
+
+        // ---- G3: 雪積もり合成 ----
+
+        /// <summary>床(cellY=0)全面 ＋ 中央 20x20 に机(cellY=20) の観測を作る。</summary>
+        static RoomObservation BuildFloorAndTableObservation(float tableWorldY = 0.82f, float floorWorldY = 0.01f)
+        {
+            var obs = new RoomObservation(40, 40, k_Cell, 0f, 0f);
+            for (int z = 0; z < 40; z++)
+            {
+                for (int x = 0; x < 40; x++)
+                {
+                    bool table = x >= 10 && x < 30 && z >= 10 && z < 30;
+                    if (table)
+                    {
+                        obs.AddHit(x, z, new SurfaceHit(20, tableWorldY, 0, SurfaceLabel.Table));
+                    }
+                    obs.AddHit(x, z, new SurfaceHit(0, floorWorldY, table ? 1 : 0, SurfaceLabel.Floor));
+                }
+            }
+            return obs;
+        }
+
+        [Test]
+        public void Snowfall_OnlyTopmostSurface_IsCovered()
+        {
+            var obs = BuildFloorAndTableObservation();
+            var result = SnowfallComposer.Compose(obs, SnowfallParams.Default);
+
+            // 机のあるセル: 机上 (cellY=20 の上) にだけ積もる
+            int aboveTable = CountColumn(result.Grid, 20, 20, 21, 24);
+            int aboveFloorUnderTable = CountColumn(result.Grid, 20, 20, 1, 4);
+            Assert.Greater(aboveTable, 0, "机の上に積もっていない");
+            Assert.AreEqual(0, aboveFloorUnderTable,
+                "机の下の床に積もっている（表面場は最上面のみ — prereg 論点1 決定(d)）");
+
+            // 机の外のセル: 床の上に積もる
+            Assert.Greater(CountColumn(result.Grid, 2, 2, 1, 4), 0, "床のみのセルに積もっていない");
+        }
+
+        static int CountColumn(BlockField.SimCore.Voxel.VoxelGrid grid, int x, int z, int y0, int y1)
+        {
+            int n = 0;
+            for (int y = y0; y <= y1; y++)
+            {
+                if (grid.Get(new BlockField.SimCore.Voxel.Int3(x, y, z)) != BlockField.SimCore.Voxel.BlockId.Air)
+                {
+                    n++;
+                }
+            }
+            return n;
+        }
+
+        [Test]
+        public void Snowfall_LayerCount_StaysWithinRange()
+        {
+            var p = SnowfallParams.Default;
+            var noise = new ValueNoise(p.seed);
+
+            int min = int.MaxValue, max = int.MinValue;
+            for (int z = 0; z < 66; z++)
+            {
+                for (int x = 0; x < 81; x++)
+                {
+                    int layers = SnowfallComposer.ComputeLayers(p, noise, x, z);
+                    if (layers < min) min = layers;
+                    if (layers > max) max = layers;
+                }
+            }
+
+            Assert.AreEqual(p.minLayers, min, "最小層数が既定 (1) と違う");
+            Assert.AreEqual(p.maxLayers, max, "最大層数が既定 (4) に届いていない — 起伏が出ない");
+
+            // 全域が同じ層数だと「薄い起伏」にならない（実測: 1層54% / 4層19%）
+            var result = SnowfallComposer.Compose(BuildFloorAndTableObservation(), p);
+            int distinct = 0;
+            foreach (var count in result.LayerHistogram)
+            {
+                if (count > 0) distinct++;
+            }
+            Assert.GreaterOrEqual(distinct, 3, "層数のばらつきが乏しい（起伏が平坦）");
+        }
+
+        [Test]
+        public void Snowfall_IgnoresWorldY_AndIsDeterministic()
+        {
+            var p = SnowfallParams.Default;
+
+            // 同一の cellY 列で worldY だけ変えても地形は一致しなければならない。
+            // これは M4 の構造的保証（リプレイ経路から float 幾何演算を排除する）の検証。
+            var a = SnowfallComposer.Compose(BuildFloorAndTableObservation(0.82f, 0.01f), p);
+            var b = SnowfallComposer.Compose(BuildFloorAndTableObservation(999f, -999f), p);
+
+            Assert.AreEqual(a.Grid.ComputeContentHash(), b.Grid.ComputeContentHash(),
+                "worldY を変えると地形が変わる — SnowfallComposer が worldY を読んでいる");
+            Assert.AreEqual(a.BlockCount, b.BlockCount);
+        }
+
+        [Test]
+        public void Snowfall_DifferentSeed_ProducesDifferentTerrain()
+        {
+            var obs = BuildFloorAndTableObservation();
+
+            var p1 = SnowfallParams.Default;
+            var p2 = SnowfallParams.Default;
+            p2.seed = 777u;
+
+            var a = SnowfallComposer.Compose(obs, p1);
+            var b = SnowfallComposer.Compose(obs, p2);
+
+            Assert.AreNotEqual(a.Grid.ComputeContentHash(), b.Grid.ComputeContentHash(),
+                "シードを変えても地形が同じ");
+            Assert.AreEqual(a.SurfaceCount, b.SurfaceCount, "積もり面の数はシードに依存しない");
+        }
     }
 }

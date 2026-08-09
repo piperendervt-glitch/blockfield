@@ -20,11 +20,15 @@ namespace BlockField
         [SerializeField] DioramaOrigin m_Diorama;
         [SerializeField] TerrainField m_TerrainField;
         [SerializeField] ARPlaneManager m_PlaneManager;
+        [SerializeField] RoomTerrainBuilder m_RoomBuilder;
+        [SerializeField] RoomTerrainView m_RoomView;
         [SerializeField] Text m_Text;
 
         public DioramaOrigin diorama { get => m_Diorama; set => m_Diorama = value; }
         public TerrainField terrainField { get => m_TerrainField; set => m_TerrainField = value; }
         public ARPlaneManager planeManager { get => m_PlaneManager; set => m_PlaneManager = value; }
+        public RoomTerrainBuilder roomBuilder { get => m_RoomBuilder; set => m_RoomBuilder = value; }
+        public RoomTerrainView roomView { get => m_RoomView; set => m_RoomView = value; }
         public Text text { get => m_Text; set => m_Text = value; }
 
         static string s_LastEvent = "-";
@@ -91,9 +95,34 @@ namespace BlockField
                 $"Origin: {origin}   AnchorSaved: {(anchorSaved ? "Y" : "N")}\n" +
                 $"Blocks: {blocks}   Field: {field}   FPS: {fps:F1}\n" +
                 $"Seed: {seed}   Gen: {genMs}ms\n" +
+                BuildRoomText() +
                 $"Tick: {tick}  Plants: {plants}  Animals: {animals}  Wolves: {wolves}\n" +
                 $"Starve: {starved}  Pred: {predated}  Birth: {births}\n" +
                 $"Last: {s_LastEvent}";
+        }
+
+        /// <summary>部屋地形 (Demo 4.5 G3) の常時表示項目。実機で状況を判断できるようにする。</summary>
+        string BuildRoomText()
+        {
+            string mode = m_RoomView != null && m_RoomView.IsComposed
+                ? (m_RoomView.Mode == RoomTerrainView.ViewMode.Normal ? "0 NORMAL" : "1 DIAG")
+                : "-";
+
+            int surfaces = m_RoomBuilder != null ? m_RoomBuilder.TotalHits : 0;
+            int cells = m_RoomBuilder != null ? m_RoomBuilder.CellsWithHits : 0;
+            float avg = cells > 0 ? (float)surfaces / cells : 0f;
+
+            var stats = m_RoomBuilder != null ? m_RoomBuilder.Stats : null;
+            string dist = stats != null
+                ? $"{stats.CellsWith1}/{stats.CellsWith2}/{stats.CellsWith3Plus}"
+                : "-/-/-";
+
+            int snowBlocks = m_RoomView != null ? m_RoomView.SnowBlockCount : 0;
+            long composeMs = m_RoomView != null ? m_RoomView.ComposeMs : 0;
+
+            return
+                $"Room[B]: {mode}   Surf: {surfaces} (avg {avg:F2})\n" +
+                $"Dist1/2/3+: {dist}   Snow: {snowBlocks} ({composeMs}ms)\n";
         }
     }
 }
