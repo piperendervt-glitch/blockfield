@@ -231,6 +231,50 @@ PNG で見た印象と実機で見た印象がずれないようにするため�
 - 適性0のセル（壁や穴）は**暗い灰色**。「場が薄い」のか
   「そもそも対象外」なのかを区別できる
 
+### 回帰検知（`--compare`）
+
+前回の `summary.json` と突き合わせ、`diff_report.html` を出す。
+
+```bash
+dotnet run -c Release --project tools/SimRunner -- \
+  --compare runs/nightly_20260810/summary.json
+```
+
+見るものは3つ。
+
+1. **ContentHash の一致**（最優先）。**コードを変えていないのに不一致なら
+   決定論 f(シード, イベントログ) が破れている。**本プロジェクトの前提が
+   崩れたということなので、他の指標より先にこれを調べる。
+   不一致があると赤いバナーが最上部に出て、終了コードが 2 になる
+2. **M5**（生態系の安定条件）の合否と、その内訳
+3. 各指標の差分。赤=悪化 / 橙=10%以上動いた / 緑=改善。
+   指標の多くは良し悪しが一意でないため、橙は「注意して見る」印であって
+   不合格ではない
+
+**終了コード**: `0` 問題なし / `1` M5 不合格 / `2` 決定論の破れ。
+
+#### M5 の判定を 0/48 にしていない理由
+
+草食獣ギルドと植物の全滅は 0 を要求するが、**狼だけは 25% までを許容**する。
+狼の全滅は死の場も踏み荒らしも切った状態でも **3/48（約6%）起きる**
+生態系そのものの性質であり（Demo 8 第2段の48シード計測、実測幅 2〜6/48）、
+0 を要求すると夜間バッチが毎晩「不合格」を出して、
+本当の退行が起きたときに気づけなくなる。
+
+シードが 12 未満の実行では、1件の全滅が簡単に許容率を超えてしまい
+「率」として意味を持たないため、狼の項目は評価しない。
+
+### 長時間実験（`--checkpoint-interval`）
+
+指定間隔で `checkpoints.csv` に途中経過を追記する。**実行中でも別窓から読める**
+（AutoFlush 済み）。個体数・累計・各場の平均と最大・個体の重みの平均と標準偏差を
+記録する。
+
+```bash
+dotnet run -c Release --project tools/SimRunner -- \
+  --seeds 5 --ticks 100000 --checkpoint-interval 2000
+```
+
 ### 指標の読み方（間違えやすい点）
 
 - **墓場の植物密度比は 1.0 と比べない。** 餓死は餌の乏しい場所で起きるため、
@@ -242,7 +286,98 @@ PNG で見た印象と実機で見た印象がずれないようにするため�
 
 ---
 
-## 5. リモートで詰まったときの確認順
+## 5. 自動シミュレーション実行環境
+
+### 夜間バッチ（`scripts/nightly_sim.ps1`）
+
+標準セット（48シード × 3,000ティック、現行 `SimParams`）を毎晩回し、
+**直近の nightly と自動比較**する。実測 約30秒。
+
+- 出力: `runs/nightly_<yyyyMMdd>/`（`report.html` / `diff_report.html` /
+  `summary.json` / `population.csv` / `images/` / `run.log`）
+- 比較対象は「前日」ではなく**直近の nightly**（PC が落ちていた日は飛ぶため）
+- **30日より前の `nightly_*` は自動削除**する。画像を埋め込んだ
+  `report.html` が1回あたり数百KB〜数MBになるため
+- 終了コード: `0` 問題なし / `1` M5 不合格 / `2` 決定論の破れ / `10` 前提エラー
+
+手動実行:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\nightly_sim.ps1
+```
+
+#### タスクスケジューラへの登録（管理者権限で実行）
+
+毎日 03:00 に実行する。
+
+```powershell
+$action = New-ScheduledTaskAction -Execute "powershell.exe" `
+  -Argument '-NoProfile -ExecutionPolicy Bypass -File "C:\dev\blockfield\scripts\nightly_sim.ps1"' `
+  -WorkingDirectory "C:\dev\blockfield"
+
+$trigger = New-ScheduledTaskTrigger -Daily -At 03:00
+
+# スリープを無効化してある前提だが、万一スリープしていても起こして実行する。
+# 電源接続時のみ・バッテリ駆動で止めない設定にはしない（デスクトップのため）
+$settings = New-ScheduledTaskSettingsSet `
+  -WakeToRun `
+  -StartWhenAvailable `
+  -DontStopIfGoingOnBatteries `
+  -AllowStartIfOnBatteries `
+  -ExecutionTimeLimit (New-TimeSpan -Hours 2) `
+  -MultipleInstances IgnoreNew
+
+Register-ScheduledTask -TaskName "blockfield-nightly-sim" `
+  -Action $action -Trigger $trigger -Settings $settings `
+  -RunLevel Limited -Description "blockfield: 48シード×3000ティックの夜間回帰検証"
+```
+
+`-StartWhenAvailable` を付けるのは、PC が落ちていて 03:00 を逃した場合に
+次回起動時へ振り替えるため。`-MultipleInstances IgnoreNew` は、
+前回が終わっていないときに二重起動しないため。
+
+確認と手動起動:
+
+```powershell
+Get-ScheduledTask -TaskName "blockfield-nightly-sim"
+Get-ScheduledTaskInfo -TaskName "blockfield-nightly-sim"   # 前回実行結果
+Start-ScheduledTask -TaskName "blockfield-nightly-sim"     # 今すぐ実行
+```
+
+解除:
+
+```powershell
+Unregister-ScheduledTask -TaskName "blockfield-nightly-sim" -Confirm:$false
+```
+
+**翌朝に見るもの**: `runs/nightly_<日付>/diff_report.html` を開き、
+最上部のバナーを確認する。赤（決定論の破れ）なら最優先で調査する。
+
+### 長時間実験（`scripts/longrun_sim.ps1`）
+
+10万ティック × 5シードをバックグラウンドで走らせる。
+
+**目的**: 生態系の長期安定性、場の飽和挙動（死の場は τ≈333 なので
+数万ティックで飽和するはず）、進化導入後の重み分布の変化を観察する。
+Demo 6「不在中の進行」の前哨実験。
+
+```powershell
+# 既定（10万ティック × 5シード、2000ティックごとにチェックポイント）
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\longrun_sim.ps1
+
+# 縮小版（動作確認用）
+powershell ... -File scripts\longrun_sim.ps1 -Ticks 10000 -Seeds 2
+
+# 前面で実行（進捗を直接見る）
+powershell ... -File scripts\longrun_sim.ps1 -Foreground
+```
+
+バックグラウンド起動は Claude Code や親シェルに紐付かない独立プロセスなので、
+**SSH セッションが切れても走り続ける**。進捗は
+`runs/longrun_<日時>/run.log`、途中経過は同ディレクトリの
+`checkpoints.csv` で追える。
+
+## 6. リモートで詰まったときの確認順
 
 1. `Get-Service sshd` — サービスが動いているか
 2. `Get-Process Unity` — Editor が開いていないか（テスト・push が失敗する）
