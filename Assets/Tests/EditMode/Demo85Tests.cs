@@ -231,19 +231,66 @@ namespace BlockField.Tests.EditMode
         // ---- 段階4: 表示 (K3) ----
 
         /// <summary>
-        /// 草の高さが場の値で決まること。事前登録の目安
-        /// （0.2で低い / 0.5で中 / 0.8で高い）どおりの段階になっているか。
+        /// 草の高さが場の値で決まること。段階の境界は実測分布の分位点から
+        /// 決めてある（事前登録の目安 0.2/0.5/0.8 は植生場が最大0.345 にしか
+        /// ならないため使えなかった）。
         /// </summary>
         [Test]
         public void Display_GrassHeightFollowsTheFieldValue()
         {
-            Assert.AreEqual(-1, GrassView.StepFor(0.19f), "0.2 未満で草が描かれている");
-            Assert.AreEqual(2, GrassView.StepFor(0.2f), "0.2 が最も低い段階になっていない");
-            Assert.AreEqual(2, GrassView.StepFor(0.49f));
-            Assert.AreEqual(1, GrassView.StepFor(0.5f), "0.5 が中段になっていない");
-            Assert.AreEqual(1, GrassView.StepFor(0.79f));
-            Assert.AreEqual(0, GrassView.StepFor(0.8f), "0.8 が最も高い段階になっていない");
+            float low = GrassView.Step(2).threshold;
+            float mid = GrassView.Step(1).threshold;
+            float high = GrassView.Step(0).threshold;
+
+            Assert.Less(low, mid, "低段の閾値が中段以上になっている");
+            Assert.Less(mid, high, "中段の閾値が高段以上になっている");
+
+            Assert.AreEqual(-1, GrassView.StepFor(low - 0.001f), "最低閾値未満で草が描かれている");
+            Assert.AreEqual(2, GrassView.StepFor(low));
+            Assert.AreEqual(2, GrassView.StepFor(mid - 0.001f));
+            Assert.AreEqual(1, GrassView.StepFor(mid));
+            Assert.AreEqual(1, GrassView.StepFor(high - 0.001f));
+            Assert.AreEqual(0, GrassView.StepFor(high));
             Assert.AreEqual(0, GrassView.StepFor(1f));
+        }
+
+        /// <summary>
+        /// **3段階すべてが実際に出ること。**
+        ///
+        /// エディタ確認で草が1つも見えなかった原因の半分がこれだった。
+        /// 事前登録の目安（0.2 / 0.5 / 0.8）は植生場が最大 0.345 にしか
+        /// ならないことと噛み合っておらず、上2段が永久に使われなかった。
+        /// 閾値を触ったときに同じ失敗を繰り返さないよう、
+        /// 「どの段階にも実際にセルが入る」ことを固定する。
+        /// </summary>
+        [Test]
+        public void Display_AllThreeHeightsActuallyAppear()
+        {
+            var world = MakeDiorama(12345u);
+            for (int t = 0; t < 1500; t++)
+            {
+                Simulation.Tick(world, world.Rng, SimParams.Default);
+            }
+
+            var counts = new int[GrassView.StepCount];
+            for (int z = 0; z < world.Depth; z++)
+            {
+                for (int x = 0; x < world.Width; x++)
+                {
+                    int step = GrassView.StepFor(world.Vegetation.GetAtColumn(x, z));
+                    if (step >= 0)
+                    {
+                        counts[step]++;
+                    }
+                }
+            }
+
+            for (int i = 0; i < counts.Length; i++)
+            {
+                Assert.Greater(counts[i], 10,
+                    $"高さ段階 {i}（閾値 {GrassView.Step(i).threshold:F2}）に " +
+                    $"{counts[i]} セルしか入らない。段階が実質使われていない");
+            }
         }
 
         [Test]
