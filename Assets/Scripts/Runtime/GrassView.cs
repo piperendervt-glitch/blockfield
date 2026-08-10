@@ -68,6 +68,7 @@ namespace BlockField
         [SerializeField] RoomTerrainBuilder m_Builder;
         [SerializeField] Material m_Material;
         [SerializeField] FieldOverlayView m_FieldOverlay;
+        [SerializeField] RoomTerrainView m_RoomView;
 
         public TerrainField terrainField { get => m_TerrainField; set => m_TerrainField = value; }
         public RoomTerrainBuilder builder { get => m_Builder; set => m_Builder = value; }
@@ -81,6 +82,14 @@ namespace BlockField
         /// 濃淡が読めない。場の値そのものを見たい場面では草は邪魔なので消す。
         /// </summary>
         public FieldOverlayView fieldOverlay { get => m_FieldOverlay; set => m_FieldOverlay = value; }
+
+        /// <summary>
+        /// 表示モード。**通常モードでは草を必ず描く**。
+        /// 場のオーバーレイは診断モード限定の機能なので、
+        /// 「オーバーレイが出ているか」だけで判定すると、
+        /// 通常モードなのに草が消える状態が起こりうる（実際に起きた）。
+        /// </summary>
+        public RoomTerrainView roomView { get => m_RoomView; set => m_RoomView = value; }
 
         /// <summary>直近の描画で草を描いたセル数（診断表示用）。</summary>
         public int DrawnCells { get; private set; }
@@ -109,8 +118,19 @@ namespace BlockField
 
         void Update()
         {
-            // 場のオーバーレイ表示中は草を隠す（草が場を覆って濃淡が読めなくなるため）
-            bool overlayShown = m_FieldOverlay != null
+            // 草を隠すのは「診断モードで場のオーバーレイを見ているとき」だけ
+            // （草が場を覆って濃淡が読めなくなるため）。
+            //
+            // 【条件に診断モードを含める理由】場のオーバーレイは診断モード限定の
+            // 機能なので、オーバーレイの状態だけで判定すると
+            // **通常モードなのに草が消える**状態が起こりうる。実際に起きた:
+            // Current の初期値が Fear だったため起動時から条件が成立し、
+            // 草が永久に描画されなかった。初期値は None に直したが、
+            // 判定側にも通常モードの保証を入れておく（二重の防御）。
+            bool diagnostic = m_RoomView == null
+                || m_RoomView.Mode == RoomTerrainView.ViewMode.Diagnostic;
+            bool overlayShown = diagnostic
+                && m_FieldOverlay != null
                 && m_FieldOverlay.Current != FieldOverlayView.Layer.None
                 && m_FieldOverlay.Current != FieldOverlayView.Layer.Markers;
 

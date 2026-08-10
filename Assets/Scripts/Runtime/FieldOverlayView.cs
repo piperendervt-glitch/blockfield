@@ -72,7 +72,16 @@ namespace BlockField
         public Material material { get => m_Material; set => m_Material = value; }
 
         /// <summary>現在表示中の場（パネル表示用）。</summary>
-        public Layer Current { get; private set; } = Layer.Fear;
+        /// <summary>
+        /// 現在表示中の場（パネル表示用）。
+        ///
+        /// **初期値は None。** 起動直後は通常モードであり、何も出さないのが
+        /// 正しい状態である。以前は Fear で始まっていたため、
+        /// 「オーバーレイ表示中は草を隠す」判定が起動時から成立してしまい、
+        /// **草が永久に描画されなかった**（実機で草が1つも見えなかった二次原因。
+        /// 左手Yで巡回して None に到達した瞬間に108セルが描画された）。
+        /// </summary>
+        public Layer Current { get; private set; } = Layer.None;
 
         InputAction m_ToggleAction;
         GameObject m_Object;

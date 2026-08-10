@@ -282,8 +282,10 @@ public static class SceneBootstrap
         panel.fieldOverlay = overlay;
         // 「草が0セルなのか、描画したが見えないのか」を切り分けられるようにする
         panel.grassView = grass;
-        // オーバーレイ表示中は草を隠す（草が場を覆って濃淡が読めなくなるため）
+        // 診断モードで場のオーバーレイを見ているときだけ草を隠す
+        // （草が場を覆って濃淡が読めなくなるため）。通常モードでは必ず描く
         grass.fieldOverlay = overlay;
+        grass.roomView = roomView;
 
         // 狼の軌跡 (Demo 8 H4)。診断モードで「今まさに恐怖場を書いている場所」を示す
         var trailGo = new GameObject("Wolf Trail (H4)");

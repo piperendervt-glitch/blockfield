@@ -339,6 +339,70 @@ namespace BlockField.Tests.EditMode
         }
 
         /// <summary>
+        /// **起動直後の状態で草が描画されること。**
+        ///
+        /// 実機で草が1つも見えなかった二次原因の再発防止。
+        /// `FieldOverlayView.Current` の初期値が `Fear` だったため、
+        /// 「オーバーレイ表示中は草を隠す」判定が**起動時から成立**し、
+        /// 左手Yで巡回して None に到達するまで草が永久に描画されなかった
+        /// （実機ログ: 「草=0セル」が3分続き、None への切替直後に「草=108セル」）。
+        ///
+        /// 初期値を `Fear` に戻すとこのテストが落ちる。
+        /// </summary>
+        [Test]
+        public void Display_GrassIsVisibleInTheStartupState()
+        {
+            // 起動直後は通常モードで、場のオーバーレイは何も出ていないのが正しい
+            Assert.AreEqual(FieldOverlayView.Layer.None, DefaultOverlayLayer(),
+                "場のオーバーレイの初期値が None でない。" +
+                "起動時から『オーバーレイ表示中』とみなされ、草が描画されなくなる");
+        }
+
+        /// <summary>
+        /// <see cref="FieldOverlayView.Current"/> の初期値。
+        /// MonoBehaviour を生成せずに読むため、既定値を持つインスタンスから取る。
+        /// </summary>
+        static FieldOverlayView.Layer DefaultOverlayLayer()
+        {
+            var go = new UnityEngine.GameObject("overlay-probe");
+            try
+            {
+                return go.AddComponent<FieldOverlayView>().Current;
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(go);
+            }
+        }
+
+        /// <summary>
+        /// 通常モードでは、場のオーバーレイの状態にかかわらず草を隠さないこと。
+        /// オーバーレイは診断モード限定の機能なので、
+        /// 「オーバーレイが出ているか」だけで判定すると通常モードで草が消える。
+        /// </summary>
+        [Test]
+        public void Display_GrassIsNotHiddenInNormalMode()
+        {
+            var go = new UnityEngine.GameObject("grass-probe");
+            try
+            {
+                var grass = go.AddComponent<GrassView>();
+                var overlay = go.AddComponent<FieldOverlayView>();
+                var roomView = go.AddComponent<RoomTerrainView>();
+
+                grass.fieldOverlay = overlay;
+                grass.roomView = roomView;
+
+                Assert.AreEqual(RoomTerrainView.ViewMode.Normal, roomView.Mode,
+                    "表示モードの初期値が通常モードでない");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(go);
+            }
+        }
+
+        /// <summary>
         /// **表示基準値が実測分布と乖離していないこと。**
         ///
         /// 同じ不具合を2回起こしている:
