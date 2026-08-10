@@ -357,9 +357,15 @@ public class TerrainPreview : EditorWindow
 
                 var go = new GameObject($"Grass {x},{z}") { hideFlags = HideFlags.DontSave };
                 go.transform.SetParent(m_GrassRoot.transform, false);
+                // 【地表の高さ】表層ブロックの上面は surfaceY * k_BlockSize にある
+                // （FieldOverlayView も同じ規約。エンティティは中心が
+                // (cell.y + 0.5) にあり、その 0.5 ブロック下が地表）。
+                // 立方体メッシュは原点中心なので、地面に「乗せる」には
+                // 高さの半分だけ上げる。ここを間違えて 0.5 ブロック下げており、
+                // 草が完全に地中に埋まって1つも見えなかった
                 go.transform.localPosition = new Vector3(
                     x * k_BlockSize,
-                    (surfaceY - 0.5f + height * 0.5f) * k_BlockSize,
+                    (surfaceY + height * 0.5f) * k_BlockSize,
                     z * k_BlockSize);
 
                 var mf = go.AddComponent<MeshFilter>();
