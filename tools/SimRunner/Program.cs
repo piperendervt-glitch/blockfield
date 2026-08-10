@@ -131,14 +131,31 @@ if (!string.IsNullOrEmpty(opts.ComparePath))
         else
         {
             string diffPath = Path.Combine(opts.OutDir, "diff_report.html");
-            bool deterministic = Compare.WriteDiffHtml(
+            var status = Compare.WriteDiffHtml(
                 diffPath, opts.ComparePath, prev, aggregates, results, opts.Ticks, opts.Size);
             Console.WriteLine($"\n差分レポート: {diffPath}");
-            if (!deterministic)
+
+            switch (status)
             {
-                Console.WriteLine("!!! 決定論の破れを検出: ContentHash が前回と一致しません !!!");
-                Console.WriteLine("!!! コードを変更していないなら f(シード, イベントログ) が壊れています !!!");
-                exitCode = 2;
+                case Compare.DeterminismStatus.BrokenSameCode:
+                    // コードが同一なのにハッシュが違う。本物の破れ
+                    Console.WriteLine("!!! 決定論の破れを検出: ContentHash が前回と一致しません !!!");
+                    Console.WriteLine("!!! コミットは前回と同一です。f(シード, イベントログ) が壊れています !!!");
+                    exitCode = 2;
+                    break;
+
+                case Compare.DeterminismStatus.MismatchUnknownCode:
+                    Console.WriteLine("!!! ContentHash が前回と一致しません !!!");
+                    Console.WriteLine("!!! コミットを取得できず、実装変更によるものか区別できません !!!");
+                    exitCode = 2;
+                    break;
+
+                case Compare.DeterminismStatus.ChangedWithCode:
+                    // 実装を変えたのなら想定内。ここで exit 2 にすると、
+                    // 段階的な移行の期間に毎回警報が鳴って本物の破れを見逃す
+                    Console.WriteLine("ContentHash が前回と一致しませんが、コミットも変わっています" +
+                                      "（実装を変更したのであれば想定どおり）");
+                    break;
             }
         }
     }

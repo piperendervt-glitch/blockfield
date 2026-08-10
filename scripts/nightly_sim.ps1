@@ -62,8 +62,8 @@ $code = $LASTEXITCODE
 switch ($code) {
     0 { "結果: 問題なし" | Tee-Object -FilePath $logFile -Append }
     1 { "結果: M5（生態系の安定条件）が不合格" | Tee-Object -FilePath $logFile -Append }
-    2 { "結果: 決定論の破れ（ContentHash 不一致）。diff_report.html を最優先で確認すること" |
-        Tee-Object -FilePath $logFile -Append }
+    2 { "結果: 決定論の破れ（コードは同一なのに ContentHash が不一致）。" +
+        "diff_report.html を最優先で確認すること" | Tee-Object -FilePath $logFile -Append }
     default { "結果: SimRunner が異常終了 (exit $code)" | Tee-Object -FilePath $logFile -Append }
 }
 

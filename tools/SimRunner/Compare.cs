@@ -21,9 +21,46 @@ namespace SimRunner
     /// </summary>
     public static class Compare
     {
+        /// <summary>
+        /// 実行時の git HEAD。summary.json に残しておくと、ハッシュ不一致が
+        /// 「実装を変えたから（想定内）」なのか「変えていないのに壊れた（本物の破れ）」
+        /// なのかを機械的に区別できる。
+        ///
+        /// Demo 8.5 のように段階的に実装を変える期間は、ハッシュ不一致が
+        /// 何度も起きる。そのたびに警報が鳴ると本物の破れを見逃すため、
+        /// この区別が要る。git が無い環境では空文字になり、
+        /// その場合は従来どおり「区別できない」扱いにする。
+        /// </summary>
+        public static string CurrentCommit()
+        {
+            try
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo("git", "rev-parse HEAD")
+                {
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                };
+                using var proc = System.Diagnostics.Process.Start(psi);
+                if (proc == null)
+                {
+                    return "";
+                }
+                string outText = proc.StandardOutput.ReadToEnd().Trim();
+                proc.WaitForExit(5000);
+                return proc.ExitCode == 0 ? outText : "";
+            }
+            catch
+            {
+                return "";
+            }
+        }
+
         public sealed class Previous
         {
             public int Ticks, Size, Seeds;
+            public string Commit = "";
             public Dictionary<string, Dictionary<string, double>> Numbers = new();
             public Dictionary<string, bool> M5Pass = new();
             /// <summary>"条件|シード" → ハッシュ文字列。</summary>
@@ -43,6 +80,7 @@ namespace SimRunner
                     Ticks = root.GetProperty("ticks").GetInt32(),
                     Size = root.GetProperty("size").GetInt32(),
                     Seeds = root.GetProperty("seeds").GetInt32(),
+                    Commit = root.TryGetProperty("commit", out var c0) ? (c0.GetString() ?? "") : "",
                 };
 
                 foreach (var c in root.GetProperty("conditions").EnumerateArray())
@@ -116,7 +154,23 @@ namespace SimRunner
         /// <summary>相対変化がこれを超えたら「大きく動いた」とみなす。</summary>
         const double k_SignificantChange = 0.10;
 
-        public static bool WriteDiffHtml(
+        /// <summary>決定論の照合結果。終了コードとコンソール表示を分けるために使う。</summary>
+        public enum DeterminismStatus
+        {
+            /// <summary>一致した、または照合できなかった。</summary>
+            Ok,
+
+            /// <summary>不一致だが、コミットも変わっている（実装を変えたのなら想定内）。</summary>
+            ChangedWithCode,
+
+            /// <summary>コードは同一なのに不一致。本物の決定論の破れ。</summary>
+            BrokenSameCode,
+
+            /// <summary>不一致だが、コミットを取得できず区別できない。</summary>
+            MismatchUnknownCode,
+        }
+
+        public static DeterminismStatus WriteDiffHtml(
             string path, string previousPath, Previous prev,
             List<Report.Aggregate> current, List<SeedResult> results,
             int ticks, int size)
@@ -143,6 +197,8 @@ namespace SimRunner
                     }
                 }
             }
+
+            var status = DeterminismStatus.Ok;
 
             var sb = new StringBuilder();
             sb.Append("""
@@ -186,12 +242,43 @@ namespace SimRunner
             }
             else if (mismatches.Count > 0)
             {
-                sb.Append("<div class='banner alarm'><h2>⚠ 決定論が破れています</h2>");
+                // コードが変わっていれば不一致は想定内。変わっていないなら本物の破れ。
+                // この区別ができないと、実装を段階的に変えている期間に警報が鳴り続け、
+                // 本物の破れを見逃す
+                string nowCommit = CurrentCommit();
+                bool codeChanged = nowCommit.Length > 0 && prev.Commit.Length > 0 && nowCommit != prev.Commit;
+                bool codeSame = nowCommit.Length > 0 && prev.Commit.Length > 0 && nowCommit == prev.Commit;
+
+                sb.Append(codeChanged
+                    ? "<div class='banner warn'><h2>ContentHash が変わりました（コードも変わっています）</h2>"
+                    : "<div class='banner alarm'><h2>⚠ 決定論が破れています</h2>");
                 sb.Append($"<p><b>{mismatches.Count} / {compared} シードで ContentHash が前回と一致しません。</b></p>");
-                sb.Append("<p>コードを変更していないのにここが不一致になるのは、" +
-                          "f(シード, イベントログ) という本プロジェクトの前提が崩れたということです。" +
-                          "他の指標の差分より先にこれを調べてください。" +
-                          "意図的にシミュレーションのルールを変更した場合は、この不一致が想定どおりです。</p>");
+
+                status = codeChanged ? DeterminismStatus.ChangedWithCode
+                    : codeSame ? DeterminismStatus.BrokenSameCode
+                    : DeterminismStatus.MismatchUnknownCode;
+
+                if (codeChanged)
+                {
+                    sb.Append($"<p>前回の実行以降にコミットが変わっています" +
+                              $"（<code>{prev.Commit[..Math.Min(8, prev.Commit.Length)]}</code> → " +
+                              $"<code>{nowCommit[..Math.Min(8, nowCommit.Length)]}</code>）。" +
+                              "シミュレーションのルールを変更したのであれば、この不一致は想定どおりです。" +
+                              "<b>心当たりが無い場合は、その差分が本当に挙動を変えるものだったかを確認してください。</b></p>");
+                }
+                else if (codeSame)
+                {
+                    sb.Append($"<p><b>コードは前回と同一です（<code>{nowCommit[..Math.Min(8, nowCommit.Length)]}</code>）。" +
+                              "つまりこれは実装変更によるものではありません。</b> " +
+                              "f(シード, イベントログ) という本プロジェクトの前提が崩れたということなので、" +
+                              "他の指標の差分より先にこれを調べてください。</p>");
+                }
+                else
+                {
+                    sb.Append("<p>コミットを取得できなかったため、実装変更によるものか区別できません。" +
+                              "コードを変更していないのにここが不一致になるなら、" +
+                              "f(シード, イベントログ) という前提が崩れたということです。</p>");
+                }
                 sb.Append("<table><thead><tr><th>条件</th><th>シード</th><th>前回</th><th>今回</th></tr></thead><tbody>");
                 foreach (var (c, s, before, after) in mismatches.Take(30))
                 {
@@ -292,7 +379,7 @@ namespace SimRunner
                       "指標の多くは良し悪しが一意でないため、橙は「注意して見る」印であって不合格ではない。</p>\n");
 
             File.WriteAllText(path, sb.ToString(), new UTF8Encoding(false));
-            return mismatches.Count == 0;
+            return status;
         }
 
         static Dictionary<string, double> CurrentNumbers(Report.Aggregate a) => new()

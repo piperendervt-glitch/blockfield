@@ -191,6 +191,9 @@ namespace SimRunner
             sb.Append($"  \"size\": {size},\n");
             sb.Append($"  \"seeds\": {results.Select(r => r.Seed).Distinct().Count()},\n");
             sb.Append($"  \"elapsedSeconds\": {N(elapsedSeconds)},\n");
+            // 実行時のコミット。ハッシュ不一致が「実装変更によるもの」か
+            // 「本物の決定論の破れ」かを次回の比較で区別するために残す
+            sb.Append($"  \"commit\": \"{Compare.CurrentCommit()}\",\n");
             sb.Append("  \"conditions\": [\n");
             for (int i = 0; i < aggregates.Count; i++)
             {
