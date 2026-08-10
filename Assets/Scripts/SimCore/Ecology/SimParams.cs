@@ -129,6 +129,57 @@ namespace BlockField.SimCore.Ecology
         /// </summary>
         public float herbivoreFearWeight;
 
+        /// <summary>
+        /// 狼の移動評価: 獲物場の重み。
+        /// 狼は獲物場だけを追うので、他の場の重みは0。
+        /// </summary>
+        public float wolfPreyWeight;
+
+        // --- 踏み荒らし場 (Demo 8 第3段 J1) ---
+
+        /// <summary>動物が移動先のセルに残す踏み跡の量。</summary>
+        public float trampleDeposit;
+
+        /// <summary>踏み荒らし場の拡散率。踏み跡は歩いた筋そのものであるべきなので最小。</summary>
+        public float trampleDiffuse;
+
+        /// <summary>
+        /// 踏み荒らし場の拡散パス数。**1から増やさないこと。**
+        /// 死の場と同じく総量が「書き込み量 × τ」で頭打ちなので、
+        /// 広げるほど1セルあたりの値が下がり、道の形が消える（第2段の実測）。
+        /// </summary>
+        public int trampleDiffusePasses;
+
+        /// <summary>
+        /// 踏み荒らし場の減衰率（τ中 ≈50ティック）。
+        /// 「踏まれた草が回復する速さ」。恐怖0.03よりやや遅く、死0.003より大幅に速い。
+        /// 通行が続くかぎり道は残り、通らなくなれば草が戻る。
+        /// </summary>
+        public float trampleDecay;
+
+        /// <summary>
+        /// 踏み荒らしが植物のスポーンを抑える強さ (Demo 8 第3段 J1)。
+        /// スポーン重みに (1 - k × 踏み荒らし場) を掛ける。0未満にはクランプせず、
+        /// <see cref="trampleSuppressionFloor"/> で下限を設けて回復の余地を残す。
+        /// </summary>
+        public float trampleSuppression;
+
+        /// <summary>
+        /// 踏み荒らしによる抑制の下限。完全に0にすると、一度踏まれた筋が
+        /// 二度と草の生えない不可逆な傷になる。踏まれなくなれば戻る余地を残す。
+        /// </summary>
+        public float trampleSuppressionFloor;
+
+        /// <summary>
+        /// この値を超えた踏み荒らし場のセルで、既存の植物が踏み潰される確率
+        /// (Demo 8 第3段 J1)。0 にすると「新しく生えない」だけになり、
+        /// けもの道が見えるまでに植物の寿命ぶんの時間がかかる。
+        /// </summary>
+        public float trampleCrushThreshold;
+
+        /// <summary>踏み潰しが起きる毎ティック確率（閾値を超えたセルの植物に対して）。</summary>
+        public float trampleCrushChance;
+
         /// <summary>動物: 毎ティックの抽選候補セル数（低頻度、基準スケールでの値）。</summary>
         public int animalSpawnCandidates;
 
@@ -213,6 +264,22 @@ namespace BlockField.SimCore.Ecology
             deathNutrientBoost = 20f,
             herbivoreVegetationWeight = 1f,
             herbivoreFearWeight = 1.5f,
+            wolfPreyWeight = 1f,
+
+            // 踏み荒らし (Demo 8 第3段)。到達距離 L = sqrt(1 × 0.02/4 / 0.02) = 0.5セル
+            // ＝ 実質にじまない。踏み跡は歩いた筋そのもの
+            trampleDeposit = 0.35f,
+            trampleDiffuse = 0.02f,
+            trampleDiffusePasses = 1,
+            trampleDecay = 0.02f,
+            trampleSuppression = 1.2f,
+            trampleSuppressionFloor = 0.1f,
+            // 0.35 では届かない。3000t の実測分布は 中央値0.024 / 90%点0.257 /
+            // 最大1.0 で、0.35 以上は適性セルの6.2%しかなく踏み潰しが年に数回になる
+            // （3シード×3000tで15件）。0.10 は「通行のある域」23.5% に相当し、
+            // 375件／3シードと目に見える頻度になる。植物総数は 205 のまま変わらない
+            trampleCrushThreshold = 0.10f,
+            trampleCrushChance = 0.02f,
             animalSpawnCandidates = 2,
             animalSpawnChance = 0.5f,
             animalCap = 30,

@@ -53,6 +53,7 @@ namespace BlockField.SimCore.Ecology
             UpdateVegetation(world, p);
             UpdateHerbivores(world, rng, p);
             UpdateWolves(world, rng, p);
+            CrushTrampledPlants(world, rng, p);
             Breed(world, rng, p);
 
             world.PopulationLog.Record(world);
@@ -83,7 +84,17 @@ namespace BlockField.SimCore.Ecology
                 // 「墓場に草が茂る」という因果が読み取りにくいため。
                 // ここは死が生を生む経路そのものなので、直接的な方が意図が伝わる
                 float nutrient = 1f + p.deathNutrientBoost * world.Death.GetAtColumn(x, z);
-                float weight = suitability * Math.Max(vegetation, p.vegetationFloor) * nutrient;
+
+                // 踏み荒らしがスポーンを抑える (Demo 8 第3段 J1)。
+                // 死の場と対になる経路。下限を設けるのは、一度踏まれた筋が
+                // 二度と草の生えない不可逆な傷になるのを避けるため
+                float trampled = 1f - p.trampleSuppression * world.Trample.GetAtColumn(x, z);
+                if (trampled < p.trampleSuppressionFloor)
+                {
+                    trampled = p.trampleSuppressionFloor;
+                }
+
+                float weight = suitability * Math.Max(vegetation, p.vegetationFloor) * nutrient * trampled;
 
                 if (rng.NextFloat01() < weight)
                 {
@@ -129,7 +140,8 @@ namespace BlockField.SimCore.Ecology
                     }
 
                     int facing = rng.Range(0, 4);
-                    world.TrySpawn(kind, x, z, facing);
+                    // 野生スポーンはパラメータの初期重みを個体へ写す (Demo 8 第3段 J2)
+                    world.TrySpawn(kind, x, z, facing, p);
                     if (world.AnimalCount >= p.animalSpawnCap)
                     {
                         return;
@@ -153,6 +165,61 @@ namespace BlockField.SimCore.Ecology
                 }
             }
             world.UpdateFields(p);
+        }
+
+        /// <summary>
+        /// 通った跡を残す (Demo 8 第3段 J1)。**実際に移動したときだけ**書く。
+        /// 立ち止まっている個体が同じセルを踏み固め続けると、
+        /// 「通り道」ではなく「滞留した場所」が濃くなり、けもの道にならない。
+        /// </summary>
+        static void DepositTrample(World world, SimParams p, Int3 cell)
+        {
+            if (!world.InBounds(cell.x, cell.z))
+            {
+                return;
+            }
+            world.Trample.Deposit(cell, p.trampleDeposit);
+        }
+
+        /// <summary>
+        /// 踏み潰し (Demo 8 第3段 J1)。踏み荒らし場が閾値を超えたセルの植物を
+        /// 確率で消す。
+        ///
+        /// 【実装した理由】スポーン抑制だけだと「新しく生えない」だけになり、
+        /// 既にある草が消えるのを植物の寿命（＝草食獣に食われるまで）待つことになる。
+        /// けもの道が見えるまでの時間が M1（実機5分セッションでの目視）に対して
+        /// 長すぎる。踏み潰しを入れると、通行が始まってから数十ティックで
+        /// 筋が見え始める。「歩いたら草が消える」は直感にも合う。
+        /// </summary>
+        static void CrushTrampledPlants(World world, Mulberry32 rng, SimParams p)
+        {
+            if (p.trampleCrushChance <= 0f)
+            {
+                return;
+            }
+
+            var crushed = new HashSet<int>();
+            foreach (var e in world.Entities)
+            {
+                if (!e.IsPlant)
+                {
+                    continue;
+                }
+                if (world.Trample.GetAtColumn(e.cell.x, e.cell.z) < p.trampleCrushThreshold)
+                {
+                    continue;
+                }
+                if (rng.NextFloat01() < p.trampleCrushChance)
+                {
+                    crushed.Add(e.id);
+                }
+            }
+
+            if (crushed.Count > 0)
+            {
+                world.TrampleCrushCount += crushed.Count;
+                world.RemoveEntities(crushed);
+            }
         }
 
         /// <summary>
@@ -200,7 +267,7 @@ namespace BlockField.SimCore.Ecology
                     else
                     {
                         // 場読み: 「餌に寄りたい」と「危険を避けたい」を1つのスコアで合成する
-                        e.facing = FindForagingFacing(world, p, e.cell, e.facing);
+                        e.facing = FindForagingFacing(world, e.forageWeights, e.cell, e.facing);
                         MoveHerbivore(world, rng, p, ref e);
                     }
                 }
@@ -213,7 +280,7 @@ namespace BlockField.SimCore.Ecology
                     {
                         e.facing = rng.Range(0, 4);
                     }
-                    e.facing = FindWanderFacing(world, p, e.cell, e.facing);
+                    e.facing = FindWanderFacing(world, e.wanderWeights, e.cell, e.facing);
                     MoveHerbivore(world, rng, p, ref e);
                 }
 
@@ -276,7 +343,7 @@ namespace BlockField.SimCore.Ecology
                     {
                         // 場読み: 獲物場の濃い方へ向く（決定論、RNG不使用）。
                         // 匂いが全く無ければ現在の向きのまま＝ランダム徘徊に落ちる
-                        e.facing = FindPreyGradientFacing(world, e.cell, e.facing);
+                        e.facing = FindPreyGradientFacing(world, e.forageWeights, e.cell, e.facing);
                         TryMove(world, rng, p, ref e, allowRandomTurnOnBlock: true);
                     }
                 }
@@ -296,10 +363,13 @@ namespace BlockField.SimCore.Ecology
                     world.Fear.Deposit(e.cell, p.fearDeposit);
                 }
 
-                // 診断用の統計（導出値、ハッシュ非対象）: 何歩歩いたか
                 if (e.cell != world.Entities[i].cell)
                 {
+                    // 診断用の統計（導出値、ハッシュ非対象）: 何歩歩いたか
                     world.WolfStepCount++;
+
+                    // 通った跡を残す (Demo 8 第3段 J1)。狼も草を踏む
+                    DepositTrample(world, p, e.cell);
                 }
 
                 world.UpdateEntity(i, e);
@@ -367,7 +437,11 @@ namespace BlockField.SimCore.Ecology
                     {
                         continue;
                     }
-                    childId = world.TrySpawn(e.kind, nx, nz, rng.Range(0, 4));
+                    // 親の重みをそのまま継承する (Demo 8 第3段 J2)。
+                    // 変異は入れない — 本段は構造の移管までで、進化本体は実装しない。
+                    // 変異を入れるならこの1行に乱数を足すだけで済む形にしてある
+                    childId = world.TrySpawn(
+                        e.kind, nx, nz, rng.Range(0, 4), e.forageWeights, e.wanderWeights);
                 }
 
                 if (childId < 0)
@@ -484,8 +558,15 @@ namespace BlockField.SimCore.Ecology
         ///
         /// 同値は固定順の先勝ち。RNG は使わない（＝決定論）。
         /// 場読みの振る舞いを直接検証できるよう public にしている。
+        ///
+        /// 【Demo 8 第3段 J2】重みは <see cref="SimParams"/> ではなく**個体**が持つ。
+        /// スコアの計算は <see cref="EntityWeights.Score"/> の
+        /// 「各場について 重み × 場の値 を合計」という一般形になり、
+        /// 場が増えてもこの関数は触らずに済む。
+        /// 重み0の項は 0×値 = 0 で加算も厳密なので、移管しても値は変わらない。
         /// </summary>
-        public static int FindForagingFacing(World world, SimParams p, Int3 cell, int currentFacing)
+        public static int FindForagingFacing(
+            World world, in EntityWeights weights, Int3 cell, int currentFacing)
         {
             int best = currentFacing;
             float bestScore = 0f;
@@ -501,8 +582,7 @@ namespace BlockField.SimCore.Ecology
                     continue;
                 }
 
-                float score = p.herbivoreVegetationWeight * world.Vegetation.GetAtColumn(nx, nz)
-                    - p.herbivoreFearWeight * world.Fear.GetAtColumn(nx, nz);
+                float score = weights.Score(world, nx, nz);
 
                 if (!found || score > bestScore)
                 {
@@ -543,7 +623,8 @@ namespace BlockField.SimCore.Ecology
         /// 恐怖が wanderBias / w_fear を超えると向きを変える。
         /// 「空腹でなくても危険は避ける」を、徘徊の性質を壊さずに入れるための形。
         /// </summary>
-        public static int FindWanderFacing(World world, SimParams p, Int3 cell, int currentFacing)
+        public static int FindWanderFacing(
+            World world, in EntityWeights weights, Int3 cell, int currentFacing)
         {
             const float wanderBias = 0.15f;
 
@@ -559,7 +640,7 @@ namespace BlockField.SimCore.Ecology
                     continue;
                 }
                 float score = (f == currentFacing ? wanderBias : 0f)
-                    - p.herbivoreFearWeight * world.Fear.GetAtColumn(nx, nz);
+                    + weights.Score(world, nx, nz);
                 if (score > bestScore)
                 {
                     bestScore = score;
@@ -601,7 +682,15 @@ namespace BlockField.SimCore.Ecology
 
             TryMove(world, rng, p, ref e, allowRandomTurnOnBlock: true);
 
-            if (e.cell == from || !nearFear)
+            if (e.cell == from)
+            {
+                return;
+            }
+
+            // 通った跡を残す (Demo 8 第3段 J1)
+            DepositTrample(world, p, e.cell);
+
+            if (!nearFear)
             {
                 return;
             }
@@ -625,7 +714,8 @@ namespace BlockField.SimCore.Ecology
         /// 個体数に依らず4近傍を見るだけなので O(1)。
         /// 場読みの振る舞いを直接検証できるよう public にしている。
         /// </summary>
-        public static int FindPreyGradientFacing(World world, Int3 cell, int currentFacing)
+        public static int FindPreyGradientFacing(
+            World world, in EntityWeights weights, Int3 cell, int currentFacing)
         {
             int best = currentFacing;
             float bestValue = 0f;
@@ -638,7 +728,7 @@ namespace BlockField.SimCore.Ecology
                 {
                     continue;
                 }
-                float v = world.Prey.GetAtColumn(nx, nz);
+                float v = weights.Score(world, nx, nz);
                 if (v > bestValue)
                 {
                     bestValue = v;

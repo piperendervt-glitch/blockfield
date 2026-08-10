@@ -32,6 +32,9 @@ namespace BlockField.SimCore.Ecology
         /// <summary>死の場 (Demo 8 第2段)。死んだ場所に残り、養分として植生を高める。</summary>
         public DeathField Death { get; }
 
+        /// <summary>踏み荒らし場 (Demo 8 第3段)。動物の通行で植生を抑える。死の場と対になる。</summary>
+        public TrampleField Trample { get; }
+
         /// <summary>
         /// 場の一元管理 (Demo 4.5 作業1)。ContentHash 計算と更新ループが場の種類を
         /// 知らずに回るための辞書。決定論のため名前昇順で走査する（m_FieldOrder）。
@@ -92,6 +95,9 @@ namespace BlockField.SimCore.Ecology
         /// 動かなかったティックや、危険地帯で捕食されて消えた個体の影響を受けない。
         /// </summary>
         public int HerbivoreMovesTowardFear { get; internal set; }
+
+        /// <summary>踏み潰された植物の累計 (Demo 8 第3段)。表示用の導出値。</summary>
+        public int TrampleCrushCount { get; internal set; }
 
         readonly struct PendingAction
         {
@@ -159,6 +165,7 @@ namespace BlockField.SimCore.Ecology
             Fear = new FearField(p.width, p.depth);
             Prey = new PreyField(p.width, p.depth);
             Death = new DeathField(p.width, p.depth);
+            Trample = new TrampleField(p.width, p.depth);
             SuitableCellCount = CountSuitableCells(Suitability, p.width, p.depth);
 
             RegisterField(Suitability);
@@ -166,6 +173,7 @@ namespace BlockField.SimCore.Ecology
             RegisterField(Fear);
             RegisterField(Prey);
             RegisterField(Death);
+            RegisterField(Trample);
         }
 
         /// <summary>
@@ -195,6 +203,7 @@ namespace BlockField.SimCore.Ecology
             Fear = new FearField(p.width, p.depth);
             Prey = new PreyField(p.width, p.depth);
             Death = new DeathField(p.width, p.depth);
+            Trample = new TrampleField(p.width, p.depth);
             SuitableCellCount = CountSuitableCells(Suitability, p.width, p.depth);
 
             RegisterField(Suitability);
@@ -202,6 +211,7 @@ namespace BlockField.SimCore.Ecology
             RegisterField(Fear);
             RegisterField(Prey);
             RegisterField(Death);
+            RegisterField(Trample);
         }
 
         /// <summary>適性 &gt; 0 のセル数（生成時の基準スケール）。</summary>
@@ -307,7 +317,29 @@ namespace BlockField.SimCore.Ecology
         /// (x, z) 柱の表層上セルへスポーンを試みる（同一セルに2つ生成しない原則）。
         /// 成功時は新しいエンティティの id、失敗時は -1 を返す。
         /// </summary>
-        public int TrySpawn(EntityKind kind, int x, int z, int facing)
+        /// <summary>
+        /// 重みを既定値で初期化するスポーン。テストや設置系の呼び出し用。
+        /// 個体の重みは <see cref="SimParams.Default"/> から作る。
+        /// </summary>
+        public int TrySpawn(EntityKind kind, int x, int z, int facing) =>
+            TrySpawn(kind, x, z, facing, SimParams.Default);
+
+        /// <summary>
+        /// パラメータから重みを初期化してスポーンする (Demo 8 第3段 J2)。
+        /// 野生スポーンはこちらを使い、その時点の <see cref="SimParams"/> の
+        /// 重みを個体へ写す。
+        /// </summary>
+        public int TrySpawn(EntityKind kind, int x, int z, int facing, SimParams p) =>
+            TrySpawn(kind, x, z, facing,
+                EntityWeights.ForagingFor(kind, p), EntityWeights.WanderingFor(kind, p));
+
+        /// <summary>
+        /// 重みを明示してスポーンする。繁殖は親の重みをここに渡す
+        /// （将来、変異を入れる場所もここ）。
+        /// </summary>
+        public int TrySpawn(
+            EntityKind kind, int x, int z, int facing,
+            in EntityWeights forageWeights, in EntityWeights wanderWeights)
         {
             if (!InBounds(x, z))
             {
@@ -328,6 +360,8 @@ namespace BlockField.SimCore.Ecology
                 facing = facing,
                 hunger = 0f,
                 breedCooldown = 0,
+                forageWeights = forageWeights,
+                wanderWeights = wanderWeights,
             };
             m_Entities.Add(entity);
             m_OccupiedCells.Add(cell, entity.id);
@@ -678,6 +712,15 @@ namespace BlockField.SimCore.Ecology
                 hash = (hash ^ (uint)e.facing) * prime;
                 hash = FoldUInt(hash, (uint)BitConverter.SingleToInt32Bits(e.hunger), prime);
                 hash = FoldUInt(hash, (uint)e.breedCooldown, prime);
+
+                // 個体の重み (Demo 8 第3段 J2)。進化が入ると個体差そのものが
+                // 世界の状態になるので、最初からハッシュ対象にしておく。
+                // 場の名前昇順で畳み込む（EntityWeights のメンバ順と一致）
+                for (int w = 0; w < EntityWeights.FieldCount; w++)
+                {
+                    hash = FoldUInt(hash, (uint)BitConverter.SingleToInt32Bits(e.forageWeights[w]), prime);
+                    hash = FoldUInt(hash, (uint)BitConverter.SingleToInt32Bits(e.wanderWeights[w]), prime);
+                }
             }
 
             hash = FoldUInt(hash, (uint)TickCount, prime);

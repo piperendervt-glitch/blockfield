@@ -30,6 +30,17 @@ namespace BlockField.Tests.EditMode
 
         static World MakeDiorama(uint seed) => World.Create(DioramaParams(seed));
 
+        /// <summary>
+        /// Demo 8 第3段 J2 で、行動の重みは SimParams から個体へ移った。
+        /// 場読みの振る舞い自体は変わっていないので、
+        /// ここでは種の初期重みを渡して従来どおりの検証を続ける。
+        /// </summary>
+        static EntityWeights WolfWeights =>
+            EntityWeights.ForagingFor(EntityKind.Wolf, SimParams.Default);
+
+        static EntityWeights HerbivoreWeights(SimParams p) =>
+            EntityWeights.ForagingFor(EntityKind.Sheep, p);
+
         // ---- 場読みの振る舞い（決定論的な単体検証）----
 
         [Test]
@@ -40,12 +51,12 @@ namespace BlockField.Tests.EditMode
 
             // +X 側だけに匂いを置く。狼はそちらを向くはず（facing 0 = +X）
             world.Prey.SetAtColumn(26, 25, 0.8f);
-            Assert.AreEqual(0, Simulation.FindPreyGradientFacing(world, cell, 2),
+            Assert.AreEqual(0, Simulation.FindPreyGradientFacing(world, WolfWeights, cell, 2),
                 "獲物場が濃い +X 方向へ向いていない");
 
             // -Z 側をさらに濃くすると、そちらへ切り替わる（facing 3 = -Z）
             world.Prey.SetAtColumn(25, 24, 0.9f);
-            Assert.AreEqual(3, Simulation.FindPreyGradientFacing(world, cell, 0),
+            Assert.AreEqual(3, Simulation.FindPreyGradientFacing(world, WolfWeights, cell, 0),
                 "より濃い -Z 方向へ向いていない");
         }
 
@@ -55,7 +66,7 @@ namespace BlockField.Tests.EditMode
             // 匂いが全く無ければ向きを変えない＝通常の徘徊に落ちる
             var world = MakeDiorama(2u);
             var cell = new Int3(25, world.GetSurfaceHeight(25, 25), 25);
-            Assert.AreEqual(1, Simulation.FindPreyGradientFacing(world, cell, 1));
+            Assert.AreEqual(1, Simulation.FindPreyGradientFacing(world, WolfWeights, cell, 1));
         }
 
         [Test]
@@ -69,12 +80,12 @@ namespace BlockField.Tests.EditMode
             world.Vegetation.SetAtColumn(26, 25, 0.5f);
             world.Fear.SetAtColumn(24, 25, 0.5f);
 
-            Assert.AreEqual(0, Simulation.FindForagingFacing(world, p, cell, 2),
+            Assert.AreEqual(0, Simulation.FindForagingFacing(world, HerbivoreWeights(p), cell, 2),
                 "草のある +X ではなく恐怖のある方へ向いている");
 
             // 同じ +X に強い恐怖を足すと、草があっても避けるようになる
             world.Fear.SetAtColumn(26, 25, 0.9f);
-            Assert.AreNotEqual(0, Simulation.FindForagingFacing(world, p, cell, 2),
+            Assert.AreNotEqual(0, Simulation.FindForagingFacing(world, HerbivoreWeights(p), cell, 2),
                 "草はあるが恐怖が濃い方向を選んでいる（葛藤が表現できていない）");
         }
 
@@ -92,7 +103,7 @@ namespace BlockField.Tests.EditMode
             world.Fear.SetAtColumn(24, 25, 0.9f); // -X
             world.Fear.SetAtColumn(25, 24, 0.2f); // -Z が最も薄い
 
-            Assert.AreEqual(3, Simulation.FindForagingFacing(world, p, cell, 0),
+            Assert.AreEqual(3, Simulation.FindForagingFacing(world, HerbivoreWeights(p), cell, 0),
                 "全方向が危険なとき、最も恐怖の薄い方向へ逃げていない");
         }
 
