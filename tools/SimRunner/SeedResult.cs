@@ -17,6 +17,32 @@ namespace SimRunner
         // 時間を通した最小値（warmup 以降）。M5 の判定はこれで行う
         public int MinPlants, MinHerbivores, MinWolves;
 
+        // ---- 時間平均（warmup 以降の毎ティック平均）----
+        // 最終時点の1点は揺れが大きく、実装の前後を比べる基準値にならない。
+        // Demo 8.5（植物の場化）の M1/M2 はこちらを使う
+        public double MeanPlantsPerTick, MeanHerbivoresPerTick, MeanWolvesPerTick;
+        public double MeanEntitiesPerTick;
+
+        /// <summary>
+        /// 個体あたりの餓死・捕食（1個体1000ティックあたり）。
+        /// 絶対数はスケールと個体数に比例して増えるため、実装の前後を
+        /// 比べるには個体あたりに正規化する必要がある。
+        /// </summary>
+        public double StarvationPerAnimalPerKiloTick, PredationPerAnimalPerKiloTick;
+
+        /// <summary>
+        /// 適性セルあたりの植生場の平均（最終時点）。
+        /// 植物を場にしたあとは「本数」が存在しなくなるため、
+        /// 移行の前後で比較できる指標はこれになる。
+        /// </summary>
+        public double VegetationPerSuitableCell;
+
+        /// <summary>
+        /// ティックループだけの所要時間（ミリ秒）。ワールド生成・集計・
+        /// 画像生成・ファイル出力は含まない。M1 の基準値。
+        /// </summary>
+        public double SimMilliseconds;
+
         // 累計
         public int Starvation, Predation, Births, TrampleCrush;
 
@@ -44,5 +70,8 @@ namespace SimRunner
         public bool GuildExtinct => MinHerbivores == 0;
         public bool WolvesExtinct => MinWolves == 0;
         public bool PlantsExtinct => MinPlants == 0;
+
+        /// <summary>安定条件（ギルド・狼・植物のいずれか）に違反したシードか。</summary>
+        public bool StabilityViolated => GuildExtinct || WolvesExtinct || PlantsExtinct;
     }
 }

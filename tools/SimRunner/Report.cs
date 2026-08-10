@@ -36,6 +36,14 @@ namespace SimRunner
             public int GuildExtinct, WolvesExtinct, PlantsExtinct;
             public double MeanPlants, MeanHerbivores, MeanWolves, MeanCrush;
             public double StarvationPer1000Ticks, PredationPer1000Ticks, BirthsPer1000Ticks;
+
+            // Demo 8.5（植物の場化）の基準値。時間平均・個体あたり・処理時間
+            public double MeanPlantsPerTick, MeanHerbivoresPerTick, MeanWolvesPerTick;
+            public double MeanEntitiesPerTick;
+            public double StarvationPerAnimalPerKiloTick, PredationPerAnimalPerKiloTick;
+            public double VegetationPerSuitableCell;
+            public double MsPer1000Ticks;
+            public int StabilityViolations;
             public Dictionary<string, double> FieldMean = new();
             public Dictionary<string, double> FieldMax = new();
 
@@ -138,6 +146,16 @@ namespace SimRunner
                 a.PredationPer1000Ticks = rs.Average(r => r.Predation * 1000.0 / ticks);
                 a.BirthsPer1000Ticks = rs.Average(r => r.Births * 1000.0 / ticks);
 
+                a.MeanPlantsPerTick = rs.Average(r => r.MeanPlantsPerTick);
+                a.MeanHerbivoresPerTick = rs.Average(r => r.MeanHerbivoresPerTick);
+                a.MeanWolvesPerTick = rs.Average(r => r.MeanWolvesPerTick);
+                a.MeanEntitiesPerTick = rs.Average(r => r.MeanEntitiesPerTick);
+                a.StarvationPerAnimalPerKiloTick = rs.Average(r => r.StarvationPerAnimalPerKiloTick);
+                a.PredationPerAnimalPerKiloTick = rs.Average(r => r.PredationPerAnimalPerKiloTick);
+                a.VegetationPerSuitableCell = rs.Average(r => r.VegetationPerSuitableCell);
+                a.MsPer1000Ticks = rs.Average(r => r.SimMilliseconds * 1000.0 / ticks);
+                a.StabilityViolations = rs.Count(r => r.StabilityViolated);
+
                 foreach (string name in rs[0].FieldMean.Keys.OrderBy(k => k, StringComparer.Ordinal))
                 {
                     a.FieldMean[name] = rs.Average(r => r.FieldMean[name]);
@@ -198,6 +216,15 @@ namespace SimRunner
                 sb.Append($"      \"starvationPer1000Ticks\": {N(a.StarvationPer1000Ticks)},\n");
                 sb.Append($"      \"predationPer1000Ticks\": {N(a.PredationPer1000Ticks)},\n");
                 sb.Append($"      \"birthsPer1000Ticks\": {N(a.BirthsPer1000Ticks)},\n");
+                sb.Append($"      \"meanPlantsPerTick\": {N(a.MeanPlantsPerTick)},\n");
+                sb.Append($"      \"meanHerbivoresPerTick\": {N(a.MeanHerbivoresPerTick)},\n");
+                sb.Append($"      \"meanWolvesPerTick\": {N(a.MeanWolvesPerTick)},\n");
+                sb.Append($"      \"meanEntitiesPerTick\": {N(a.MeanEntitiesPerTick)},\n");
+                sb.Append($"      \"starvationPerAnimalPerKiloTick\": {N(a.StarvationPerAnimalPerKiloTick)},\n");
+                sb.Append($"      \"predationPerAnimalPerKiloTick\": {N(a.PredationPerAnimalPerKiloTick)},\n");
+                sb.Append($"      \"vegetationPerSuitableCell\": {N(a.VegetationPerSuitableCell)},\n");
+                sb.Append($"      \"msPer1000Ticks\": {N(a.MsPer1000Ticks)},\n");
+                sb.Append($"      \"stabilityViolations\": {a.StabilityViolations},\n");
                 sb.Append("      \"fieldMean\": {");
                 sb.Append(string.Join(", ", a.FieldMean.Select(kv => $"\"{kv.Key}\": {N(kv.Value)}")));
                 sb.Append("},\n");

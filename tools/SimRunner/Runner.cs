@@ -99,6 +99,12 @@ namespace SimRunner
                 MinWolves = int.MaxValue,
             };
 
+            // ティックループだけを測る。ワールド生成と Collect は含めない (M1 の基準値)。
+            // ループ内の集計は個体数カウンタの読み出し（O(1)）だけに留めてあり、
+            // 場の走査のような重い処理は入れていない。時間の汚染を避けるため
+            long plantSum = 0, herbivoreSum = 0, wolfSum = 0, entitySum = 0, samples = 0;
+            var simWatch = System.Diagnostics.Stopwatch.StartNew();
+
             for (int t = 0; t < ticks; t++)
             {
                 Simulation.Tick(world, world.Rng, p);
@@ -109,6 +115,12 @@ namespace SimRunner
                     if (world.PlantCount < r.MinPlants) r.MinPlants = world.PlantCount;
                     if (herbivores < r.MinHerbivores) r.MinHerbivores = herbivores;
                     if (world.WolfCount < r.MinWolves) r.MinWolves = world.WolfCount;
+
+                    plantSum += world.PlantCount;
+                    herbivoreSum += herbivores;
+                    wolfSum += world.WolfCount;
+                    entitySum += world.Entities.Count;
+                    samples++;
                 }
 
                 // 長時間実験で系列が肥大しないよう、1ランあたり最大2,000点に抑える。
@@ -131,6 +143,17 @@ namespace SimRunner
                 world.TickCount % checkpointInterval != 0)
             {
                 checkpoints.Write(condition.Name, world);
+            }
+
+            simWatch.Stop();
+            r.SimMilliseconds = simWatch.Elapsed.TotalMilliseconds;
+
+            if (samples > 0)
+            {
+                r.MeanPlantsPerTick = (double)plantSum / samples;
+                r.MeanHerbivoresPerTick = (double)herbivoreSum / samples;
+                r.MeanWolvesPerTick = (double)wolfSum / samples;
+                r.MeanEntitiesPerTick = (double)entitySum / samples;
             }
 
             if (r.MinPlants == int.MaxValue) r.MinPlants = world.PlantCount;
@@ -168,6 +191,36 @@ namespace SimRunner
             var (high, low) = EcologyStats.TrampleQuartileThresholds(world);
             r.TrampleQuartileHigh = high;
             r.TrampleQuartileLow = low;
+
+            // 個体あたりの餓死・捕食。分母は延べ生存動物ティック数
+            // （PopulationLog が毎ティック記録している）
+            r.StarvationPerAnimalPerKiloTick = EcologyStats.StarvationPerAnimalPerKiloTick(world);
+            long animalTicks = 0;
+            var log = world.PopulationLog;
+            for (int i = 0; i < log.Count; i++)
+            {
+                animalTicks += log.GetSample(i).Animals;
+            }
+            r.PredationPerAnimalPerKiloTick = animalTicks > 0
+                ? 1000.0 * world.PredationCount / animalTicks
+                : 0;
+
+            // 適性セルあたりの植生場。植物を場にしたあとも比較できる唯一の指標
+            double vegSum = 0;
+            int suitable = 0;
+            for (int z = 0; z < world.Depth; z++)
+            {
+                for (int x = 0; x < world.Width; x++)
+                {
+                    if (world.Suitability.GetAtColumn(x, z) <= 0f)
+                    {
+                        continue;
+                    }
+                    suitable++;
+                    vegSum += world.Vegetation.GetAtColumn(x, z);
+                }
+            }
+            r.VegetationPerSuitableCell = suitable > 0 ? vegSum / suitable : 0;
 
             for (int z = 0; z < world.Depth; z++)
             {
