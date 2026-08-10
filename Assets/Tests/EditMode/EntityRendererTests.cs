@@ -36,14 +36,21 @@ namespace BlockField.Tests.EditMode
         }
 
         [Test]
-        public void CollectRemovedVisualIds_AgainstRealWorld_EatenPlantIsCollected()
+        public void CollectRemovedVisualIds_AgainstRealWorld_StarvedAnimalIsCollected()
         {
-            // 実ワールドで植物が食べられた後、その id が破棄対象になることを end-to-end で検証
+            // 実ワールドで個体が消えた後、その id が破棄対象になることを end-to-end で検証。
+            //
+            // 【Demo 8.5 で対象が変わった】移行前は「食べられた植物」で見ていたが、
+            // 草が場になり植物 Entity が存在しなくなったため、
+            // **餓死した動物**で同じことを見る。表示側の関心
+            // （World から消えた id の Visual を破棄する）は変わらない。
             var p = SimParams.Default;
-            p.plantSpawnCandidates = 0;
             p.animalSpawnCandidates = 0;
             p.moveChance = 0f;
             p.turnChance = 0f;
+            p.vegetationGrowth = 0f;   // 草を生やさない＝必ず餓死する
+            p.vegetationFloor = 0f;
+            p.hungerPerTick = 0.2f;    // 数ティックで餓死させる
 
             var tp = new TerrainParams
             {
@@ -57,21 +64,21 @@ namespace BlockField.Tests.EditMode
             };
             var world = World.Create(tp);
 
-            // 平坦セルを探して羊と植物を隣接配置
+            // 平坦セルを探して羊を2匹配置。片方だけ餓死させたいので
+            // 世界には草を置かず、生存側は表示だけを模擬する
             (int x, int z) = FindFlatPair(world);
-            int sheepId = world.TrySpawn(EntityKind.Sheep, x, z, 0);
-            int plantId = world.TrySpawn(EntityKind.GrassTuft, x + 1, z, 0);
-            Assert.GreaterOrEqual(sheepId, 0);
-            Assert.GreaterOrEqual(plantId, 0);
+            int starvingId = world.TrySpawn(EntityKind.Sheep, x, z, 0);
+            Assert.GreaterOrEqual(starvingId, 0);
 
-            // 表示側は両方を表示している状態を模擬
-            var visualIds = new List<int> { sheepId, plantId };
+            // 実在しない id も混ぜて「World に無い id は破棄対象」になることを見る
+            const int ghostId = 99999;
+            var visualIds = new List<int> { starvingId, ghostId };
 
-            for (int t = 0; t < 80 && world.PlantCount > 0; t++)
+            for (int t = 0; t < 40 && world.AnimalCount > 0; t++)
             {
                 Simulation.Tick(world, world.Rng, p);
             }
-            Assert.AreEqual(0, world.PlantCount, "前提: 植物が食べられていること");
+            Assert.AreEqual(0, world.AnimalCount, "前提: 羊が餓死していること");
 
             var liveIds = new HashSet<int>();
             foreach (var e in world.Entities)
@@ -81,8 +88,8 @@ namespace BlockField.Tests.EditMode
             var result = new List<int>();
             EntityRenderer.CollectRemovedVisualIds(liveIds, visualIds, result);
 
-            CollectionAssert.Contains(result, plantId, "食べられた植物の表示が破棄対象になっていない");
-            CollectionAssert.DoesNotContain(result, sheepId, "生存中の羊が誤って破棄対象になっている");
+            CollectionAssert.Contains(result, starvingId, "餓死した羊の表示が破棄対象になっていない");
+            CollectionAssert.Contains(result, ghostId, "World に存在しない id が破棄対象になっていない");
         }
 
         static (int x, int z) FindFlatPair(World world)

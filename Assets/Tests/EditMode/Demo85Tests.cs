@@ -231,21 +231,65 @@ namespace BlockField.Tests.EditMode
         // ---- 段階0が既存の挙動を変えていないこと ----
 
         /// <summary>
-        /// 成長率だけはまだどこからも読まれていない（段階3で配線する）。
-        /// 値を変えても世界は1ビットも変わらないはず。
-        ///
-        /// 摂食の3つ（bite / recovery / threshold）は段階1で配線済みなので、
-        /// ここでは対象外。<see cref="Stage1_GrazingParametersAreWired"/> が
-        /// 逆に「効いていること」を固定する。
+        /// 成長率が効いていること（段階3で配線した）。
+        /// 草の成長は抽選ではなく場の値の増加になったので、
+        /// 成長率を上げれば草の総量が増える。
         /// </summary>
         [Test]
-        public void Stage3_GrowthParameterIsNotWiredYet()
+        public void Stage3_GrowthParameterIsWired()
         {
-            var changed = SimParams.Default;
-            changed.vegetationGrowth = 0.99f;
+            var slow = SimParams.Default;
+            slow.vegetationGrowth = SimParams.Default.vegetationGrowth * 0.5f;
+            var fast = SimParams.Default;
+            fast.vegetationGrowth = SimParams.Default.vegetationGrowth * 2f;
 
-            Assert.AreEqual(HashAfter(SimParams.Default), HashAfter(changed),
-                "vegetationGrowth が既に挙動へ影響している（配線は段階3のはず）");
+            float slowGrass = GrassAfter(slow);
+            float fastGrass = GrassAfter(fast);
+
+            Assert.Greater(fastGrass, slowGrass,
+                $"成長率を上げても草が増えない（遅 {slowGrass:F1} / 速 {fastGrass:F1}）");
+        }
+
+        /// <summary>
+        /// 成長がロジスティック型であること（Demo 8.5 段階3 の設計上の要）。
+        ///
+        /// 素直な `成長率 × 草` は破綻する。成長も減衰も草の量に比例するため
+        /// 比だけで結果が決まり、**内部の釣り合い点が無い**（成長率 &gt; 減衰率で
+        /// 世界が草で埋まり、下回れば消滅する）。移行前は plantCap が
+        /// 暗黙の安定装置だった。
+        ///
+        /// (1 - 草) を掛けることで釣り合い点 1 - 減衰率/成長率 ができる。
+        /// ここでは「成長率を倍にしても草が上限に張り付かない」ことで
+        /// その性質を固定する。
+        /// </summary>
+        [Test]
+        public void Stage3_GrowthIsLogisticSoTheWorldDoesNotFillWithGrass()
+        {
+            var fast = SimParams.Default;
+            fast.vegetationGrowth = SimParams.Default.vegetationGrowth * 2f;
+
+            var world = MakeDiorama(12345u);
+            for (int t = 0; t < 1500; t++)
+            {
+                Simulation.Tick(world, world.Rng, fast);
+            }
+
+            // 釣り合い点は 1 - 0.02/0.056 = 0.64。上限1.0には達しない
+            float perCell = world.VegetationTotal / world.SuitableCellCount;
+            Assert.Less(perCell, 0.9f,
+                $"成長率を倍にしたら草が上限に張り付いた（適性セルあたり {perCell:F3}）。" +
+                "ロジスティック型 (1 - 草) が効いていない");
+            Assert.Greater(perCell, 0.1f, "草が育っていない");
+        }
+
+        static float GrassAfter(SimParams p, uint seed = 12345u, int ticks = 800)
+        {
+            var world = MakeDiorama(seed);
+            for (int t = 0; t < ticks; t++)
+            {
+                Simulation.Tick(world, world.Rng, p);
+            }
+            return world.VegetationTotal;
         }
 
         /// <summary>
@@ -278,6 +322,21 @@ namespace BlockField.Tests.EditMode
                 Simulation.Tick(world, world.Rng, p);
             }
             return world.ComputeContentHash();
+        }
+
+        /// <summary>
+        /// 診断用の通行阻害が既定で無効であること (Demo 8.5 段階3)。
+        ///
+        /// これは移行前の「植物が通行不可だった」副作用を再現して
+        /// 切り分けるための入口であり、通常の実行では使わない。
+        /// 既定で有効になっていると、廃止したはずの阻害が復活して
+        /// 生態系の指標が静かにずれる。
+        /// </summary>
+        [Test]
+        public void Stage3_MovementBlockingIsDisabledByDefault()
+        {
+            Assert.AreEqual(0f, SimParams.Default.movementBlockVegetation, 1e-6f,
+                "診断用の通行阻害が既定で有効になっている");
         }
 
         [Test]

@@ -132,11 +132,22 @@ namespace BlockField.Tests.EditMode
                 // 有効な PlayerBreakPlant を確実に1件含める（実在の植物セルを狙う）
                 if (t == 30)
                 {
-                    foreach (var e in worldA.Entities)
+                    // Demo 8.5: 植物 Entity が無いので、草のあるセルを狙う
+                    // （PlayerBreakPlant は「その場の草を半分にする」操作になった）
+                    for (int z = 0; z < worldA.Depth; z++)
                     {
-                        if (e.IsPlant)
+                        bool done = false;
+                        for (int x = 0; x < worldA.Width && !done; x++)
                         {
-                            worldA.EnqueuePlayerAction(SimEventType.PlayerBreakPlant, e.cell, BlockId.Air);
+                            if (worldA.Vegetation.GetAtColumn(x, z) > 0.1f)
+                            {
+                                worldA.EnqueuePlayerAction(SimEventType.PlayerBreakPlant,
+                                    new Int3(x, worldA.GetSurfaceHeight(x, z), z), BlockId.Air);
+                                done = true;
+                            }
+                        }
+                        if (done)
+                        {
                             break;
                         }
                     }
@@ -258,14 +269,22 @@ namespace BlockField.Tests.EditMode
             }
 
             // test 側: 最初の5植物の下のブロックを Break
+            // Demo 8.5: 植物 Entity が無くなったので、草の濃いセルを狙う
             var broken = new List<Int3>();
-            foreach (var e in test.Entities)
+            for (int z = 0; z < test.Depth && broken.Count < 5; z++)
             {
-                if (e.IsPlant && broken.Count < 5)
+                for (int x = 0; x < test.Width && broken.Count < 5; x++)
                 {
-                    test.EnqueuePlayerAction(SimEventType.PlayerBreak,
-                        new Int3(e.cell.x, e.cell.y - 1, e.cell.z), BlockId.Air);
-                    broken.Add(new Int3(e.cell.x, e.cell.y - 1, e.cell.z));
+                    // 0.3 だと 300ティック時点で5セル揃うのが 4/16 シードしかない。
+                    // 0.2 なら 16/16（実測）
+                    if (test.Vegetation.GetAtColumn(x, z) < 0.2f)
+                    {
+                        continue;
+                    }
+                    int h = test.GetSurfaceHeight(x, z);
+                    var below = new Int3(x, h - 1, z);
+                    test.EnqueuePlayerAction(SimEventType.PlayerBreak, below, BlockId.Air);
+                    broken.Add(below);
                 }
             }
             if (broken.Count < 5)
@@ -297,39 +316,45 @@ namespace BlockField.Tests.EditMode
             return (controlNear, testNear, true);
         }
 
+        /// <summary>
+        /// 1ティック進めて、破壊列の**近傍にある草の量**を返す（破壊列そのものは除く）。
+        ///
+        /// Demo 8.5 で植物が Entity でなくなったため、「新しく湧いた植物の本数」を
+        /// 数えることができなくなった。同じ因果（破壊 → 植生場が下がる →
+        /// 周囲の草も減る）を**連続量**で測る形に変えた。
+        /// 本数は1シードあたり数個しか出ず符号が反転しやすかったので、
+        /// 量で測るほうが指標としても素直である。
+        /// 千倍して整数にするのは呼び出し側の集計を整数のまま保つため。
+        /// </summary>
         static int TickAndCountNearSpawns(World w, SimParams sp, List<Int3> centers, HashSet<int> scratch)
         {
-            scratch.Clear();
-            foreach (var e in w.Entities)
-            {
-                if (e.IsPlant) scratch.Add(e.id);
-            }
             Simulation.Tick(w, w.Rng, sp);
 
-            int near = 0;
-            foreach (var e in w.Entities)
+            double near = 0;
+            for (int z = 0; z < w.Depth; z++)
             {
-                if (!e.IsPlant || scratch.Contains(e.id)) continue;
-                bool onBrokenColumn = false;
-                foreach (var c in centers)
+                for (int x = 0; x < w.Width; x++)
                 {
-                    if (c.x == e.cell.x && c.z == e.cell.z)
+                    bool onBrokenColumn = false, isNear = false;
+                    foreach (var c in centers)
                     {
-                        onBrokenColumn = true;
-                        break;
+                        if (c.x == x && c.z == z)
+                        {
+                            onBrokenColumn = true;
+                            break;
+                        }
+                        if (System.Math.Max(System.Math.Abs(c.x - x), System.Math.Abs(c.z - z)) <= 3)
+                        {
+                            isNear = true;
+                        }
                     }
-                }
-                if (onBrokenColumn) continue;
-                foreach (var c in centers)
-                {
-                    if (System.Math.Max(System.Math.Abs(c.x - e.cell.x), System.Math.Abs(c.z - e.cell.z)) <= 3)
+                    if (!onBrokenColumn && isNear)
                     {
-                        near++;
-                        break;
+                        near += w.Vegetation.GetAtColumn(x, z);
                     }
                 }
             }
-            return near;
+            return (int)(near * 1000);
         }
 
         [Test]
@@ -343,18 +368,19 @@ namespace BlockField.Tests.EditMode
             var surfaceCell = new Int3(x, h - 1, z);
             var surfaceBlock = world.Grid.Get(surfaceCell);
 
-            Assert.GreaterOrEqual(world.TrySpawn(EntityKind.GrassTuft, x, z, 0), 0);
+            // Demo 8.5: 植物 Entity が無くなったので、草を直接置く。
+            // PlayerBreakPlant は「その場の草を半分にする」操作に変わった
+            // （Demo 4 M1d の植物の独立破壊そのものは廃止。列挙子だけ残してある）
+            world.Vegetation.SetAtColumn(x, z, 0.8f);
 
-            // 1ティック回して植生場に書き込ませてから破壊
             Simulation.Tick(world, world.Rng, p);
             float vegBefore = world.Vegetation.GetAtColumn(x, z);
-            Assert.Greater(vegBefore, 0f, "テスト前提: 植生場に書き込みがあること");
+            Assert.Greater(vegBefore, 0f, "テスト前提: 植生場に草があること");
 
             world.EnqueuePlayerAction(SimEventType.PlayerBreakPlant, plantCell, BlockId.Air);
             Simulation.Tick(world, world.Rng, p);
 
-            Assert.AreEqual(0, world.PlantCount, "植物が消えていない");
-            Assert.AreEqual(surfaceBlock, world.Grid.Get(surfaceCell), "地形が変更された（植物のみ消えるはず）");
+            Assert.AreEqual(surfaceBlock, world.Grid.Get(surfaceCell), "地形が変更された（草だけ減るはず）");
             Assert.AreEqual(h, world.GetSurfaceHeight(x, z), "表層高さが変わった");
             Assert.Less(world.Vegetation.GetAtColumn(x, z), vegBefore * 0.75f, "植生場が半減していない");
 

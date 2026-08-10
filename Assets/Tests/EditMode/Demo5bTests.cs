@@ -80,7 +80,12 @@ namespace BlockField.Tests.EditMode
                 var world = MakeDiorama(seed);
                 var caps = SimParams.Default.Resolve(world.SuitableCellCount);
 
-                int plantsAtCap = 0, animalsAtCap = 0, samples = 0;
+                // 【植物の項目を外した理由 (Demo 8.5)】
+                // 草が場になり plantCap が使われなくなったため、「本数が上限に
+                // 張り付く」という状態が存在しない。草の飽和は
+                // ロジスティック成長の釣り合い点で決まり、上限1.0に張り付くかは
+                // Demo85Tests 側で見る。ここは動物だけを見る
+                int animalsAtCap = 0, samples = 0;
                 for (int t = 0; t < k_Ticks; t++)
                 {
                     Simulation.Tick(world, world.Rng);
@@ -89,17 +94,13 @@ namespace BlockField.Tests.EditMode
                         continue;
                     }
                     samples++;
-                    if (world.PlantCount >= caps.plantCap) plantsAtCap++;
                     if (world.AnimalCount >= caps.animalCap) animalsAtCap++;
                 }
 
                 // 上限に張り付いている時間が半分を超えると、場の値が飽和して
                 // 「どこが濃いか」の差が失われる
-                float plantRatio = (float)plantsAtCap / samples;
                 float animalRatio = (float)animalsAtCap / samples;
 
-                Assert.Less(plantRatio, 0.5f,
-                    $"seed {seed}: 植物が上限に張り付いている時間の割合が {plantRatio:P0}");
                 Assert.Less(animalRatio, 0.5f,
                     $"seed {seed}: 動物が上限に張り付いている時間の割合が {animalRatio:P0}");
             }
@@ -125,7 +126,7 @@ namespace BlockField.Tests.EditMode
             {
                 var world = MakeDiorama(seed);
                 int minHerbivores = int.MaxValue;
-                int minPlants = int.MaxValue;
+                float minVegetation = float.MaxValue;
 
                 for (int t = 0; t < k_Ticks; t++)
                 {
@@ -136,10 +137,10 @@ namespace BlockField.Tests.EditMode
                     }
                     int herbivores = world.SheepCount + world.PigCount;
                     if (herbivores < minHerbivores) minHerbivores = herbivores;
-                    if (world.PlantCount < minPlants) minPlants = world.PlantCount;
+                    if (world.VegetationTotal < minVegetation) minVegetation = world.VegetationTotal;
                 }
 
-                Assert.Greater(minPlants, 0, $"seed {seed}: 植物が一度でも絶滅した");
+                Assert.Greater(minVegetation, 0f, $"seed {seed}: 草が一度でも消え去った");
                 Assert.Greater(minHerbivores, 0,
                     $"seed {seed}: 草食獣ギルドが一度でも全滅した（最小 {minHerbivores}）");
             }

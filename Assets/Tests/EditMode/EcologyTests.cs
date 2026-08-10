@@ -54,7 +54,7 @@ namespace BlockField.Tests.EditMode
         public void Spawn_After100Ticks_PlantsAndAnimalsExist()
         {
             var world = CreateAndTick(1u, 100, SimParams.Default);
-            Assert.Greater(world.PlantCount, 0, "100ティックで植物が1つも湧いていない");
+            Assert.Greater(world.VegetationTotal, 0f, "100ティックで草が育っていない");
             Assert.Greater(world.AnimalCount, 0, "100ティックで動物が1匹も湧いていない");
         }
 
@@ -66,7 +66,7 @@ namespace BlockField.Tests.EditMode
 
             // Demo 5a: 上限は基準スケールの値なので、ワールドの適性セル数へ換算してから比べる
             var resolved = p.Resolve(world.SuitableCellCount);
-            Assert.LessOrEqual(world.PlantCount, resolved.plantCap);
+            Assert.LessOrEqual(world.VegetationTotal, world.Width * world.Depth, "草の総量がセル数×1.0を超えている");
             Assert.LessOrEqual(world.AnimalCount, resolved.animalCap);
         }
 
@@ -117,9 +117,9 @@ namespace BlockField.Tests.EditMode
         {
             var world = CreateAndTick(11u, 800, SimParams.Default);
 
-            Assert.Greater(world.PlantCount, 0, "植物が湧いていない（テストが空回りしている）");
+            Assert.Greater(world.VegetationTotal, 0f, "草が育っていない（テストが空回りしている）");
             Assert.AreEqual(
-                (float)world.PlantCount / world.SuitableCellCount,
+                world.VegetationTotal / world.SuitableCellCount,
                 EcologyStats.PlantDensity(world), 1e-6f);
             Assert.AreEqual(
                 (float)world.AnimalCount / world.SuitableCellCount,
@@ -181,7 +181,7 @@ namespace BlockField.Tests.EditMode
 
             Assert.AreEqual(world.TickCount, last.tick + 1,
                 "最後の記録はティック加算の直前に取られる");
-            Assert.AreEqual(world.PlantCount, last.plants);
+            Assert.AreEqual((int)world.VegetationTotal, last.plants);
             Assert.AreEqual(world.SheepCount + world.PigCount, last.herbivores);
             Assert.AreEqual(world.WolfCount, last.wolves);
             Assert.AreEqual(world.AnimalCount, last.Animals);
@@ -204,8 +204,8 @@ namespace BlockField.Tests.EditMode
             Assert.Greater(large.SuitableCellCount, small.SuitableCellCount * 2,
                 "広い方が十分に広くない（テストが意味を成さない）");
 
-            double dSmall = (double)small.PlantCount / small.SuitableCellCount;
-            double dLarge = (double)large.PlantCount / large.SuitableCellCount;
+            double dSmall = (double)small.VegetationTotal / small.SuitableCellCount;
+            double dLarge = (double)large.VegetationTotal / large.SuitableCellCount;
 
             // 上限に張り付く水準まで育つので、密度は 10% 以内に収まるはず
             Assert.AreEqual(dSmall, dLarge, dSmall * 0.1,

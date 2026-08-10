@@ -330,7 +330,8 @@ namespace BlockField.Tests.EditMode
             p.trampleSuppression = 0f;
             p.trampleCrushRate = 0f;
 
-            int graveCells = 0, otherCells = 0, gravePlants = 0, otherPlants = 0;
+            int graveCells = 0, otherCells = 0;
+            double graveGrass = 0, otherGrass = 0;
             foreach (uint seed in k_Seeds)
             {
                 var world = Run(seed, p);
@@ -342,26 +343,27 @@ namespace BlockField.Tests.EditMode
                         {
                             continue;
                         }
-                        if (world.Death.GetAtColumn(x, z) >= EcologyStats.GraveyardThreshold) graveCells++;
-                        else otherCells++;
+                        // Demo 8.5: 「本数」ではなく草の量（植生場）で比べる
+                        float g = world.Vegetation.GetAtColumn(x, z);
+                        if (world.Death.GetAtColumn(x, z) >= EcologyStats.GraveyardThreshold)
+                        {
+                            graveCells++;
+                            graveGrass += g;
+                        }
+                        else
+                        {
+                            otherCells++;
+                            otherGrass += g;
+                        }
                     }
-                }
-                foreach (var e in world.Entities)
-                {
-                    if (!e.IsPlant)
-                    {
-                        continue;
-                    }
-                    if (world.Death.GetAtColumn(e.cell.x, e.cell.z) >= EcologyStats.GraveyardThreshold) gravePlants++;
-                    else otherPlants++;
                 }
             }
 
-            if (graveCells == 0 || otherCells == 0 || otherPlants == 0)
+            if (graveCells == 0 || otherCells == 0 || otherGrass <= 0)
             {
                 return 0f;
             }
-            return ((float)gravePlants / graveCells) / ((float)otherPlants / otherCells);
+            return (float)((graveGrass / graveCells) / (otherGrass / otherCells));
         }
 
         static int CountGraveyardCells(World world)

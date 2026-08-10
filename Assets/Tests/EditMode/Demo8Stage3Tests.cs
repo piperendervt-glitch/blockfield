@@ -145,13 +145,6 @@ namespace BlockField.Tests.EditMode
             var a = Run(k_Seeds[0], SimParams.Default, 400);
             var b = Run(k_Seeds[0], strong, 400);
 
-            // 乱数の消費順が同じなら、スポーンした個体の id 列は一致する
-            // （植生場の違いで摂食の成否は変わりうるが、抽選そのものはずれない）
-            Assert.AreNotEqual(
-                a.Vegetation.GetAtColumn(0, 0) + a.PlantCount,
-                b.Vegetation.GetAtColumn(0, 0) + b.PlantCount - 1,
-                "前提: レートの違いが世界に反映されていること");
-
             var (meanA, _) = EcologyStats.FieldStats(a.Vegetation);
             var (meanB, _) = EcologyStats.FieldStats(b.Vegetation);
             Assert.Less(meanB, meanA, "踏み潰しを強めても草が減っていない");
@@ -200,10 +193,14 @@ namespace BlockField.Tests.EditMode
             }
         }
 
-        /// <summary>3シードのセル数・植物数を合算してから比を取る（1シードでは揺れが大きい）。</summary>
+        /// <summary>
+        /// 3シードのセル数・草の量を合算してから比を取る（1シードでは揺れが大きい）。
+        /// Demo 8.5 で「植物の本数」から「草の量（植生場）」に変わった。
+        /// </summary>
         static float PooledTrampleRatio(SimParams p)
         {
-            int highCells = 0, lowCells = 0, highPlants = 0, lowPlants = 0;
+            int highCells = 0, lowCells = 0;
+            double highGrass = 0, lowGrass = 0;
             foreach (uint seed in k_Seeds)
             {
                 var world = Run(seed, p);
@@ -216,28 +213,19 @@ namespace BlockField.Tests.EditMode
                         {
                             continue;
                         }
-                        float v = world.Trample.GetAtColumn(x, z);
-                        if (v >= high) highCells++;
-                        else if (v <= low) lowCells++;
+                        float t = world.Trample.GetAtColumn(x, z);
+                        float g = world.Vegetation.GetAtColumn(x, z);
+                        if (t >= high) { highCells++; highGrass += g; }
+                        else if (t <= low) { lowCells++; lowGrass += g; }
                     }
-                }
-                foreach (var e in world.Entities)
-                {
-                    if (!e.IsPlant)
-                    {
-                        continue;
-                    }
-                    float v = world.Trample.GetAtColumn(e.cell.x, e.cell.z);
-                    if (v >= high) highPlants++;
-                    else if (v <= low) lowPlants++;
                 }
             }
 
-            if (highCells == 0 || lowCells == 0 || lowPlants == 0)
+            if (highCells == 0 || lowCells == 0 || lowGrass <= 0)
             {
                 return 0f;
             }
-            return ((float)highPlants / highCells) / ((float)lowPlants / lowCells);
+            return (float)((highGrass / highCells) / (lowGrass / lowCells));
         }
 
         // ---- M4: 決定論 ----
@@ -402,7 +390,8 @@ namespace BlockField.Tests.EditMode
             foreach (uint seed in k_Seeds)
             {
                 var world = MakeDiorama(seed);
-                int minWolves = int.MaxValue, minHerbivores = int.MaxValue, minPlants = int.MaxValue;
+                int minWolves = int.MaxValue, minHerbivores = int.MaxValue;
+                float minVegetation = float.MaxValue;
 
                 for (int t = 0; t < k_Ticks; t++)
                 {
@@ -414,10 +403,10 @@ namespace BlockField.Tests.EditMode
                     if (world.WolfCount < minWolves) minWolves = world.WolfCount;
                     int herbivores = world.SheepCount + world.PigCount;
                     if (herbivores < minHerbivores) minHerbivores = herbivores;
-                    if (world.PlantCount < minPlants) minPlants = world.PlantCount;
+                    if (world.VegetationTotal < minVegetation) minVegetation = world.VegetationTotal;
                 }
 
-                Assert.Greater(minPlants, 0, $"seed {seed}: 植物が全滅した（踏み荒らしが強すぎる）");
+                Assert.Greater(minVegetation, 0f, $"seed {seed}: 草が消え去った（踏み荒らしが強すぎる）");
                 Assert.Greater(minHerbivores, 0, $"seed {seed}: 草食獣ギルドが全滅した");
                 Assert.Greater(minWolves, 0, $"seed {seed}: 狼が全滅した");
             }

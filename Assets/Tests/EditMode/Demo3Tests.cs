@@ -59,86 +59,80 @@ namespace BlockField.Tests.EditMode
         }
 
         [Test]
-        public void M4_NewPlantSpawns_ClusterNearExistingPlants()
+        public void M4_VegetationClustersAroundExistingGrass()
         {
-            // Demo 3 M4: 場の効果の定量判定（植物ダイナミクスのみで測定）。
-            // ticks 100 以降の新規スポーンの過半が「スポーン時点で既存植物の3セル以内(Chebyshev)」
+            // Demo 3 M4: 場の効果の定量判定。
             //
-            // 観測窓を 200 → 400 ティックに伸ばした。Demo 5b で plantSpawnCandidates を
-            // 10→5 に絞った（植物が上限に張り付き続けるのを解消するため）ので、
-            // 同じ窓では標本が半分になり判定できなくなったため（実測 17 < 必要20）
+            // 【Demo 8.5 で測り方が変わった】移行前は「新しく湧いた植物の過半が
+            // 既存植物の3セル以内か」を数えていた。草が場になり「新しく湧いた1本」が
+            // 存在しなくなったので、同じ主張を連続量で測る:
+            // **草の濃いセルの周囲は、薄いセルの周囲より草が濃い**（＝面として固まる）。
+            //
+            // 成長がロジスティック型（成長率 × 草 × (1-草)）なので草のある所ほど増える。
+            // この相関が消えたら自己増殖が壊れている。
+            // 1,500ティック回す。400ティックでは草がまだ育ちきらず
+            // 「濃いセル」が1つも無かった（実測: 400tで平均0.115・濃い0セル、
+            // 1,500tで平均0.246・濃い1,995セル）。ロジスティック成長は
+            // 立ち上がりが緩やかなので、移行前より長い窓が要る
             var world = World.Create(WorldParams(5u));
             var p = SimParams.Default;
             p.animalSpawnCandidates = 0;
 
-            int near = 0;
-            int total = 0;
-            var prevPlantIds = new HashSet<int>();
-            var prevPlantCells = new List<Int3>();
-
-            for (int t = 0; t < 400; t++)
+            for (int t = 0; t < 1500; t++)
             {
-                prevPlantIds.Clear();
-                prevPlantCells.Clear();
-                foreach (var e in world.Entities)
-                {
-                    if (e.IsPlant)
-                    {
-                        prevPlantIds.Add(e.id);
-                        prevPlantCells.Add(e.cell);
-                    }
-                }
-
                 Simulation.Tick(world, world.Rng, p);
+            }
 
-                if (t < 100)
+            double richNeighbours = 0, poorNeighbours = 0;
+            int richN = 0, poorN = 0;
+            for (int z = 1; z < world.Depth - 1; z++)
+            {
+                for (int x = 1; x < world.Width - 1; x++)
                 {
-                    continue;
-                }
-
-                foreach (var e in world.Entities)
-                {
-                    if (!e.IsPlant || prevPlantIds.Contains(e.id))
+                    if (world.Suitability.GetAtColumn(x, z) <= 0f)
                     {
                         continue;
                     }
-                    total++;
-                    foreach (var c in prevPlantCells)
-                    {
-                        if (System.Math.Max(System.Math.Abs(c.x - e.cell.x), System.Math.Abs(c.z - e.cell.z)) <= 3)
-                        {
-                            near++;
-                            break;
-                        }
-                    }
+                    float v = world.Vegetation.GetAtColumn(x, z);
+                    float around =
+                        (world.Vegetation.GetAtColumn(x + 1, z) + world.Vegetation.GetAtColumn(x - 1, z)
+                         + world.Vegetation.GetAtColumn(x, z + 1) + world.Vegetation.GetAtColumn(x, z - 1)) / 4f;
+
+                    if (v >= 0.2f) { richNeighbours += around; richN++; }
+                    else if (v <= 0.05f) { poorNeighbours += around; poorN++; }
                 }
             }
 
-            Assert.GreaterOrEqual(total, 20, "測定窓内の新規スポーンが少なすぎて判定できない");
-            Assert.Greater((float)near / total, 0.5f,
-                $"クラスタ化が不足: 近傍3セル以内 {near}/{total} ({(float)near / total:P0})");
+            Assert.Greater(richN, 20, "草の濃いセルが少なすぎて判定できない");
+            Assert.Greater(poorN, 20, "草の薄いセルが少なすぎて判定できない");
+            Assert.Greater(richNeighbours / richN, poorNeighbours / poorN,
+                $"草が固まっていない（濃いセルの周囲 {richNeighbours / richN:F3} 対 " +
+                $"薄いセルの周囲 {poorNeighbours / poorN:F3}）");
         }
 
         [Test]
-        public void Eating_AdjacentPlantIsConsumed_AndHungerResets()
+        public void Eating_AdjacentGrassIsConsumed_AndHungerDrops()
         {
+            // Demo 8.5: 草が場になったので「植物1本が消えたか」ではなく
+            // 「隣のセルの草が減ったか」を見る
             var world = World.Create(WorldParams(1u));
             var p = ScenarioParams();
             var (x, z) = FindFlatRun(world, 2);
             world.TrySpawn(EntityKind.Sheep, x, z, 0);
-            world.TrySpawn(EntityKind.GrassTuft, x + 1, z, 0);
+            world.Vegetation.SetAtColumn(x + 1, z, 1f);
+            float before = world.Vegetation.GetAtColumn(x + 1, z);
 
-            int eatenAt = -1;
-            for (int t = 0; t < 80 && eatenAt < 0; t++)
+            bool eaten = false;
+            for (int t = 0; t < 80 && !eaten; t++)
             {
                 Simulation.Tick(world, world.Rng, p);
-                if (world.PlantCount == 0)
+                if (world.Vegetation.GetAtColumn(x + 1, z) < before * 0.5f)
                 {
-                    eatenAt = t;
+                    eaten = true;
                 }
             }
 
-            Assert.GreaterOrEqual(eatenAt, 0, "80ティック以内に植物が食べられなかった");
+            Assert.IsTrue(eaten, "80ティック以内に隣の草が食べられなかった");
             Assert.AreEqual(1, world.SheepCount, "羊が消えている");
             // hunger は摂食でリセットされている（摂食直後 < 摂食閾値0.5）
             foreach (var e in world.Entities)
