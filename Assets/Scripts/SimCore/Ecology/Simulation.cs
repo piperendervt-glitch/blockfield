@@ -229,7 +229,6 @@ namespace BlockField.SimCore.Ecology
         static void UpdateHerbivores(World world, Mulberry32 rng, SimParams p)
         {
             var dead = new HashSet<int>();
-            var eatenPlants = new HashSet<int>();
 
             for (int i = 0; i < world.Entities.Count; i++)
             {
@@ -251,18 +250,24 @@ namespace BlockField.SimCore.Ecology
 
                 if (e.hunger > k_HungerActionThreshold)
                 {
-                    // 摂食モード: 自セル＋4近傍の植物を固定順で探す
-                    int plantIndex = FindAdjacentPlant(world, e.cell, eatenPlants);
+                    // 摂食モード: 自セル＋4近傍の「草のあるセル」を固定順で探す
+                    // (Demo 8.5 段階1)。探すのは植物 Entity ではなく**場の値**
+                    bool grazed = TryGraze(world, p, e.cell, dead, out float taken);
 
                     // 診断用の統計。導出値なので ContentHash には含めず、RNG も消費しない
                     world.FeedAttemptCount++;
 
-                    if (plantIndex >= 0)
+                    if (grazed)
                     {
                         world.FeedSuccessCount++;
-                        eatenPlants.Add(world.Entities[plantIndex].id);
-                        dead.Add(world.Entities[plantIndex].id);
-                        e.hunger = 0f; // 植生場は据え置き＝痕跡は残る
+
+                        // 食べた**量に比例して**回復する。草の薄いセルでは
+                        // 満腹にならない — これが摂食を連続量にした意味そのもの
+                        e.hunger -= taken * p.grazeRecovery;
+                        if (e.hunger < 0f)
+                        {
+                            e.hunger = 0f;
+                        }
                     }
                     else
                     {
@@ -504,45 +509,70 @@ namespace BlockField.SimCore.Ecology
             return -1;
         }
 
-        /// <summary>自セル＋4近傍（固定順）にある未捕食の植物のインデックスを返す（無ければ -1）。</summary>
-        static int FindAdjacentPlant(World world, Int3 cell, HashSet<int> alreadyEaten)
+        /// <summary>
+        /// 自セル＋4近傍（固定順）で草を食む (Demo 8.5 段階1 / K2)。
+        /// 食べられたら true と**実際に減らせた量**を返す。
+        ///
+        /// 【個体を探さなくなった】移行前は植物 Entity を走査し、
+        /// 同じ植物を2頭が同時に食べないよう `alreadyEaten` の HashSet を
+        /// 持ち回っていた。場からの減算はその集合を要らなくする —
+        /// 2頭目は「1頭目が食べ残した分」を得るだけで、破綻しない。
+        /// 個体側が持つ状態がひとつ減った（Demo 8.5 M1 に寄与）。
+        ///
+        /// 【中間状態の扱い】段階1では植物 Entity がまだ存在し、
+        /// <see cref="UpdateVegetation"/> が毎ティック植生場へ書き込む。
+        /// 食べたセルに植物が残っていると翌ティックに場が回復してしまい、
+        /// 「食べても減らない」無限の餌場になる。それを避けるため、
+        /// **草を食んだセルに植物 Entity がいれば取り除く**。
+        /// 植物の増減（スポーン・上限・除去）は移行前と同じ経済のまま保たれ、
+        /// 段階1で変わるのは hunger の回復のしかただけになる。
+        /// </summary>
+        static bool TryGraze(World world, SimParams p, Int3 from, HashSet<int> dead, out float taken)
         {
-            if (TryPlantAtColumn(world, cell.x, cell.z, cell.y, alreadyEaten, out int index))
+            if (TryGrazeColumn(world, p, from.x, from.z, from.y, dead, out taken))
             {
-                return index;
+                return true;
             }
             foreach (var dir in FacingDirections)
             {
-                if (TryPlantAtColumn(world, cell.x + dir.x, cell.z + dir.z, cell.y, alreadyEaten, out index))
+                if (TryGrazeColumn(world, p, from.x + dir.x, from.z + dir.z, from.y, dead, out taken))
                 {
-                    return index;
+                    return true;
                 }
             }
-            return -1;
+            taken = 0f;
+            return false;
         }
 
-        static bool TryPlantAtColumn(World world, int x, int z, int fromY, HashSet<int> alreadyEaten, out int index)
+        static bool TryGrazeColumn(
+            World world, SimParams p, int x, int z, int fromY, HashSet<int> dead, out float taken)
         {
-            index = -1;
+            taken = 0f;
             if (!world.InBounds(x, z))
             {
                 return false;
             }
+            if (Math.Abs(world.GetSurfaceHeight(x, z) - fromY) > 1)
+            {
+                return false;
+            }
+            if (world.Vegetation.GetAtColumn(x, z) < p.grazeThreshold)
+            {
+                return false;
+            }
+
+            taken = world.Vegetation.Consume(x, z, p.grazeBite);
+            if (taken <= 0f)
+            {
+                return false;
+            }
+
+            // 中間状態の後始末（段階3で植物 Entity ごと消える）
             var cell = new Int3(x, world.GetSurfaceHeight(x, z), z);
-            if (Math.Abs(cell.y - fromY) > 1)
+            if (world.TryGetEntityIndexAt(cell, out int i) && world.Entities[i].IsPlant)
             {
-                return false;
+                dead.Add(world.Entities[i].id);
             }
-            if (!world.TryGetEntityIndexAt(cell, out int i))
-            {
-                return false;
-            }
-            var e = world.Entities[i];
-            if (!e.IsPlant || alreadyEaten.Contains(e.id))
-            {
-                return false;
-            }
-            index = i;
             return true;
         }
 
