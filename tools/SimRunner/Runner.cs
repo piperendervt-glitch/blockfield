@@ -46,7 +46,8 @@ namespace SimRunner
         /// </summary>
         public static List<SeedResult> Run(
             IReadOnlyList<Condition> conditions, uint[] seeds, int ticks, int size,
-            int maxParallel, Action<int, int>? progress = null)
+            int maxParallel, Action<int, int>? progress = null,
+            CheckpointWriter? checkpoints = null, int checkpointInterval = 0)
         {
             var jobs = new List<(Condition c, uint seed)>();
             foreach (var c in conditions)
@@ -65,7 +66,7 @@ namespace SimRunner
                 i =>
                 {
                     var (c, seed) = jobs[i];
-                    results[i] = RunOne(c, seed, ticks, size);
+                    results[i] = RunOne(c, seed, ticks, size, checkpoints, checkpointInterval);
                     int n = System.Threading.Interlocked.Increment(ref done);
                     progress?.Invoke(n, jobs.Count);
                 });
@@ -80,7 +81,9 @@ namespace SimRunner
             return list;
         }
 
-        public static SeedResult RunOne(Condition condition, uint seed, int ticks, int size)
+        public static SeedResult RunOne(
+            Condition condition, uint seed, int ticks, int size,
+            CheckpointWriter? checkpoints = null, int checkpointInterval = 0)
         {
             var world = MakeWorld(seed, size);
             var p = condition.Params;
@@ -108,11 +111,26 @@ namespace SimRunner
                     if (world.WolfCount < r.MinWolves) r.MinWolves = world.WolfCount;
                 }
 
-                if (t % SeriesInterval == 0)
+                // 長時間実験で系列が肥大しないよう、1ランあたり最大2,000点に抑える。
+                // 3,000ティックなら従来どおり10ティック間隔、10万ティックなら50ティック間隔
+                if (t % Math.Max(SeriesInterval, ticks / 2000) == 0)
                 {
                     r.Series.Add((world.TickCount, world.PlantCount,
                         world.SheepCount + world.PigCount, world.WolfCount));
                 }
+
+                if (checkpoints != null && checkpointInterval > 0 && world.TickCount % checkpointInterval == 0)
+                {
+                    checkpoints.Write(condition.Name, world);
+                }
+            }
+
+            // 最終状態も1点残す。ただし最後のティックが既に間隔と一致していれば
+            // 二重に書かない（同じ tick の行が2つ並ぶと集計時に重複する）
+            if (checkpoints != null && checkpointInterval > 0 &&
+                world.TickCount % checkpointInterval != 0)
+            {
+                checkpoints.Write(condition.Name, world);
             }
 
             if (r.MinPlants == int.MaxValue) r.MinPlants = world.PlantCount;

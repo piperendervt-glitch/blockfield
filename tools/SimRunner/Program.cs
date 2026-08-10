@@ -32,6 +32,15 @@ Console.WriteLine($"SimRunner: {conditions.Count} 条件 × {seeds.Length} シ�
 Console.WriteLine($"  条件: {string.Join(", ", conditions.Select(c => c.Name))}");
 Console.WriteLine($"  出力: {Path.GetFullPath(opts.OutDir)}");
 
+// チェックポイント（長時間実験の途中経過）。場の名前を得るために空のワールドを1つ作る
+CheckpointWriter? checkpoints = null;
+if (opts.CheckpointInterval > 0)
+{
+    var probe = Runner.MakeWorld(seeds[0], opts.Size);
+    checkpoints = new CheckpointWriter(Path.Combine(opts.OutDir, "checkpoints.csv"), probe.Fields.Keys);
+    Console.WriteLine($"  チェックポイント: {opts.CheckpointInterval} ティックごとに checkpoints.csv へ追記");
+}
+
 var sw = Stopwatch.StartNew();
 int lastPercent = -1;
 var results = Runner.Run(conditions, seeds, opts.Ticks, opts.Size, opts.Parallel,
@@ -44,8 +53,10 @@ var results = Runner.Run(conditions, seeds, opts.Ticks, opts.Size, opts.Parallel
             // 進捗はリダイレクト先のファイルでも読めるよう改行で出す
             Console.WriteLine($"  ... {done}/{total} ({percent}%) {sw.Elapsed.TotalSeconds:F0}s");
         }
-    });
+    },
+    checkpoints, opts.CheckpointInterval);
 sw.Stop();
+checkpoints?.Dispose();
 
 Console.WriteLine($"シミュレーション完了: {sw.Elapsed.TotalSeconds:F1} 秒 " +
                   $"({sw.Elapsed.TotalSeconds / (conditions.Count * seeds.Length):F2} 秒/ラン)");
@@ -102,12 +113,48 @@ Report.WriteHtml(Path.Combine(opts.OutDir, "report.html"),
     aggregates, results, embedded, opts.Ticks, opts.Size, sw.Elapsed.TotalSeconds,
     "SimRunner " + string.Join(' ', args));
 
+// 前回との比較（回帰検知）
+int exitCode = 0;
+if (!string.IsNullOrEmpty(opts.ComparePath))
+{
+    if (!File.Exists(opts.ComparePath))
+    {
+        Console.WriteLine($"\n比較対象が見つかりません: {opts.ComparePath}（比較をスキップ）");
+    }
+    else
+    {
+        var prev = Compare.Load(opts.ComparePath, out string? loadError);
+        if (prev == null)
+        {
+            Console.WriteLine($"\n比較対象を読めません: {loadError}（比較をスキップ）");
+        }
+        else
+        {
+            string diffPath = Path.Combine(opts.OutDir, "diff_report.html");
+            bool deterministic = Compare.WriteDiffHtml(
+                diffPath, opts.ComparePath, prev, aggregates, results, opts.Ticks, opts.Size);
+            Console.WriteLine($"\n差分レポート: {diffPath}");
+            if (!deterministic)
+            {
+                Console.WriteLine("!!! 決定論の破れを検出: ContentHash が前回と一致しません !!!");
+                Console.WriteLine("!!! コードを変更していないなら f(シード, イベントログ) が壊れています !!!");
+                exitCode = 2;
+            }
+        }
+    }
+}
+
 Console.WriteLine();
 foreach (var a in aggregates)
 {
-    Console.WriteLine($"[{a.Condition}] 墓場比={a.GraveRatio:F3} 踏跡比={a.TrampleRatio:F3} " +
+    Console.WriteLine($"[{a.Condition}] M5={a.M5Detail} " +
+                      $"墓場比={a.GraveRatio:F3} 踏跡比={a.TrampleRatio:F3} " +
                       $"迂回={a.AvoidanceRatio * 100:F1}% " +
                       $"全滅(ギルド/狼/植物)={a.GuildExtinct}/{a.WolvesExtinct}/{a.PlantsExtinct} of {a.Seeds}");
+    if (!a.M5Pass)
+    {
+        exitCode = Math.Max(exitCode, 1);
+    }
 }
 Console.WriteLine();
 Console.WriteLine($"出力:");
@@ -115,7 +162,14 @@ Console.WriteLine($"  {Path.Combine(opts.OutDir, "report.html")}  ← これ1枚
 Console.WriteLine($"  {Path.Combine(opts.OutDir, "summary.json")}");
 Console.WriteLine($"  {Path.Combine(opts.OutDir, "population.csv")}");
 Console.WriteLine($"  {imageDir}\\*.png ({embedded.Count} 枚)");
-return 0;
+if (opts.CheckpointInterval > 0)
+{
+    Console.WriteLine($"  {Path.Combine(opts.OutDir, "checkpoints.csv")}");
+}
+
+// 終了コード: 0=問題なし / 1=M5 不合格 / 2=決定論の破れ。
+// バッチから成否を判定できるようにする
+return exitCode;
 
 sealed class Options
 {
@@ -125,6 +179,8 @@ sealed class Options
     public int Parallel = Math.Max(1, Environment.ProcessorCount - 2);
     public int Images = 1;
     public string OutDir = "";
+    public string ComparePath = "";
+    public int CheckpointInterval;
     public List<Condition> Conditions = new();
 
     public static Options? Parse(string[] args)
@@ -145,6 +201,10 @@ sealed class Options
                 case "--parallel": if (!int.TryParse(Next(), out o.Parallel)) return null; break;
                 case "--images": if (!int.TryParse(Next(), out o.Images)) return null; break;
                 case "--out": o.OutDir = Next() ?? ""; break;
+                case "--compare": o.ComparePath = Next() ?? ""; break;
+                case "--checkpoint-interval":
+                    if (!int.TryParse(Next(), out o.CheckpointInterval)) return null;
+                    break;
                 case "--conditions":
                     string? list = Next();
                     if (list == null) return null;
@@ -196,6 +256,11 @@ sealed class Options
   --conditions a,b 条件をカンマ区切りで（既定 default）
   --images N       画像を出す代表シード数（既定 1。条件ごとに再実行するので増やすと遅い）
   --out DIR        出力先（既定 runs/日時）
+  --compare PATH   前回の summary.json と比較し diff_report.html を出す
+  --checkpoint-interval N   N ティックごとに checkpoints.csv へ途中経過を追記
+
+終了コード:
+  0 問題なし / 1 M5（生態系の安定条件）不合格 / 2 決定論の破れ（ContentHash 不一致）
 
 条件:
   default        既定パラメータ
@@ -209,6 +274,12 @@ sealed class Options
 
   # 最終判定（48シード、対照つき）
   dotnet run -c Release --project tools/SimRunner -- --conditions default,trample-off
+
+  # 前回と比較して回帰を見る
+  dotnet run -c Release --project tools/SimRunner -- --compare runs/nightly_20260810/summary.json
+
+  # 長時間実験（途中経過つき）
+  dotnet run -c Release --project tools/SimRunner -- --seeds 5 --ticks 100000 --checkpoint-interval 2000
 """);
     }
 }

@@ -35,8 +35,68 @@ namespace SimRunner
             public double GraveDensity, NonGraveDensity, HighTrampleDensity, LowTrampleDensity;
             public int GuildExtinct, WolvesExtinct, PlantsExtinct;
             public double MeanPlants, MeanHerbivores, MeanWolves, MeanCrush;
+            public double StarvationPer1000Ticks, PredationPer1000Ticks, BirthsPer1000Ticks;
             public Dictionary<string, double> FieldMean = new();
             public Dictionary<string, double> FieldMax = new();
+
+            /// <summary>
+            /// 狼の全滅を退行とみなす割合の上限。
+            ///
+            /// 【0 にしない理由】狼の全滅は**死の場も踏み荒らしも切った状態でも
+            /// 3/48（約6%）起きる**（Demo 8 第2段の48シード計測）。実測の幅は
+            /// 2〜6/48（4〜12.5%）で、これは生態系そのものの性質であって
+            /// 退行ではない。0/48 を要求すると夜間バッチが毎晩「不合格」を出し、
+            /// 本当の退行が起きたときに気づけなくなる。
+            ///
+            /// 25% は実測上限 12.5% の倍。ここを超えたら「たまたま」では説明が
+            /// つかないので退行として扱う。
+            /// </summary>
+            public const double WolfExtinctionTolerance = 0.25;
+
+            /// <summary>
+            /// 狼の全滅率を評価するのに必要な最小シード数。
+            /// これ未満では1件の全滅が許容率を簡単に超えてしまい（2シードなら50%）、
+            /// 「率」として意味を持たない。CLAUDE.md の「生態系の判定は最低48シード」と
+            /// 同じ理由であり、少ないシードでの実行では狼の項目を評価しない。
+            /// </summary>
+            public const int MinSeedsForWolfRate = 12;
+
+            /// <summary>
+            /// Demo 8 第2段で確立した安定条件（草食獣ギルド≧1 かつ 狼≧1 かつ
+            /// 植物≧1、いずれも時間を通した最小値）を48シード規模へ読み替えたもの。
+            ///
+            /// ギルドと植物の全滅は48シードで一度も観測されていないので 0 を要求する。
+            /// 狼だけは <see cref="WolfExtinctionTolerance"/> の許容を設け、
+            /// シード数が足りないときは評価しない。
+            /// </summary>
+            public bool M5Pass =>
+                GuildExtinct == 0 && PlantsExtinct == 0 &&
+                (Seeds < MinSeedsForWolfRate ||
+                 (double)WolvesExtinct / Seeds <= WolfExtinctionTolerance);
+
+            /// <summary>不合格の内訳（レポートとログに理由を出すため）。</summary>
+            public string M5Detail
+            {
+                get
+                {
+                    var reasons = new List<string>();
+                    if (GuildExtinct > 0) reasons.Add($"草食ギルド全滅 {GuildExtinct}/{Seeds}");
+                    if (PlantsExtinct > 0) reasons.Add($"植物全滅 {PlantsExtinct}/{Seeds}");
+                    if (Seeds >= MinSeedsForWolfRate &&
+                        (double)WolvesExtinct / Seeds > WolfExtinctionTolerance)
+                    {
+                        reasons.Add($"狼全滅 {WolvesExtinct}/{Seeds} が許容 " +
+                                    $"{WolfExtinctionTolerance:P0} を超過");
+                    }
+                    if (reasons.Count > 0)
+                    {
+                        return string.Join(" / ", reasons);
+                    }
+                    return Seeds < MinSeedsForWolfRate
+                        ? $"合格（シード{Seeds}件のため狼の全滅率は未評価）"
+                        : "合格";
+                }
+            }
         }
 
         public static List<Aggregate> Aggregate_(List<SeedResult> results)
@@ -71,6 +131,12 @@ namespace SimRunner
                 a.MeanHerbivores = rs.Average(r => (double)(r.Sheep + r.Pigs));
                 a.MeanWolves = rs.Average(r => (double)r.Wolves);
                 a.MeanCrush = rs.Average(r => (double)r.TrampleCrush);
+
+                // 率にしておかないとティック数の違う実行どうしを比べられない
+                double ticks = rs[0].Ticks;
+                a.StarvationPer1000Ticks = rs.Average(r => r.Starvation * 1000.0 / ticks);
+                a.PredationPer1000Ticks = rs.Average(r => r.Predation * 1000.0 / ticks);
+                a.BirthsPer1000Ticks = rs.Average(r => r.Births * 1000.0 / ticks);
 
                 foreach (string name in rs[0].FieldMean.Keys.OrderBy(k => k, StringComparer.Ordinal))
                 {
@@ -128,6 +194,10 @@ namespace SimRunner
                 sb.Append($"      \"meanHerbivores\": {N(a.MeanHerbivores)},\n");
                 sb.Append($"      \"meanWolves\": {N(a.MeanWolves)},\n");
                 sb.Append($"      \"meanTrampleCrush\": {N(a.MeanCrush)},\n");
+                sb.Append($"      \"m5Pass\": {(a.M5Pass ? "true" : "false")},\n");
+                sb.Append($"      \"starvationPer1000Ticks\": {N(a.StarvationPer1000Ticks)},\n");
+                sb.Append($"      \"predationPer1000Ticks\": {N(a.PredationPer1000Ticks)},\n");
+                sb.Append($"      \"birthsPer1000Ticks\": {N(a.BirthsPer1000Ticks)},\n");
                 sb.Append("      \"fieldMean\": {");
                 sb.Append(string.Join(", ", a.FieldMean.Select(kv => $"\"{kv.Key}\": {N(kv.Value)}")));
                 sb.Append("},\n");
