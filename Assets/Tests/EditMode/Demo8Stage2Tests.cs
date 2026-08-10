@@ -45,6 +45,19 @@ namespace BlockField.Tests.EditMode
         /// これは標本のばらつきであって真の効果ではない。
         /// 閾値は真の効果 1.5倍 を下回る 1.2倍 に置き、
         /// 「係数を外したら落ちる」ことだけを検出する。
+        ///
+        /// 【踏み荒らしを切って測る理由 (Demo 8 第3段で追加)】
+        /// 第3段の踏み荒らし場は**墓場と同じ場所に立つ**（死の場との重なりは
+        /// 独立の場合の1.67倍。通行が多い→草が減る→餌が乏しい→そこで餓死する）。
+        /// そのため墓場の植物密度は「養分で増える力」と「踏まれて減る力」の
+        /// **合成**になり、養分効果だけを分離できなくなった。
+        /// 48シード実測でも対照が 0.348 → 0.439 に押し上げられ、
+        /// 効果の差が +0.175 → +0.075 に縮む。
+        ///
+        /// このテストが確かめたいのは「死の場の養分効果が生きているか」なので、
+        /// 交絡要因である踏み荒らしの**効果だけ**を切って測る
+        /// （場への書き込みは残すので、世界の進行は第2段と完全に同一になる）。
+        /// 踏み荒らし込みの合成結果は48シードで prereg に記録した。
         /// </summary>
         [Test]
         public void M2_NutrientBoostRaisesPlantDensityInGraveyardsVersusControl()
@@ -299,6 +312,12 @@ namespace BlockField.Tests.EditMode
         {
             var p = SimParams.Default;
             p.deathNutrientBoost = boost;
+
+            // 踏み荒らしの**効果**だけを切る (Demo 8 第3段)。場への書き込みは
+            // 残すので RNG の消費列は変わらず、世界の進行は第2段と完全に同一になる。
+            // 交絡（墓場と踏み跡が重なる）を除いて養分効果だけを見るため
+            p.trampleSuppression = 0f;
+            p.trampleCrushChance = 0f;
 
             int graveCells = 0, otherCells = 0, gravePlants = 0, otherPlants = 0;
             foreach (uint seed in k_Seeds)
