@@ -228,6 +228,69 @@ namespace BlockField.Tests.EditMode
             return default;
         }
 
+        // ---- 段階4: 表示 (K3) ----
+
+        /// <summary>
+        /// 草の高さが場の値で決まること。事前登録の目安
+        /// （0.2で低い / 0.5で中 / 0.8で高い）どおりの段階になっているか。
+        /// </summary>
+        [Test]
+        public void Display_GrassHeightFollowsTheFieldValue()
+        {
+            Assert.AreEqual(-1, GrassView.StepFor(0.19f), "0.2 未満で草が描かれている");
+            Assert.AreEqual(2, GrassView.StepFor(0.2f), "0.2 が最も低い段階になっていない");
+            Assert.AreEqual(2, GrassView.StepFor(0.49f));
+            Assert.AreEqual(1, GrassView.StepFor(0.5f), "0.5 が中段になっていない");
+            Assert.AreEqual(1, GrassView.StepFor(0.79f));
+            Assert.AreEqual(0, GrassView.StepFor(0.8f), "0.8 が最も高い段階になっていない");
+            Assert.AreEqual(0, GrassView.StepFor(1f));
+        }
+
+        [Test]
+        public void Display_TallerGrassIsActuallyTaller()
+        {
+            // 段階0が最も高い（StepFor は上から探すため）
+            float tall = GrassView.Step(0).height;
+            float mid = GrassView.Step(1).height;
+            float low = GrassView.Step(2).height;
+
+            Assert.Greater(tall, mid, "高い段階が中段より低い");
+            Assert.Greater(mid, low, "中段が低い段階より低い");
+            Assert.Greater(low, 0f);
+            Assert.LessOrEqual(tall, 1f, "草がブロックより高い");
+        }
+
+        /// <summary>
+        /// 描画対象のセル数が現実的な範囲に収まること。
+        /// 全セルに草を描くと重く、閾値0.2 が高すぎると何も見えない。
+        /// 実測（3000t、適性2,225セル）で数百セルになるのが妥当。
+        /// </summary>
+        [Test]
+        public void Display_GrassCoversAReasonableFractionOfCells()
+        {
+            var world = MakeDiorama(12345u);
+            for (int t = 0; t < 3000; t++)
+            {
+                Simulation.Tick(world, world.Rng, SimParams.Default);
+            }
+
+            int drawn = 0;
+            for (int z = 0; z < world.Depth; z++)
+            {
+                for (int x = 0; x < world.Width; x++)
+                {
+                    if (GrassView.StepFor(world.Vegetation.GetAtColumn(x, z)) >= 0)
+                    {
+                        drawn++;
+                    }
+                }
+            }
+
+            Assert.Greater(drawn, 20, $"草が {drawn} セルしか描かれない（閾値が高すぎる）");
+            Assert.Less(drawn, world.SuitableCellCount,
+                "全ての適性セルに草が描かれている（濃淡が読めない）");
+        }
+
         // ---- 段階0が既存の挙動を変えていないこと ----
 
         /// <summary>
