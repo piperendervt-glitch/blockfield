@@ -280,6 +280,8 @@ public static class SceneBootstrap
         overlay.roomView = roomView;
         overlay.material = terrainMat;
         panel.fieldOverlay = overlay;
+        // オーバーレイ表示中は草を隠す（草が場を覆って濃淡が読めなくなるため）
+        grass.fieldOverlay = overlay;
 
         // 狼の軌跡 (Demo 8 H4)。診断モードで「今まさに恐怖場を書いている場所」を示す
         var trailGo = new GameObject("Wolf Trail (H4)");

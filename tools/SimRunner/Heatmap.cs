@@ -20,7 +20,9 @@ namespace SimRunner
         /// <summary>場ごとの色。実機・エディタのオーバーレイと同じ色相にする。</summary>
         public static (byte r, byte g, byte b) ColorFor(string fieldName) => fieldName switch
         {
-            VegetationField.FieldName => (30, 220, 60),
+            // 植生場はシアン。緑だと地形の草ブロックと同系色で図と地が分離しない
+            // （実機・エディタと同じ色。Demo 8.5 段階4）
+            VegetationField.FieldName => (60, 230, 220),
             FearField.FieldName => (240, 60, 50),
             PreyField.FieldName => (70, 130, 245),
             DeathField.FieldName => (230, 40, 255),

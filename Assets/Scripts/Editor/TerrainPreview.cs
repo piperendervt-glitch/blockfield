@@ -82,6 +82,8 @@ public class TerrainPreview : EditorWindow
             if (m_World != null)
             {
                 UpdateVegetationOverlay();
+                // 草の表示・非表示も切り替わる（オーバーレイ中は草を隠す）
+                UpdateGrassDisplay();
             }
         }
 
@@ -340,6 +342,15 @@ public class TerrainPreview : EditorWindow
         {
             DestroyImmediate(m_GrassRoot);
         }
+
+        // 場のオーバーレイ表示中は草を描かない (Demo 8.5 段階4)。
+        // 草の房（幅0.55・高さ最大0.75ブロック）がオーバーレイの平板（幅0.9）の
+        // 中央を覆い、真上から見ると場が細い枠にしか見えなくなるため
+        if (m_ShowVegetation)
+        {
+            return;
+        }
+
         m_GrassRoot = new GameObject("Grass") { hideFlags = HideFlags.DontSave };
         m_GrassRoot.transform.SetParent(m_Root.transform, false);
 
@@ -433,7 +444,9 @@ public class TerrainPreview : EditorWindow
             // 見分けにくかった。青成分を最大まで振って色相を赤から離す
             FieldLayer.Death => new Color32(230, 40, 255, 0),
             FieldLayer.Trample => new Color32(190, 120, 45, 0), // 茶色（土が見えた道）
-            _ => new Color32(30, 220, 60, 0),
+            // 植生場はシアン。緑にすると地形の草ブロックと同系色で
+            // 図と地が分離しない（FieldOverlayView と同じ理由・同じ色）
+            _ => new Color32(60, 230, 220, 0),
         };
 
         // 場ごとに値の桁が違うので、表示の濃さは場ごとの基準値で正規化する。

@@ -67,10 +67,20 @@ namespace BlockField
         [SerializeField] TerrainField m_TerrainField;
         [SerializeField] RoomTerrainBuilder m_Builder;
         [SerializeField] Material m_Material;
+        [SerializeField] FieldOverlayView m_FieldOverlay;
 
         public TerrainField terrainField { get => m_TerrainField; set => m_TerrainField = value; }
         public RoomTerrainBuilder builder { get => m_Builder; set => m_Builder = value; }
         public Material material { get => m_Material; set => m_Material = value; }
+
+        /// <summary>
+        /// 場のオーバーレイ。表示中は草を描かない (Demo 8.5 段階4)。
+        ///
+        /// 草の房は幅0.55・高さ最大0.75ブロックあり、オーバーレイの平板（幅0.9）の
+        /// **中央を覆ってしまう**。真上から見ると場が細い枠にしか見えず、
+        /// 濃淡が読めない。場の値そのものを見たい場面では草は邪魔なので消す。
+        /// </summary>
+        public FieldOverlayView fieldOverlay { get => m_FieldOverlay; set => m_FieldOverlay = value; }
 
         /// <summary>直近の描画で草を描いたセル数（診断表示用）。</summary>
         public int DrawnCells { get; private set; }
@@ -99,6 +109,20 @@ namespace BlockField
 
         void Update()
         {
+            // 場のオーバーレイ表示中は草を隠す（草が場を覆って濃淡が読めなくなるため）
+            bool overlayShown = m_FieldOverlay != null
+                && m_FieldOverlay.Current != FieldOverlayView.Layer.None
+                && m_FieldOverlay.Current != FieldOverlayView.Layer.Markers;
+
+            if (overlayShown)
+            {
+                if (m_Object != null && m_Object.activeSelf)
+                {
+                    m_Object.SetActive(false);
+                }
+                return;
+            }
+
             if (Time.unscaledTime < m_NextRefresh)
             {
                 return;
