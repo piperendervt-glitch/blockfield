@@ -62,7 +62,7 @@ namespace BlockField.Tests.EditMode
         [Test]
         public void M2_NutrientBoostRaisesPlantDensityInGraveyardsVersusControl()
         {
-            float withBoost = PooledGraveyardRatio(SimParams.Default.deathNutrientBoost);
+            float withBoost = PooledGraveyardRatio(SimParams.Default.deathNutrientGrowth);
             float control = PooledGraveyardRatio(0f);
 
             Assert.Greater(control, 0f, "対照の比が0。測定系が壊れている（墓場か植物が無い）");
@@ -299,10 +299,10 @@ namespace BlockField.Tests.EditMode
 
                 Assert.Greater(minHerbivores, 0,
                     $"seed {seed}: 草食獣ギルドが全滅した（最小 {minHerbivores}）。" +
-                    $"deathNutrientBoost={p.deathNutrientBoost}");
+                    $"deathNutrientGrowth={p.deathNutrientGrowth}");
                 Assert.Greater(minWolves, 0,
                     $"seed {seed}: 狼が0になった（最小 {minWolves}）。" +
-                    $"deathNutrientBoost={p.deathNutrientBoost} が高すぎる");
+                    $"deathNutrientGrowth={p.deathNutrientGrowth} が高すぎる");
             }
         }
 
@@ -322,13 +322,13 @@ namespace BlockField.Tests.EditMode
         static float PooledGraveyardRatio(float boost)
         {
             var p = SimParams.Default;
-            p.deathNutrientBoost = boost;
+            p.deathNutrientGrowth = boost;
 
             // 踏み荒らしの**効果**だけを切る (Demo 8 第3段)。場への書き込みは
             // 残すので RNG の消費列は変わらず、世界の進行は第2段と完全に同一になる。
             // 交絡（墓場と踏み跡が重なる）を除いて養分効果だけを見るため
             p.trampleSuppression = 0f;
-            p.trampleCrushChance = 0f;
+            p.trampleCrushRate = 0f;
 
             int graveCells = 0, otherCells = 0, gravePlants = 0, otherPlants = 0;
             foreach (uint seed in k_Seeds)

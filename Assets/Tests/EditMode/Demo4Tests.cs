@@ -200,20 +200,48 @@ namespace BlockField.Tests.EditMode
             // **下流の弱い代理指標**であり、1シードあたり数個しか出ない。
             // 直接の機構（植生場が半減すること）は MeasureNearSpawnsAfterBreak の
             // 中で毎シード検証しているので、ここは合算でだけ見る。
-            int totalControlNear = 0, totalTestNear = 0;
+            int totalControlNear = 0, totalTestNear = 0, measured = 0;
             for (uint seed = 1; seed <= 16; seed++)
             {
-                var (c, t) = MeasureNearSpawnsAfterBreak(seed);
+                // 300ティックで植物が5つ揃わないシードは前提を満たさないので飛ばす。
+                // 植物の密度は Demo 8.5 の各段階で動くため、特定のシードが
+                // 揃うかどうかに依存させない（揃わないシードでテスト全体を
+                // 落とすと、測りたいものと無関係な理由で赤くなる）
+                if (!TryMeasureNearSpawnsAfterBreak(seed, out int c, out int t))
+                {
+                    continue;
+                }
                 totalControlNear += c;
                 totalTestNear += t;
+                measured++;
             }
 
+            Assert.GreaterOrEqual(measured, 8,
+                $"前提を満たすシードが {measured} 個しかない。植物が湧かなくなっている疑い");
             Assert.Less(totalTestNear, totalControlNear,
-                $"破壊後の近傍スポーンが対照より少なくない (ctrl={totalControlNear}, test={totalTestNear})");
+                $"破壊後の近傍スポーンが対照より少なくない " +
+                $"(ctrl={totalControlNear}, test={totalTestNear}, {measured}シード)");
         }
 
-        /// <summary>破壊あり/なしで、破壊列の近傍に湧いた植物数を数える。</summary>
-        static (int control, int test) MeasureNearSpawnsAfterBreak(uint seed)
+        /// <summary>
+        /// 破壊あり/なしで、破壊列の近傍に湧いた植物数を数える。
+        /// 植物が5つ揃わないシードでは false を返す（前提を満たさない）。
+        /// </summary>
+        static bool TryMeasureNearSpawnsAfterBreak(uint seed, out int control, out int test)
+        {
+            control = 0;
+            test = 0;
+            var (c, t, ok) = MeasureNearSpawnsAfterBreak(seed);
+            if (!ok)
+            {
+                return false;
+            }
+            control = c;
+            test = t;
+            return true;
+        }
+
+        static (int control, int test, bool ok) MeasureNearSpawnsAfterBreak(uint seed)
         {
             var tp = WorldParams(seed);
             var sp = SimParams.Default;
@@ -240,7 +268,11 @@ namespace BlockField.Tests.EditMode
                     broken.Add(new Int3(e.cell.x, e.cell.y - 1, e.cell.z));
                 }
             }
-            Assert.AreEqual(5, broken.Count, "テスト前提: 植物が5つ以上あること");
+            if (broken.Count < 5)
+            {
+                // 前提を満たさないシード。呼び出し側が集計から外す
+                return (0, 0, false);
+            }
 
             // 適用ティック直後、破壊列の植生場が対照より十分低い（×0.5適用）
             Simulation.Tick(control, control.Rng, sp);
@@ -262,7 +294,7 @@ namespace BlockField.Tests.EditMode
                 testNear += TickAndCountNearSpawns(test, sp, broken, prevIds);
             }
 
-            return (controlNear, testNear);
+            return (controlNear, testNear, true);
         }
 
         static int TickAndCountNearSpawns(World w, SimParams sp, List<Int3> centers, HashSet<int> scratch)

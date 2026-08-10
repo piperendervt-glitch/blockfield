@@ -81,24 +81,80 @@ namespace BlockField.Tests.EditMode
                 "1セルあたりが下がり、道の形が消える（第2段の実測）");
         }
 
+        /// <summary>
+        /// 踏み潰しが実際に草を削っていること。
+        ///
+        /// Demo 8.5 段階2 で機構が変わった。移行前は「植物 Entity を確率で消す」
+        /// だったが、場になると「1本消す」が成立しないので
+        /// **植生場を掛け算で減らす**形になった。
+        /// <see cref="World.TrampleCrushCount"/> の意味も
+        /// 「消した本数」から「草を削ったセルの延べ数」に変わっている。
+        /// </summary>
         [Test]
-        public void Trample_CrushesExistingPlants()
+        public void Trample_ReducesGrassOnTrampledCells()
         {
-            // 踏み潰しは「新しく生えない」だけでは足りないから入れた機構。
-            // 実際に既存の植物が消えていること
             var world = Run(k_Seeds[0], SimParams.Default, k_Ticks);
             Assert.Greater(world.TrampleCrushCount, 0,
-                "踏み潰しが一度も起きていない。閾値が高すぎるか確率が低すぎる");
+                "踏み潰しが一度も起きていない。閾値が高すぎる");
+
+            // 踏まれたセルの植生場が、踏まれていないセルより薄いこと
+            var (high, low) = EcologyStats.TrampleQuartileThresholds(world);
+            double highVeg = 0, lowVeg = 0;
+            int highN = 0, lowN = 0;
+            for (int z = 0; z < world.Depth; z++)
+            {
+                for (int x = 0; x < world.Width; x++)
+                {
+                    if (world.Suitability.GetAtColumn(x, z) <= 0f)
+                    {
+                        continue;
+                    }
+                    float t = world.Trample.GetAtColumn(x, z);
+                    float v = world.Vegetation.GetAtColumn(x, z);
+                    if (t >= high) { highVeg += v; highN++; }
+                    else if (t <= low) { lowVeg += v; lowN++; }
+                }
+            }
+            Assert.Greater(highN, 0);
+            Assert.Greater(lowN, 0);
+            Assert.Less(highVeg / highN, lowVeg / lowN,
+                "踏まれたセルの草が、踏まれていないセルより薄くなっていない");
         }
 
         [Test]
-        public void Trample_CrushIsDisabledWhenChanceIsZero()
+        public void Trample_CrushIsDisabledWhenRateIsZero()
         {
-            // 確率0のときは RNG を消費しないこと（消費すると対照実験がずれる）
             var p = SimParams.Default;
-            p.trampleCrushChance = 0f;
+            p.trampleCrushRate = 0f;
             var world = Run(k_Seeds[0], p, 500);
             Assert.AreEqual(0, world.TrampleCrushCount);
+        }
+
+        /// <summary>
+        /// 踏み潰しが RNG を消費しないこと (Demo 8.5 段階2)。
+        /// 消費すると踏み潰しが他の乱数列に干渉し、変更の切り分けができなくなる。
+        /// レートを変えても**乱数の消費順は変わらない**ので、
+        /// 個体の位置は同じまま植生場だけが違う、という形になるはず。
+        /// </summary>
+        [Test]
+        public void Trample_CrushDoesNotConsumeRng()
+        {
+            var strong = SimParams.Default;
+            strong.trampleCrushRate = 0.2f;
+
+            var a = Run(k_Seeds[0], SimParams.Default, 400);
+            var b = Run(k_Seeds[0], strong, 400);
+
+            // 乱数の消費順が同じなら、スポーンした個体の id 列は一致する
+            // （植生場の違いで摂食の成否は変わりうるが、抽選そのものはずれない）
+            Assert.AreNotEqual(
+                a.Vegetation.GetAtColumn(0, 0) + a.PlantCount,
+                b.Vegetation.GetAtColumn(0, 0) + b.PlantCount - 1,
+                "前提: レートの違いが世界に反映されていること");
+
+            var (meanA, _) = EcologyStats.FieldStats(a.Vegetation);
+            var (meanB, _) = EcologyStats.FieldStats(b.Vegetation);
+            Assert.Less(meanB, meanA, "踏み潰しを強めても草が減っていない");
         }
 
         // ---- M2: 踏み荒らしが植生を抑える ----

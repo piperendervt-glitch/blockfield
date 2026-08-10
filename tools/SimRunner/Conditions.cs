@@ -30,12 +30,12 @@ namespace SimRunner
         public static readonly Condition TrampleOff = new Condition(
             "trample-off",
             "踏み荒らしの効果のみ無効（書き込みは残す）。Demo 8 第3段 M2 の対照",
-            Tweak(p => { p.trampleSuppression = 0f; p.trampleCrushChance = 0f; return p; }));
+            Tweak(p => { p.trampleSuppression = 0f; p.trampleCrushRate = 0f; return p; }));
 
         public static readonly Condition NutrientOff = new Condition(
             "nutrient-off",
             "死の場の養分効果のみ無効。Demo 8 第2段 M2 の対照",
-            Tweak(p => { p.deathNutrientBoost = 0f; return p; }));
+            Tweak(p => { p.deathNutrientGrowth = 0f; return p; }));
 
         public static readonly Condition FearOff = new Condition(
             "fear-off",
