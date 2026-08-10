@@ -34,6 +34,7 @@ namespace BlockField
         [SerializeField] VrModeController m_VrMode;
         [SerializeField] RoomShellView m_Shell;
         [SerializeField] FieldOverlayView m_FieldOverlay;
+        [SerializeField] GrassView m_GrassView;
         [SerializeField] Text m_Text;
 
         public DioramaOrigin diorama { get => m_Diorama; set => m_Diorama = value; }
@@ -44,6 +45,7 @@ namespace BlockField
         public VrModeController vrMode { get => m_VrMode; set => m_VrMode = value; }
         public RoomShellView shell { get => m_Shell; set => m_Shell = value; }
         public FieldOverlayView fieldOverlay { get => m_FieldOverlay; set => m_FieldOverlay = value; }
+        public GrassView grassView { get => m_GrassView; set => m_GrassView = value; }
         public Text text { get => m_Text; set => m_Text = value; }
 
         static string s_LastEvent = "-";
@@ -98,6 +100,10 @@ namespace BlockField
                 {
                     Debug.Log($"[DebugPanel] 生態: tick={world.TickCount} " +
                         $"草の総量={world.VegetationTotal:F0}（植生場の全セル合計。本数ではない） " +
+                        // 「草が0セルなのか、描画したが見えないのか」を切り分けるため。
+                        // -1 は GrassView 自体が配線されていないことを示す
+                        // （シーン再生成を忘れて実機に GrassView が入っていなかった事故があった）
+                        $"草={(m_GrassView != null ? m_GrassView.DrawnCells : -1)}セル " +
                         $"草食={world.SheepCount + world.PigCount} 狼={world.WolfCount} " +
                         $"適性セル={world.SuitableCellCount}");
                     Debug.Log($"[DebugPanel] 密度: 植物={EcologyStats.PlantDensity(world) * 100:F2}% " +
@@ -264,7 +270,8 @@ namespace BlockField
                 $"{weightMean[5]:F2}/{weightMean[1]:F2}/{weightMean[2]:F2}\n" +
                 $"Pred/1k step: {EcologyStats.PredationPerKiloWolfStep(world):F1}   " +
                 $"FearExpo: {EcologyStats.HerbivoreFearExposure(world):F2}   " +
-                $"Ovl[Y]: {(m_FieldOverlay != null ? m_FieldOverlay.Current.ToString() : "-")}\n";
+                $"Ovl[Y]: {(m_FieldOverlay != null ? m_FieldOverlay.Current.ToString() : "-")}   " +
+                $"Grass cells: {(m_GrassView != null ? m_GrassView.DrawnCells.ToString() : "N/A")}\n";
         }
 
         /// <summary>
