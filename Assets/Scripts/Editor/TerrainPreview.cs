@@ -40,6 +40,8 @@ public class TerrainPreview : EditorWindow
     World m_World;
     GameObject m_Root;
     GameObject m_EntityRoot;
+    GameObject m_GrassRoot;
+    readonly Material[] m_GrassMaterials = new Material[BlockField.GrassView.StepCount];
     GameObject m_VegetationOverlay;
     Mesh m_CubeMesh;
     Material m_TerrainMaterial;
@@ -322,6 +324,70 @@ public class TerrainPreview : EditorWindow
             BlockField.EntityShape.Build(
                 go.transform, e.kind, m_CubeMesh, m_EntityMaterials[e.kind], k_BlockSize);
         }
+
+        UpdateGrassDisplay();
+    }
+
+    /// <summary>
+    /// 草の表示 (Demo 8.5 K3)。植生場の値から直接、高さ3段階で描く。
+    /// 閾値と高さは <see cref="BlockField.GrassView"/> から共用しており、
+    /// **実機と同じ見え方**になる（ここで別の基準を使うと、
+    /// エディタで確認した内容が実機の判断につながらない）。
+    /// </summary>
+    void UpdateGrassDisplay()
+    {
+        if (m_GrassRoot != null)
+        {
+            DestroyImmediate(m_GrassRoot);
+        }
+        m_GrassRoot = new GameObject("Grass") { hideFlags = HideFlags.DontSave };
+        m_GrassRoot.transform.SetParent(m_Root.transform, false);
+
+        for (int z = 0; z < m_World.Depth; z++)
+        {
+            for (int x = 0; x < m_World.Width; x++)
+            {
+                int step = BlockField.GrassView.StepFor(m_World.Vegetation.GetAtColumn(x, z));
+                if (step < 0)
+                {
+                    continue;
+                }
+                int surfaceY = m_World.GetSurfaceHeight(x, z);
+                var (_, height, brightness) = BlockField.GrassView.Step(step);
+
+                var go = new GameObject($"Grass {x},{z}") { hideFlags = HideFlags.DontSave };
+                go.transform.SetParent(m_GrassRoot.transform, false);
+                go.transform.localPosition = new Vector3(
+                    x * k_BlockSize,
+                    (surfaceY - 0.5f + height * 0.5f) * k_BlockSize,
+                    z * k_BlockSize);
+
+                var mf = go.AddComponent<MeshFilter>();
+                mf.sharedMesh = m_CubeMesh;
+                var mr = go.AddComponent<MeshRenderer>();
+                mr.sharedMaterial = GrassMaterial(step);
+                go.transform.localScale = new Vector3(
+                    k_BlockSize * 0.55f, k_BlockSize * height, k_BlockSize * 0.55f);
+                _ = brightness;
+            }
+        }
+    }
+
+    Material GrassMaterial(int step)
+    {
+        if (m_GrassMaterials[step] == null)
+        {
+            var (_, _, brightness) = BlockField.GrassView.Step(step);
+            var mat = new Material(Shader.Find("BlockField/OcclusionUnlit"))
+            {
+                name = $"GrassMat{step}",
+                hideFlags = HideFlags.DontSave,
+            };
+            mat.SetColor("_BaseColor", new Color(0.27f * brightness, 0.78f * brightness, 0.24f * brightness));
+            m_GrassMaterials[step] = mat;
+            m_Generated.Add(mat);
+        }
+        return m_GrassMaterials[step];
     }
 
     /// <summary>植生場の値を地表の半透明緑オーバーレイで可視化する（値→アルファ）。</summary>
@@ -468,6 +534,11 @@ public class TerrainPreview : EditorWindow
         m_World = null;
         m_Root = null;
         m_EntityRoot = null;
+        m_GrassRoot = null;
+        for (int i = 0; i < m_GrassMaterials.Length; i++)
+        {
+            m_GrassMaterials[i] = null;
+        }
         m_VegetationOverlay = null;
         m_VegetationMaterial = null;
     }

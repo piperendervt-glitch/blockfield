@@ -264,6 +264,14 @@ public static class SceneBootstrap
         // 飢餓の色分け (Demo 5a) は診断モードのときだけ効かせる
         entityRenderer.roomView = roomView;
 
+        // 草の表示 (Demo 8.5 K3)。植生場の値から直接メッシュを組む。
+        // 植物 Entity が無くなったので、EntityRenderer は動物だけを扱う
+        var grassGo = new GameObject("Grass (K3)");
+        var grass = grassGo.AddComponent<BlockField.GrassView>();
+        grass.terrainField = terrainField;
+        grass.builder = roomTerrain;
+        grass.material = terrainMat;
+
         // 場のオーバーレイ (Demo 8 H4)。診断モード中に左手Yで 植生→恐怖→獲物→非表示 を巡回
         var overlayGo = new GameObject("Field Overlay (H4)");
         var overlay = overlayGo.AddComponent<BlockField.FieldOverlayView>();
