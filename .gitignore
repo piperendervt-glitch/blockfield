@@ -111,3 +111,10 @@ TestResults/
 Builds/
 # 実機から取り出した録画 (scripts/pull_recordings.ps1)。動画はリポジトリに入れない
 Recordings/
+
+# SimRunner の出力（検証結果。生成物なのでコミットしない）
+/runs/
+
+# .NET ビルド成果物（tools/ 配下）
+tools/**/bin/
+tools/**/obj/
