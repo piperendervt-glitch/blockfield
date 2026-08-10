@@ -53,7 +53,7 @@ namespace BlockField.SimCore.Ecology
             UpdateVegetation(world, p);
             UpdateHerbivores(world, rng, p);
             UpdateWolves(world, rng, p);
-            CrushTrampledPlants(world, rng, p);
+            CrushTrampledGrass(world, p);
             Breed(world, rng, p);
 
             world.PopulationLog.Record(world);
@@ -83,7 +83,9 @@ namespace BlockField.SimCore.Ecology
                 // 増やす）は場を経由するぶん間接的で効果が出るまで遅く、
                 // 「墓場に草が茂る」という因果が読み取りにくいため。
                 // ここは死が生を生む経路そのものなので、直接的な方が意図が伝わる
-                float nutrient = 1f + p.deathNutrientBoost * world.Death.GetAtColumn(x, z);
+                // 死の場の養分は Demo 8.5 段階2 で成長率へ移した。
+                // 抽選の重みではなく、植生場を直接育てる形になっている
+                // （UpdateVegetation の GrowFromDeath を参照）
 
                 // 踏み荒らしがスポーンを抑える (Demo 8 第3段 J1)。
                 // 死の場と対になる経路。下限を設けるのは、一度踏まれた筋が
@@ -94,7 +96,7 @@ namespace BlockField.SimCore.Ecology
                     trampled = p.trampleSuppressionFloor;
                 }
 
-                float weight = suitability * Math.Max(vegetation, p.vegetationFloor) * nutrient * trampled;
+                float weight = suitability * Math.Max(vegetation, p.vegetationFloor) * trampled;
 
                 if (rng.NextFloat01() < weight)
                 {
@@ -164,7 +166,41 @@ namespace BlockField.SimCore.Ecology
                     world.Vegetation.Deposit(e.cell, p.vegetationDeposit);
                 }
             }
+            GrowFromDeath(world, p);
             world.UpdateFields(p);
+        }
+
+        /// <summary>
+        /// 死骸が養分になって草が育つ (Demo 8 第2段 I2 → Demo 8.5 段階2 で場化)。
+        ///
+        /// 移行前は「植物スポーンの抽選重みに (1 + k × 死の場) を掛ける」形だった。
+        /// 抽選には plantCap の上限があるため、実質は「どこに湧くか」の再配分であり
+        /// 総量は増えなかった。場に移すと再配分ではなく**純増**になるため、
+        /// 係数はそのまま流用できず測り直してある（SimParams のコメント参照）。
+        ///
+        /// 適性0のセル（壁・穴）では育てない。そこは草の生えない場所であり、
+        /// そこで死んだ個体の養分まで草に変えると、通れない場所に草が茂る。
+        /// </summary>
+        static void GrowFromDeath(World world, SimParams p)
+        {
+            if (p.deathNutrientGrowth <= 0f)
+            {
+                return;
+            }
+
+            for (int z = 0; z < world.Depth; z++)
+            {
+                for (int x = 0; x < world.Width; x++)
+                {
+                    float death = world.Death.GetAtColumn(x, z);
+                    if (death <= 0f || world.Suitability.GetAtColumn(x, z) <= 0f)
+                    {
+                        continue;
+                    }
+                    float v = world.Vegetation.GetAtColumn(x, z) + p.deathNutrientGrowth * death;
+                    world.Vegetation.SetAtColumn(x, z, v > 1f ? 1f : v);
+                }
+            }
         }
 
         /// <summary>
@@ -182,43 +218,47 @@ namespace BlockField.SimCore.Ecology
         }
 
         /// <summary>
-        /// 踏み潰し (Demo 8 第3段 J1)。踏み荒らし場が閾値を超えたセルの植物を
-        /// 確率で消す。
+        /// 踏み潰し (Demo 8 第3段 J1 → Demo 8.5 段階2 で場化)。
+        /// 踏み荒らし場が閾値を超えたセルの**植生場を掛け算で減らす**。
         ///
         /// 【実装した理由】スポーン抑制だけだと「新しく生えない」だけになり、
-        /// 既にある草が消えるのを植物の寿命（＝草食獣に食われるまで）待つことになる。
+        /// 既にある草が消えるのを草の寿命（＝草食獣に食われるまで）待つことになる。
         /// けもの道が見えるまでの時間が M1（実機5分セッションでの目視）に対して
         /// 長すぎる。踏み潰しを入れると、通行が始まってから数十ティックで
         /// 筋が見え始める。「歩いたら草が消える」は直感にも合う。
+        ///
+        /// 【場化で変わったこと】移行前は植物 Entity を走査して確率で消していた。
+        /// 場になると「1本消す」が成立しないので、その期待値を連続量で表した
+        /// 掛け算に置き換えた。個体を1つも見なくなり、処理は個体数に依存しない
+        /// O(セル数) になった（Demo 8.5 M1 に寄与）。RNG も消費しない。
+        ///
+        /// <see cref="World.TrampleCrushCount"/> の意味も変わった。
+        /// 「消した植物の本数」ではなく「草を削ったセルの延べ数」である。
         /// </summary>
-        static void CrushTrampledPlants(World world, Mulberry32 rng, SimParams p)
+        static void CrushTrampledGrass(World world, SimParams p)
         {
-            if (p.trampleCrushChance <= 0f)
+            if (p.trampleCrushRate <= 0f)
             {
                 return;
             }
 
-            var crushed = new HashSet<int>();
-            foreach (var e in world.Entities)
+            float keep = 1f - p.trampleCrushRate;
+            for (int z = 0; z < world.Depth; z++)
             {
-                if (!e.IsPlant)
+                for (int x = 0; x < world.Width; x++)
                 {
-                    continue;
+                    if (world.Trample.GetAtColumn(x, z) < p.trampleCrushThreshold)
+                    {
+                        continue;
+                    }
+                    float v = world.Vegetation.GetAtColumn(x, z);
+                    if (v <= 0f)
+                    {
+                        continue;
+                    }
+                    world.Vegetation.SetAtColumn(x, z, v * keep);
+                    world.TrampleCrushCount++;
                 }
-                if (world.Trample.GetAtColumn(e.cell.x, e.cell.z) < p.trampleCrushThreshold)
-                {
-                    continue;
-                }
-                if (rng.NextFloat01() < p.trampleCrushChance)
-                {
-                    crushed.Add(e.id);
-                }
-            }
-
-            if (crushed.Count > 0)
-            {
-                world.TrampleCrushCount += crushed.Count;
-                world.RemoveEntities(crushed);
             }
         }
 

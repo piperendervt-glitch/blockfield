@@ -174,11 +174,21 @@ namespace BlockField.SimCore.Ecology
         public float deathDecay;
 
         /// <summary>
-        /// 死の場が植物スポーンを後押しする強さ (Demo 8 第2段 I2)。
-        /// スポーン重み = suitability × max(植生, 床値) × (1 + k × 死の場)。
-        /// これが「死骸が養分になる」経路そのもの。
+        /// 死の場が草を育てる強さ (Demo 8 第2段 I2 → Demo 8.5 段階2 で場化)。
+        /// 毎ティック、植生場に `この係数 × 死の場` を加える。
+        ///
+        /// 【移行前とは単位も意味も違う】移行前は
+        /// スポーン重み = 適性 × max(植生, 床値) × (1 + k × 死の場) で、
+        /// **抽選に当たりやすくする**係数だった（k=20）。
+        /// 抽選には plantCap の上限があるため、実質は「どこに湧くか」の
+        /// **再配分**であって総量は増えない。
+        ///
+        /// 成長率に移すと再配分ではなく**純増**になる。同じ k=20 を使うと
+        /// 死の場0.05のセルが毎ティック +1.0 され、草が無限に湧く。
+        /// 単位が変わった以上、値は測り直す必要がある。
+        /// 第2段で k≧40 が狼を絶滅させた実績もあるため慎重に選ぶ。
         /// </summary>
-        public float deathNutrientBoost;
+        public float deathNutrientGrowth;
 
         /// <summary>草食獣の移動評価: 植生場の重み（餌に寄る強さ）。</summary>
         public float herbivoreVegetationWeight;
@@ -232,14 +242,30 @@ namespace BlockField.SimCore.Ecology
         public float trampleSuppressionFloor;
 
         /// <summary>
-        /// この値を超えた踏み荒らし場のセルで、既存の植物が踏み潰される確率
-        /// (Demo 8 第3段 J1)。0 にすると「新しく生えない」だけになり、
-        /// けもの道が見えるまでに植物の寿命ぶんの時間がかかる。
+        /// 踏み潰しが働き始める踏み荒らし場の下限 (Demo 8 第3段 J1)。
+        /// これを超えたセルで草が削られる。0 にすると「新しく生えない」だけになり、
+        /// けもの道が見えるまでに草の寿命ぶんの時間がかかる。
         /// </summary>
         public float trampleCrushThreshold;
 
-        /// <summary>踏み潰しが起きる毎ティック確率（閾値を超えたセルの植物に対して）。</summary>
-        public float trampleCrushChance;
+        /// <summary>
+        /// 踏み潰しによる植生場の毎ティック減少率 (Demo 8.5 段階2 で意味が変わった)。
+        ///
+        /// 【もとは確率だった】移行前は `trampleCrushChance` という名前で、
+        /// 「閾値を超えたセルにある植物 Entity をこの確率で消す」ものだった。
+        /// 消えると植生場への書き込み（vegetationDeposit）が止まり、
+        /// 場が減衰で薄れる、という**間接的な**効果である。
+        ///
+        /// 植物が場になると「1本消す」が成立しないため、
+        /// **その期待値を連続量で表した掛け算**に置き換えた:
+        ///   植生場 ×= (1 - このレート)
+        /// 名前を Chance から Rate に変えたのは、意味が確率でなくなったため。
+        /// 名前が嘘をつくと段階3以降で読む人を誤らせる。
+        ///
+        /// RNG を使わない形を選んだ。踏み潰しが他の乱数列に干渉しなくなり、
+        /// 変更の切り分けが楽になる。処理も個体数に依存しない O(セル数) になった。
+        /// </summary>
+        public float trampleCrushRate;
 
         /// <summary>動物: 毎ティックの抽選候補セル数（低頻度、基準スケールでの値）。</summary>
         public int animalSpawnCandidates;
@@ -325,10 +351,11 @@ namespace BlockField.SimCore.Ecology
             deathDecay = 0.003f,
             // k=1 では効果が測定できなかった（死の場は全体の1%未満にしか立たず、
             // 平均値が0.005程度なので重みがほぼ1倍のまま）。
-            // 掃引の結果 20。48シード実測で墓場セルの植物密度の比が
-            // 対照(k=0)の 0.348 から 0.523 へ（約1.5倍）。k=0/4/20 で単調に上がる。
-            // ただし 1.0 は超えない（墓場はもともと餌の乏しい土地なので不利を背負う）
-            deathNutrientBoost = 20f,
+            // Demo 8.5 段階2 で成長率へ移した。単位が変わったので測り直した値
+            // （抽選の倍率 20 とは無関係）。死の場0.5のセルで毎ティック +0.025、
+            // 減衰0.02 との釣り合いで植生1.0 に達する＝濃い墓場は草で覆われる。
+            // 死の場0.05（墓場の下限）なら +0.0025 で釣り合いは 0.125 に留まる
+            deathNutrientGrowth = 0.05f,
             herbivoreVegetationWeight = 1f,
             herbivoreFearWeight = 1.5f,
             wolfPreyWeight = 1f,
@@ -346,7 +373,7 @@ namespace BlockField.SimCore.Ecology
             // （3シード×3000tで15件）。0.10 は「通行のある域」23.5% に相当し、
             // 375件／3シードと目に見える頻度になる。植物総数は 205 のまま変わらない
             trampleCrushThreshold = 0.10f,
-            trampleCrushChance = 0.02f,
+            trampleCrushRate = 0.02f,
             animalSpawnCandidates = 2,
             animalSpawnChance = 0.5f,
             animalCap = 30,
