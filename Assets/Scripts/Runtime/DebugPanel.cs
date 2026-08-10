@@ -97,7 +97,8 @@ namespace BlockField
                 if (world != null)
                 {
                     Debug.Log($"[DebugPanel] 生態: tick={world.TickCount} " +
-                        $"草={world.VegetationTotal:F0} 草食={world.SheepCount + world.PigCount} 狼={world.WolfCount} " +
+                        $"草の総量={world.VegetationTotal:F0}（植生場の全セル合計。本数ではない） " +
+                        $"草食={world.SheepCount + world.PigCount} 狼={world.WolfCount} " +
                         $"適性セル={world.SuitableCellCount}");
                     Debug.Log($"[DebugPanel] 密度: 植物={EcologyStats.PlantDensity(world) * 100:F2}% " +
                         $"動物={EcologyStats.AnimalDensity(world) * 100:F2}% " +
