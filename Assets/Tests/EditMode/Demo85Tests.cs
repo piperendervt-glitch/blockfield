@@ -338,6 +338,59 @@ namespace BlockField.Tests.EditMode
                 "全ての適性セルに草が描かれている（濃淡が読めない）");
         }
 
+        /// <summary>
+        /// **表示基準値が実測分布と乖離していないこと。**
+        ///
+        /// 同じ不具合を2回起こしている:
+        /// - Demo 8 第2段: 死の場が灰色に見えた（不透明度が生値に比例していた）
+        /// - Demo 8.5 段階4: 植生場が全面均一な緑に見えた
+        ///   （ロジスティック成長で釣り合い点が 0.29 になったのに基準が 0.90 のままで、
+        ///   90%点との比が 0.24 まで落ちて濃淡が潰れた）
+        ///
+        /// どちらも「τや釣り合い点を変えたのに表示の正規化を直さなかった」ことが原因。
+        /// 目視に頼らずここで捕まえる。
+        /// </summary>
+        [Test]
+        public void Display_FieldScalesMatchTheMeasuredDistribution()
+        {
+            var world = MakeDiorama(12345u);
+            for (int t = 0; t < 1500; t++)
+            {
+                Simulation.Tick(world, world.Rng, SimParams.Default);
+            }
+
+            foreach (var kv in world.Fields)
+            {
+                if (kv.Key == SuitabilityField.FieldName || kv.Value is not ScalarField field)
+                {
+                    continue; // 適性場は静的で表示対象外
+                }
+
+                // 基準値の根拠と同じ母集団（0.02 以上のセル）で 90%点を取る
+                var values = new System.Collections.Generic.List<float>();
+                for (int i = 0; i < field.Length; i++)
+                {
+                    float v = field.GetByIndex(i);
+                    if (v >= 0.02f)
+                    {
+                        values.Add(v);
+                    }
+                }
+
+                Assert.Greater(values.Count, 20,
+                    $"{kv.Key}: 0.02以上のセルが {values.Count} しかなく、分布を判定できない");
+
+                values.Sort();
+                float p90 = values[(int)(values.Count * 0.90)];
+                float scale = EcologyStats.FieldDisplayScale(kv.Key);
+
+                Assert.IsTrue(EcologyStats.DisplayScaleMatchesDistribution(kv.Key, p90),
+                    $"{kv.Key}: 表示基準値 {scale:F2} が実測の90%点 {p90:F3} と乖離している" +
+                    $"（比 {p90 / scale:F2}、許容 0.5〜2.0）。" +
+                    "小さすぎると濃淡が潰れ、大きすぎると全部が最大の濃さに張り付く");
+            }
+        }
+
         // ---- 段階0が既存の挙動を変えていないこと ----
 
         /// <summary>
