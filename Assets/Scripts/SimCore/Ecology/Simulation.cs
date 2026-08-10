@@ -45,6 +45,15 @@ namespace BlockField.SimCore.Ecology
             // 呼び出し側は基準スケールの値を渡すだけでよい。整数演算なので決定論は不変
             p = p.Resolve(world.SuitableCellCount);
 
+            // 最初のティックで草の初期値を入れる (Demo 8.5、暫定対処)。
+            // World.Create ではなくここで行うのは、初期値が SimParams にあり
+            // World は TerrainParams しか受け取らないため。
+            // RNG を消費しないので決定論は保たれる
+            if (world.TickCount == 0)
+            {
+                SeedInitialVegetation(world, p);
+            }
+
             // Demo 4 F2: プレイヤー操作はティック先頭で適用（RNG非消費 → リプレイ決定論を保つ）
             world.ApplyPendingActions();
 
@@ -94,6 +103,44 @@ namespace BlockField.SimCore.Ecology
         /// <see cref="SimParams.plantCap"/> はここでは使わない
         /// （抽選も本数の上限も存在しなくなったため）。
         /// </summary>
+        /// <summary>
+        /// 草の初期値を適性セルへ入れる (Demo 8.5、暫定対処)。
+        ///
+        /// ロジスティック成長は立ち上がりが緩やかで、0から始めると平衡に
+        /// 達するまで約1,500ティックかかる。実機セッションは5分＝約400ティック
+        /// しかなく、その時点では草が表示閾値に届かない
+        /// （実機で草が1つも見えなかった原因のひとつ）。
+        ///
+        /// 適性に比例させるのは、適性0のセル（壁・穴）に草を置かないため。
+        /// **RNG を消費しない**ので決定論は保たれる。
+        /// </summary>
+        static void SeedInitialVegetation(World world, SimParams p)
+        {
+            if (p.initialVegetation <= 0f)
+            {
+                return;
+            }
+
+            var cells = world.SuitableCellIndices;
+            for (int i = 0; i < cells.Length; i++)
+            {
+                int c = cells[i];
+
+                // **既に草があるセルは触らない。**
+                // 初期化は最初のティックで走るため、World.Create のあとに
+                // 呼び出し側が置いた草（テストの舞台づくりや、将来の
+                // セーブデータ読み込み）を上書きしてしまう。
+                // 「まだ何も無いセルに初期値を入れる」という意味に限定する
+                if (world.Vegetation.GetByIndex(c) > 0f)
+                {
+                    continue;
+                }
+
+                float v = world.Suitability.GetByIndex(c) * p.initialVegetation;
+                world.Vegetation.SetByIndex(c, v > 1f ? 1f : v);
+            }
+        }
+
         static void GrowVegetation(World world, SimParams p)
         {
             bool grow = p.vegetationGrowth > 0f;

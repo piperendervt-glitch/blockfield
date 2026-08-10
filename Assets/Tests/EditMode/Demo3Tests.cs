@@ -28,6 +28,10 @@ namespace BlockField.Tests.EditMode
             p.animalSpawnCandidates = 0;
             p.moveChance = 0f;
             p.turnChance = 0f;
+            // Demo 8.5: 草が場になったので「植物を湧かせない」だけでは草が消えない。
+            // 成長と初期値も止めて「置いた草しか存在しない」舞台にする
+            p.vegetationGrowth = 0f;
+            p.initialVegetation = 0f;
             return p;
         }
 
