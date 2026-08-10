@@ -280,6 +280,8 @@ public static class SceneBootstrap
         overlay.roomView = roomView;
         overlay.material = terrainMat;
         panel.fieldOverlay = overlay;
+        // 「草が0セルなのか、描画したが見えないのか」を切り分けられるようにする
+        panel.grassView = grass;
         // オーバーレイ表示中は草を隠す（草が場を覆って濃淡が読めなくなるため）
         grass.fieldOverlay = overlay;
 
