@@ -63,7 +63,12 @@ namespace BlockField.SimCore.Ecology
 
         public void Record(World world)
         {
-            m_Rows.Add(new Row(world.TickCount, world.PlantCount, world.SheepCount, world.PigCount, world.WolfCount));
+            // Demo 8.5: plants 列の意味が「本数」から「草の総量（植生場の合計）」に
+            // 変わった。植物が Entity でなくなり本数が存在しないため。
+            // 整数で持つのは列の型を変えないため（1未満の差は表示上意味を持たない）
+            m_Rows.Add(new Row(
+                world.TickCount, (int)world.VegetationTotal,
+                world.SheepCount, world.PigCount, world.WolfCount));
         }
 
         public string ToCsv()

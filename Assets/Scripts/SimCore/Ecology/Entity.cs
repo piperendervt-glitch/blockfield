@@ -31,10 +31,12 @@ namespace BlockField.SimCore.Ecology
         /// </summary>
         public EntityWeights wanderWeights;
 
-        public bool IsAnimal => kind == EntityKind.Sheep || kind == EntityKind.Pig || kind == EntityKind.Wolf;
+        /// <summary>
+        /// Demo 8.5 で植物が Entity でなくなったため、**全てのエンティティが動物**である。
+        /// 呼び出し側の意図（動物だけを対象にしたい）を残すためプロパティは維持する。
+        /// </summary>
+        public bool IsAnimal => true;
 
         public bool IsHerbivore => kind == EntityKind.Sheep || kind == EntityKind.Pig;
-
-        public bool IsPlant => kind == EntityKind.GrassTuft || kind == EntityKind.Flower;
     }
 }

@@ -219,20 +219,26 @@ namespace BlockField.SimCore.Ecology
                 return (0f, 0f);
             }
 
-            int gravePlants = 0, otherPlants = 0;
-            foreach (var e in world.Entities)
+            // Demo 8.5: 植物は Entity でなくなったので「本数」を数えられない。
+            // セルあたりの草の量（植生場の平均）で比べる
+            float graveGrass = 0f, otherGrass = 0f;
+            for (int z = 0; z < world.Depth; z++)
             {
-                if (!e.IsPlant)
+                for (int x = 0; x < world.Width; x++)
                 {
-                    continue;
+                    if (world.Suitability.GetAtColumn(x, z) <= 0f)
+                    {
+                        continue;
+                    }
+                    float v = world.Vegetation.GetAtColumn(x, z);
+                    if (world.Death.GetAtColumn(x, z) >= GraveyardThreshold) graveGrass += v;
+                    else otherGrass += v;
                 }
-                if (world.Death.GetAtColumn(e.cell.x, e.cell.z) >= GraveyardThreshold) gravePlants++;
-                else otherPlants++;
             }
 
             return (
-                (float)gravePlants / graveCells,
-                otherCells > 0 ? (float)otherPlants / otherCells : 0f);
+                graveGrass / graveCells,
+                otherCells > 0 ? otherGrass / otherCells : 0f);
         }
 
         /// <summary>
@@ -274,19 +280,24 @@ namespace BlockField.SimCore.Ecology
                 return (0f, 0f);
             }
 
-            int highPlants = 0, lowPlants = 0;
-            foreach (var e in world.Entities)
+            // Demo 8.5: 本数ではなくセルあたりの草の量（植生場の平均）で比べる
+            float highGrass = 0f, lowGrass = 0f;
+            for (int z = 0; z < world.Depth; z++)
             {
-                if (!e.IsPlant)
+                for (int x = 0; x < world.Width; x++)
                 {
-                    continue;
+                    if (world.Suitability.GetAtColumn(x, z) <= 0f)
+                    {
+                        continue;
+                    }
+                    float t = world.Trample.GetAtColumn(x, z);
+                    float v = world.Vegetation.GetAtColumn(x, z);
+                    if (t >= high) highGrass += v;
+                    else if (t <= low) lowGrass += v;
                 }
-                float v = world.Trample.GetAtColumn(e.cell.x, e.cell.z);
-                if (v >= high) highPlants++;
-                else if (v <= low) lowPlants++;
             }
 
-            return ((float)highPlants / highCells, (float)lowPlants / lowCells);
+            return (highGrass / highCells, lowGrass / lowCells);
         }
 
         /// <summary>
@@ -370,7 +381,7 @@ namespace BlockField.SimCore.Ecology
 
         /// <summary>植物密度 = 植物数 / 適性セル数。</summary>
         public static float PlantDensity(World world) =>
-            world.SuitableCellCount > 0 ? (float)world.PlantCount / world.SuitableCellCount : 0f;
+            world.SuitableCellCount > 0 ? world.VegetationTotal / world.SuitableCellCount : 0f;
 
         /// <summary>動物密度 = 動物数 / 適性セル数。</summary>
         public static float AnimalDensity(World world) =>

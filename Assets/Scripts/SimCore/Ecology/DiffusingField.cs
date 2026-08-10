@@ -57,13 +57,25 @@ namespace BlockField.SimCore.Ecology
 
             // 減衰しつつ書き戻し
             float keep = 1f - decayRate;
+            float total = 0f;
             for (int z = 0; z < depth; z++)
             {
                 for (int x = 0; x < width; x++)
                 {
-                    SetAtColumn(x, z, m_Scratch[x + width * z] * keep);
+                    float v = m_Scratch[x + width * z] * keep;
+                    SetAtColumn(x, z, v);
+                    total += v;
                 }
             }
+            LastSum = total;
         }
+
+        /// <summary>
+        /// 直近の更新時点での全セルの合計 (Demo 8.5)。
+        /// 拡散の書き戻しループの副産物として集計するので**追加コストがない**。
+        /// 植物が場になり「本数」が無くなったため、草の総量を表す指標として使う。
+        /// 更新後の摂食・踏み潰しは反映されない（表示用の導出値）。
+        /// </summary>
+        public float LastSum { get; private set; }
     }
 }

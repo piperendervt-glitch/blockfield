@@ -61,6 +61,24 @@ namespace BlockField.SimCore.Ecology
         /// </summary>
         public int SuitableCellCount { get; }
 
+        /// <summary>
+        /// 適性 &gt; 0 のセルの平坦インデックス（(z, x) の走査順）(Demo 8.5 段階3)。
+        ///
+        /// 場が草そのものになったことで、毎ティック全セルを走査する処理が増えた。
+        /// 適性セルは生成時に固定なので、対象セルの列を一度作っておけば
+        /// 毎ティックの「適性を引いて0なら飛ばす」を省ける。
+        ///
+        /// **順序は走査順そのまま**にしてある。順序を変えると
+        /// 浮動小数の演算順が変わり決定論が壊れるため。
+        ///
+        /// 注: <see cref="ApplyPendingActions"/> による設置・破壊で適性は
+        /// 局所的に変わりうるが、この列は追随しない。
+        /// <see cref="SuitableCellCount"/> と同じ扱い（「このワールドの広さ」を
+        /// 表す生成時の基準）であり、ブロック1個の増減で草の成長対象が
+        /// 揺れるほうが不自然なため。
+        /// </summary>
+        public int[] SuitableCellIndices { get; }
+
         // 統計（表示用の累計。導出値なので ContentHash には含めない）
         public int StarvationCount { get; internal set; }
         public int PredationCount { get; internal set; }
@@ -113,7 +131,7 @@ namespace BlockField.SimCore.Ecology
             }
         }
 
-        readonly int[] m_KindCounts = new int[5];
+        readonly int[] m_KindCounts = new int[3];
         readonly int[] m_SurfaceHeights;
         readonly List<Entity> m_Entities = new List<Entity>();
         readonly Dictionary<Int3, int> m_OccupiedCells = new Dictionary<Int3, int>();
@@ -128,7 +146,16 @@ namespace BlockField.SimCore.Ecology
         /// <summary>エンティティ列（id 昇順を維持）。</summary>
         public IReadOnlyList<Entity> Entities => m_Entities;
 
-        public int PlantCount => m_KindCounts[(int)EntityKind.GrassTuft] + m_KindCounts[(int)EntityKind.Flower];
+        /// <summary>
+        /// 草の総量 (Demo 8.5)。植物は Entity でなくなったので「本数」は存在しない。
+        /// 植生場の全セルの合計であり、移行前の PlantCount の置き換えになる。
+        ///
+        /// 値は毎ティックの場の更新時に副産物として集計されたもので、
+        /// その後の摂食・踏み潰しは反映されていない（表示用の導出値であり、
+        /// 1ティック遅れても意味が変わらないため）。
+        /// </summary>
+        public float VegetationTotal => Vegetation.LastSum;
+
         public int SheepCount => m_KindCounts[(int)EntityKind.Sheep];
         public int PigCount => m_KindCounts[(int)EntityKind.Pig];
         public int WolfCount => m_KindCounts[(int)EntityKind.Wolf];
@@ -167,6 +194,7 @@ namespace BlockField.SimCore.Ecology
             Death = new DeathField(p.width, p.depth);
             Trample = new TrampleField(p.width, p.depth);
             SuitableCellCount = CountSuitableCells(Suitability, p.width, p.depth);
+            SuitableCellIndices = CollectSuitableCells(Suitability, p.width, p.depth);
 
             RegisterField(Suitability);
             RegisterField(Vegetation);
@@ -205,6 +233,7 @@ namespace BlockField.SimCore.Ecology
             Death = new DeathField(p.width, p.depth);
             Trample = new TrampleField(p.width, p.depth);
             SuitableCellCount = CountSuitableCells(Suitability, p.width, p.depth);
+            SuitableCellIndices = CollectSuitableCells(Suitability, p.width, p.depth);
 
             RegisterField(Suitability);
             RegisterField(Vegetation);
@@ -212,6 +241,27 @@ namespace BlockField.SimCore.Ecology
             RegisterField(Prey);
             RegisterField(Death);
             RegisterField(Trample);
+        }
+
+        /// <summary>
+        /// 適性 &gt; 0 のセルの平坦インデックスを走査順に集める。
+        /// 順序は (z, x) の二重ループそのままで、変えてはいけない
+        /// （浮動小数の演算順が変わり決定論が壊れる）。
+        /// </summary>
+        static int[] CollectSuitableCells(SuitabilityField field, int width, int depth)
+        {
+            var list = new List<int>();
+            for (int z = 0; z < depth; z++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    if (field.GetAtColumn(x, z) > 0f)
+                    {
+                        list.Add(x + width * z);
+                    }
+                }
+            }
+            return list.ToArray();
         }
 
         /// <summary>適性 &gt; 0 のセル数（生成時の基準スケール）。</summary>
@@ -300,6 +350,18 @@ namespace BlockField.SimCore.Ecology
         public int GetSurfaceHeight(int x, int z) => m_SurfaceHeights[x + Width * z];
 
         public bool IsCellOccupied(Int3 cell) => m_OccupiedCells.ContainsKey(cell);
+
+        /// <summary>
+        /// 動物が塞いでいるセルか (Demo 8.5 段階3)。
+        ///
+        /// 移動の判定はこちらを使う。植物が場になると通行不可の主体でなくなり、
+        /// **動物は草の上を歩けるようになる**。段階3の前にこの1点だけを
+        /// 先に入れて影響を測れるよう、占有索引そのものとは別のメソッドにした。
+        /// </summary>
+        public bool IsCellBlockedByAnimal(Int3 cell) =>
+            m_OccupiedCells.TryGetValue(cell, out int id) &&
+            m_IdToIndex.TryGetValue(id, out int index) &&
+            m_Entities[index].IsAnimal;
 
         /// <summary>セル上のエンティティのリストインデックスを取得。</summary>
         public bool TryGetEntityIndexAt(Int3 cell, out int index)
@@ -419,19 +481,17 @@ namespace BlockField.SimCore.Ecology
                 else if (action.type == SimEventType.PlayerBreakPlant)
                 {
                     // 植物の独立破壊: 地形は不変更、植物のみ消滅＋植生場×0.5
-                    if (TryGetEntityIndexAt(action.cell, out int index) && m_Entities[index].IsPlant)
+                    // 【廃止された操作】Demo 4 M1d の「植物の独立破壊」は
+                    // Demo 8.5（植物の場化）で廃止した。草が場になった以上
+                    // 「1本を狙って壊す」は概念的に成立しない。
+                    // イベント種別だけは残してある — 過去のイベントログを
+                    // リプレイしたときに未知の種別で落ちないようにするため。
+                    // 適用時は当該セルの草を半分にするだけになる
+                    if (InBounds(action.cell.x, action.cell.z))
                     {
-                        recordedBlock = (byte)m_Entities[index].kind; // 監査用: 破壊した植物種
-                        m_FeedbackDeadScratch.Clear();
-                        m_FeedbackDeadScratch.Add(m_Entities[index].id);
-                        RemoveEntities(m_FeedbackDeadScratch);
-
-                        if (InBounds(action.cell.x, action.cell.z))
-                        {
-                            // 柱単位の操作（表面場のエスケープハッチ。IField のコメント参照）
-                            float v = Vegetation.GetAtColumn(action.cell.x, action.cell.z);
-                            Vegetation.SetAtColumn(action.cell.x, action.cell.z, v * 0.5f);
-                        }
+                        // 柱単位の操作（表面場のエスケープハッチ。IField のコメント参照）
+                        float v = Vegetation.GetAtColumn(action.cell.x, action.cell.z);
+                        Vegetation.SetAtColumn(action.cell.x, action.cell.z, v * 0.5f);
                         applied = true;
                     }
                 }
@@ -457,14 +517,8 @@ namespace BlockField.SimCore.Ecology
         {
             if (isBreak)
             {
-                m_FeedbackDeadScratch.Clear();
-                CollectPlantAt(cell, m_FeedbackDeadScratch);
-                CollectPlantAt(new Int3(cell.x, cell.y + 1, cell.z), m_FeedbackDeadScratch);
-                if (m_FeedbackDeadScratch.Count > 0)
-                {
-                    RemoveEntities(m_FeedbackDeadScratch);
-                }
-
+                // 移行前はここで当該セル・直上の植物 Entity を消していた。
+                // 草が場になったので、消すのは場の値だけになった (Demo 8.5)
                 if (InBounds(cell.x, cell.z))
                 {
                     // 柱単位の操作: 破壊されたブロックの y は表層高さと一致しないため
@@ -485,14 +539,6 @@ namespace BlockField.SimCore.Ecology
             }
 
             MarkChunkDirty(cell);
-        }
-
-        void CollectPlantAt(Int3 cell, HashSet<int> result)
-        {
-            if (TryGetEntityIndexAt(cell, out int index) && m_Entities[index].IsPlant)
-            {
-                result.Add(m_Entities[index].id);
-            }
         }
 
         /// <summary>指定列の表層高さキャッシュを再計算する。</summary>

@@ -48,7 +48,6 @@ namespace BlockField.SimCore.Ecology
             // Demo 4 F2: プレイヤー操作はティック先頭で適用（RNG非消費 → リプレイ決定論を保つ）
             world.ApplyPendingActions();
 
-            SpawnPlants(world, rng, p);
             SpawnAnimals(world, rng, p);
             UpdateVegetation(world, p);
             UpdateHerbivores(world, rng, p);
@@ -61,53 +60,97 @@ namespace BlockField.SimCore.Ecology
         }
 
         /// <summary>
-        /// 植物スポーン (E1): スポーン確率 = suitability × max(植生場, 床値)。
-        /// 場が繁殖の主体 — 既存植物の近傍（植生場が高い）ほど高確率、無からの発生は稀。
+        /// 草の成長 (Demo 8.5 K1。移行前の SpawnPlants の置き換え)。
+        ///
+        /// 移行前は「毎ティック数セルを抽選し、確率 suitability × max(植生, 床値) で
+        /// 植物 Entity を1つ湧かせる」だった。植物が場になったので、
+        /// **抽選をやめて全ての適性セルの植生場を増やす**形になる。
+        /// 抽選が無くなったぶん RNG を消費しない。
+        ///
+        /// 成長量 = 成長率 × 適性 × max(現在の草, 自然発生率) × **(1 - 現在の草)** × 踏み荒らしの抑制
+        ///
+        /// max(現在の草, 自然発生率) の形は移行前と同じで、
+        /// 「草のある所ほど増える（自己増殖）／無い所でもごく稀に生える」を表す。
+        ///
+        /// 【(1 - 現在の草) が要る理由 — 設計上の落とし穴】
+        /// 最初は素直に `成長率 × 草` としたが、これは**破綻する**。
+        /// 成長も減衰(<see cref="SimParams.vegetationDecay"/>)もどちらも草の量に
+        /// 比例するため、両者の比だけで結果が決まり、**内部の釣り合い点が無い**:
+        ///   成長率 > 減衰率 → 際限なく増えて世界が草で埋まる
+        ///   成長率 < 減衰率 → 消滅する
+        /// 実測でも 0.02 で平均0.134、0.05 で平均0.907（全セルが草）と、
+        /// 0.02〜0.05 のあいだで振る舞いが切り替わってしまった。
+        ///
+        /// 移行前にこれが起きなかったのは <see cref="SimParams.plantCap"/> が
+        /// **暗黙の安定装置**だったからである。本数に上限があるので、
+        /// 抽選確率をいくら上げても総量は頭打ちになっていた。
+        /// 場にすると本数が無いのでその歯止めも消える。
+        ///
+        /// そこでロジスティック型（混み合うほど増えにくい）にした。
+        /// 釣り合い点は 草* = 1 - 減衰率 / (成長率 × 適性 × 踏み荒らしの抑制) で、
+        /// **成長率で狙った密度に調整できる**ようになる。
+        ///
+        /// <see cref="SimParams.plantSpawnCandidates"/> と
+        /// <see cref="SimParams.plantCap"/> はここでは使わない
+        /// （抽選も本数の上限も存在しなくなったため）。
         /// </summary>
-        static void SpawnPlants(World world, Mulberry32 rng, SimParams p)
+        static void GrowVegetation(World world, SimParams p)
         {
-            if (world.PlantCount >= p.plantCap)
+            bool grow = p.vegetationGrowth > 0f;
+            bool nutrient = p.deathNutrientGrowth > 0f;
+            if (!grow && !nutrient)
             {
                 return;
             }
 
-            for (int i = 0; i < p.plantSpawnCandidates; i++)
+            // 【走査の最適化 (Demo 8.5 段階3)】
+            // 成長と養分は当初それぞれ全セルを回していたが、どちらも
+            // **近傍を読まず自セルだけで完結する**ので、1周にまとめても
+            // 結果は1ビットも変わらない（順序が問題になるのは近傍を読むとき）。
+            // さらに適性セルの索引列を使い、「適性を引いて0なら飛ばす」を省く。
+            // 索引は (z, x) の走査順のままなので演算順も変わらない。
+            var cells = world.SuitableCellIndices;
+            var vegetation = world.Vegetation;
+            var suitabilityField = world.Suitability;
+            var trampleField = world.Trample;
+            var deathField = world.Death;
+
+            for (int i = 0; i < cells.Length; i++)
             {
-                int x = rng.Range(0, world.Width);
-                int z = rng.Range(0, world.Depth);
-                float suitability = world.Suitability.GetAtColumn(x, z);
-                float vegetation = world.Vegetation.GetAtColumn(x, z);
+                int c = cells[i];
+                float current = vegetation.GetByIndex(c);
 
-                // 死の場が養分として植物スポーンを後押しする (Demo 8 第2段 I2)。
-                // 案A（スポーン重みに直接掛ける）を採った。案B（植生場の deposit を
-                // 増やす）は場を経由するぶん間接的で効果が出るまで遅く、
-                // 「墓場に草が茂る」という因果が読み取りにくいため。
-                // ここは死が生を生む経路そのものなので、直接的な方が意図が伝わる
-                // 死の場の養分は Demo 8.5 段階2 で成長率へ移した。
-                // 抽選の重みではなく、植生場を直接育てる形になっている
-                // （UpdateVegetation の GrowFromDeath を参照）
-
-                // 踏み荒らしがスポーンを抑える (Demo 8 第3段 J1)。
-                // 死の場と対になる経路。下限を設けるのは、一度踏まれた筋が
-                // 二度と草の生えない不可逆な傷になるのを避けるため
-                float trampled = 1f - p.trampleSuppression * world.Trample.GetAtColumn(x, z);
-                if (trampled < p.trampleSuppressionFloor)
+                if (grow)
                 {
-                    trampled = p.trampleSuppressionFloor;
-                }
-
-                float weight = suitability * Math.Max(vegetation, p.vegetationFloor) * trampled;
-
-                if (rng.NextFloat01() < weight)
-                {
-                    // GrassTuft : Flower = 3 : 1
-                    var kind = rng.Range(0, 4) == 0 ? EntityKind.Flower : EntityKind.GrassTuft;
-                    world.TrySpawn(kind, x, z, 0);
-                    if (world.PlantCount >= p.plantCap)
+                    float room = 1f - current;
+                    if (room > 0f)
                     {
-                        return;
+                        // 踏み荒らしが成長を抑える (Demo 8 第3段 J1)。
+                        // 死の場と対になる経路。下限を設けるのは、一度踏まれた筋が
+                        // 二度と草の生えない不可逆な傷になるのを避けるため
+                        float trampled = 1f - p.trampleSuppression * trampleField.GetByIndex(c);
+                        if (trampled < p.trampleSuppressionFloor)
+                        {
+                            trampled = p.trampleSuppressionFloor;
+                        }
+
+                        float grown = current + p.vegetationGrowth * suitabilityField.GetByIndex(c)
+                            * Math.Max(current, p.vegetationFloor) * room * trampled;
+                        current = grown > 1f ? 1f : grown;
                     }
                 }
+
+                if (nutrient)
+                {
+                    float death = deathField.GetByIndex(c);
+                    if (death > 0f)
+                    {
+                        float fed = current + p.deathNutrientGrowth * death;
+                        current = fed > 1f ? 1f : fed;
+                    }
+                }
+
+                vegetation.SetByIndex(c, current);
             }
         }
 
@@ -158,49 +201,12 @@ namespace BlockField.SimCore.Ecology
         /// </summary>
         static void UpdateVegetation(World world, SimParams p)
         {
-            foreach (var e in world.Entities)
-            {
-                if (e.IsPlant)
-                {
-                    // エンティティのセルは表層の上のセル＝表面場の対象セル
-                    world.Vegetation.Deposit(e.cell, p.vegetationDeposit);
-                }
-            }
-            GrowFromDeath(world, p);
+            // 移行前はここで「植物 Entity のセルに vegetationDeposit を書く」
+            // ループを回していた。植物が場になったので、その間接は消えて
+            // 場が自分で育つ形になった (Demo 8.5 K1)
+            // 成長と養分は GrowVegetation に統合した（どちらも自セルだけで完結するため）
+            GrowVegetation(world, p);
             world.UpdateFields(p);
-        }
-
-        /// <summary>
-        /// 死骸が養分になって草が育つ (Demo 8 第2段 I2 → Demo 8.5 段階2 で場化)。
-        ///
-        /// 移行前は「植物スポーンの抽選重みに (1 + k × 死の場) を掛ける」形だった。
-        /// 抽選には plantCap の上限があるため、実質は「どこに湧くか」の再配分であり
-        /// 総量は増えなかった。場に移すと再配分ではなく**純増**になるため、
-        /// 係数はそのまま流用できず測り直してある（SimParams のコメント参照）。
-        ///
-        /// 適性0のセル（壁・穴）では育てない。そこは草の生えない場所であり、
-        /// そこで死んだ個体の養分まで草に変えると、通れない場所に草が茂る。
-        /// </summary>
-        static void GrowFromDeath(World world, SimParams p)
-        {
-            if (p.deathNutrientGrowth <= 0f)
-            {
-                return;
-            }
-
-            for (int z = 0; z < world.Depth; z++)
-            {
-                for (int x = 0; x < world.Width; x++)
-                {
-                    float death = world.Death.GetAtColumn(x, z);
-                    if (death <= 0f || world.Suitability.GetAtColumn(x, z) <= 0f)
-                    {
-                        continue;
-                    }
-                    float v = world.Vegetation.GetAtColumn(x, z) + p.deathNutrientGrowth * death;
-                    world.Vegetation.SetAtColumn(x, z, v > 1f ? 1f : v);
-                }
-            }
         }
 
         /// <summary>
@@ -242,24 +248,29 @@ namespace BlockField.SimCore.Ecology
                 return;
             }
 
+            // 全セルを回す（適性0のセルにも拡散で草が届くので対象から外せない）。
+            // 平坦インデックスで回して GetAtColumn の境界チェックを省く
             float keep = 1f - p.trampleCrushRate;
-            for (int z = 0; z < world.Depth; z++)
+            var vegetation = world.Vegetation;
+            var trample = world.Trample;
+            int n = vegetation.Length;
+            int crushed = 0;
+
+            for (int i = 0; i < n; i++)
             {
-                for (int x = 0; x < world.Width; x++)
+                if (trample.GetByIndex(i) < p.trampleCrushThreshold)
                 {
-                    if (world.Trample.GetAtColumn(x, z) < p.trampleCrushThreshold)
-                    {
-                        continue;
-                    }
-                    float v = world.Vegetation.GetAtColumn(x, z);
-                    if (v <= 0f)
-                    {
-                        continue;
-                    }
-                    world.Vegetation.SetAtColumn(x, z, v * keep);
-                    world.TrampleCrushCount++;
+                    continue;
                 }
+                float v = vegetation.GetByIndex(i);
+                if (v <= 0f)
+                {
+                    continue;
+                }
+                vegetation.SetByIndex(i, v * keep);
+                crushed++;
             }
+            world.TrampleCrushCount += crushed;
         }
 
         /// <summary>
@@ -292,7 +303,7 @@ namespace BlockField.SimCore.Ecology
                 {
                     // 摂食モード: 自セル＋4近傍の「草のあるセル」を固定順で探す
                     // (Demo 8.5 段階1)。探すのは植物 Entity ではなく**場の値**
-                    bool grazed = TryGraze(world, p, e.cell, dead, out float taken);
+                    bool grazed = TryGraze(world, p, e.cell, out float taken);
 
                     // 診断用の統計。導出値なので ContentHash には含めず、RNG も消費しない
                     world.FeedAttemptCount++;
@@ -567,15 +578,15 @@ namespace BlockField.SimCore.Ecology
         /// 植物の増減（スポーン・上限・除去）は移行前と同じ経済のまま保たれ、
         /// 段階1で変わるのは hunger の回復のしかただけになる。
         /// </summary>
-        static bool TryGraze(World world, SimParams p, Int3 from, HashSet<int> dead, out float taken)
+        static bool TryGraze(World world, SimParams p, Int3 from, out float taken)
         {
-            if (TryGrazeColumn(world, p, from.x, from.z, from.y, dead, out taken))
+            if (TryGrazeColumn(world, p, from.x, from.z, from.y, out taken))
             {
                 return true;
             }
             foreach (var dir in FacingDirections)
             {
-                if (TryGrazeColumn(world, p, from.x + dir.x, from.z + dir.z, from.y, dead, out taken))
+                if (TryGrazeColumn(world, p, from.x + dir.x, from.z + dir.z, from.y, out taken))
                 {
                     return true;
                 }
@@ -585,7 +596,7 @@ namespace BlockField.SimCore.Ecology
         }
 
         static bool TryGrazeColumn(
-            World world, SimParams p, int x, int z, int fromY, HashSet<int> dead, out float taken)
+            World world, SimParams p, int x, int z, int fromY, out float taken)
         {
             taken = 0f;
             if (!world.InBounds(x, z))
@@ -607,12 +618,6 @@ namespace BlockField.SimCore.Ecology
                 return false;
             }
 
-            // 中間状態の後始末（段階3で植物 Entity ごと消える）
-            var cell = new Int3(x, world.GetSurfaceHeight(x, z), z);
-            if (world.TryGetEntityIndexAt(cell, out int i) && world.Entities[i].IsPlant)
-            {
-                dead.Add(world.Entities[i].id);
-            }
             return true;
         }
 
@@ -865,7 +870,14 @@ namespace BlockField.SimCore.Ecology
             var target = new Int3(nx, targetHeight, nz);
             bool climbable = Math.Abs(targetHeight - e.cell.y) <= 1;
 
-            if (climbable && !world.IsCellOccupied(target))
+            // 塞ぐのは動物だけ (Demo 8.5 段階3)。植物が場になると
+            // 「草が通行を妨げる」は成立しないので、動物は草の上を歩ける。
+            // movementBlockVegetation は移行前の阻害を再現する診断用の入口（既定 0＝無効）
+            bool blocked = world.IsCellBlockedByAnimal(target)
+                || (p.movementBlockVegetation > 0f
+                    && world.Vegetation.GetAtColumn(nx, nz) >= p.movementBlockVegetation);
+
+            if (climbable && !blocked)
             {
                 e.cell = target;
             }
