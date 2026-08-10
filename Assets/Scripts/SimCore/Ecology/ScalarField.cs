@@ -74,6 +74,35 @@ namespace BlockField.SimCore.Ecology
 
         public void SetAtColumn(int x, int z, float value) => m_Values[ToIndex(x, z)] = value;
 
+        /// <summary>
+        /// 柱 (x,z) の値を <paramref name="amount"/> だけ減らし、**実際に減った量**を返す
+        /// (Demo 8.5 の下ごしらえ)。0 未満にはならない。
+        ///
+        /// 【なぜ「減らした量」を返すか】植物を場にすると、摂食は
+        /// 「1本food食べて満腹」ではなく「そこにあるだけ食べる」になる。
+        /// 草がわずかしか無いセルでは少ししか食べられず、回復も少ない、
+        /// という連続量のやり取りを表現するには、要求量ではなく
+        /// **実際に取れた量**が要る。
+        ///
+        /// 段階0の時点では未使用。摂食の場化（段階1）で使う。
+        /// </summary>
+        public float Consume(int x, int z, float amount)
+        {
+            if (amount <= 0f)
+            {
+                return 0f;
+            }
+            int i = ToIndex(x, z);
+            float v = m_Values[i];
+            if (v <= 0f)
+            {
+                return 0f;
+            }
+            float taken = v < amount ? v : amount;
+            m_Values[i] = v - taken;
+            return taken;
+        }
+
         /// <summary>平坦インデックス（x + Width*z）での読み出し。</summary>
         public float GetByIndex(int index) => m_Values[index];
 
