@@ -14,7 +14,8 @@ namespace BlockField
     /// 【切替の割り当て: 左手Y】
     /// 右手B＝診断モード、左手X＝MR/VR切替 で埋まっているため、空いている
     /// 左手Y (secondaryButton) を場の切替に使う。押すたびに
-    /// マーカー → 植生（緑）→ 恐怖（赤）→ 獲物（青）→ 死（紫）→ 非表示 を巡回する。
+    /// マーカー → 植生（緑）→ 恐怖（赤）→ 獲物（青）→ 死（マゼンタ）
+    /// → 踏み荒らし（茶）→ 非表示 を巡回する。
     /// 同時に出すと色が混ざって読めないので1つずつ見る。
     ///
     /// 【表示と真実の分離】場を**読むだけ**で World には触らない。
@@ -48,14 +49,17 @@ namespace BlockField
             Fear = 2,
             Prey = 3,
 
-            /// <summary>死の場 (Demo 8 第2段)。紫。</summary>
+            /// <summary>死の場 (Demo 8 第2段)。マゼンタ。</summary>
             Death = 4,
 
+            /// <summary>踏み荒らし場 (Demo 8 第3段)。茶色。</summary>
+            Trample = 5,
+
             /// <summary>何も出さない（地形と生き物だけを見る）。</summary>
-            None = 5,
+            None = 6,
         }
 
-        const int k_LayerCount = 6;
+        const int k_LayerCount = 7;
 
         [SerializeField] RoomTerrainBuilder m_Builder;
         [SerializeField] TerrainField m_TerrainField;
@@ -172,6 +176,7 @@ namespace BlockField
                 Layer.Fear => world.Fear,
                 Layer.Prey => world.Prey,
                 Layer.Death => world.Death,
+                Layer.Trample => world.Trample,
                 _ => null,
             };
             if (field == null)
@@ -187,6 +192,9 @@ namespace BlockField
                 // 暗く沈んで灰色に見え、赤（恐怖）とも見分けにくかった。
                 // 青成分を最大まで振って色相を赤から離す
                 Layer.Death => new Color32(230, 40, 255, 255),
+                // 踏み荒らしは茶色（土が見えた道）。緑・赤・青・マゼンタのどれとも
+                // 色相が離れており、意味とも一致する
+                Layer.Trample => new Color32(190, 120, 45, 255),
                 _ => new Color32(70, 130, 245, 255),
             };
 

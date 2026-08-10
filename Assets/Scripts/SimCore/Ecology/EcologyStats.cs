@@ -63,6 +63,9 @@ namespace BlockField.SimCore.Ecology
             DeathField.FieldName => 0.10f,
             FearField.FieldName => 0.20f,
             PreyField.FieldName => 0.20f,
+            // 踏み荒らし: deposit 0.35 / τ≈50 で、通行のある筋は 0.3〜1.0 に達する。
+            // 恐怖場より濃く出るので基準も高めに取る
+            TrampleField.FieldName => 0.35f,
             _ => 0.90f, // 植生
         };
 
@@ -230,6 +233,139 @@ namespace BlockField.SimCore.Ecology
             return (
                 (float)gravePlants / graveCells,
                 otherCells > 0 ? (float)otherPlants / otherCells : 0f);
+        }
+
+        /// <summary>
+        /// 踏み荒らしの効果の指標 (Demo 8 第3段 M2)。
+        /// 踏み荒らし場の**上位25%セルと下位25%セル**で植物密度を比べ、
+        /// (上位, 下位) を返す。踏み荒らしが効いていれば上位の方が低い。
+        ///
+        /// 【死の場と違って四分位が使える理由】死の場は世界の数%にしか立たないため
+        /// 上位25%の閾値がほぼ0になって比較が成立しなかったが、踏み荒らし場は
+        /// 動物が歩いたセル全てに書かれるので広く分布する。四分位で十分に分かれる。
+        /// 実際に分かれているかは <see cref="TrampleQuartileThresholds"/> で確認できる。
+        ///
+        /// 分母からは適性0のセル（そもそも植物が湧けない）を除く。
+        /// </summary>
+        public static (float trampled, float quiet) PlantDensityByTrample(World world)
+        {
+            var (high, low) = TrampleQuartileThresholds(world);
+            if (high <= 0f)
+            {
+                return (0f, 0f); // まだ誰も歩いていない
+            }
+
+            int highCells = 0, lowCells = 0;
+            for (int z = 0; z < world.Depth; z++)
+            {
+                for (int x = 0; x < world.Width; x++)
+                {
+                    if (world.Suitability.GetAtColumn(x, z) <= 0f)
+                    {
+                        continue;
+                    }
+                    float v = world.Trample.GetAtColumn(x, z);
+                    if (v >= high) highCells++;
+                    else if (v <= low) lowCells++;
+                }
+            }
+            if (highCells == 0 || lowCells == 0)
+            {
+                return (0f, 0f);
+            }
+
+            int highPlants = 0, lowPlants = 0;
+            foreach (var e in world.Entities)
+            {
+                if (!e.IsPlant)
+                {
+                    continue;
+                }
+                float v = world.Trample.GetAtColumn(e.cell.x, e.cell.z);
+                if (v >= high) highPlants++;
+                else if (v <= low) lowPlants++;
+            }
+
+            return ((float)highPlants / highCells, (float)lowPlants / lowCells);
+        }
+
+        /// <summary>
+        /// 踏み荒らし場の上位25%・下位25%の閾値（適性セルのみ）。
+        /// 両者が十分に離れていなければ M2 の比較は意味を持たないので、
+        /// 指標と一緒に確認できるよう公開する。
+        /// </summary>
+        public static (float high, float low) TrampleQuartileThresholds(World world)
+        {
+            var values = new System.Collections.Generic.List<float>();
+            for (int z = 0; z < world.Depth; z++)
+            {
+                for (int x = 0; x < world.Width; x++)
+                {
+                    if (world.Suitability.GetAtColumn(x, z) > 0f)
+                    {
+                        values.Add(world.Trample.GetAtColumn(x, z));
+                    }
+                }
+            }
+            if (values.Count < 4)
+            {
+                return (0f, 0f);
+            }
+            values.Sort();
+            return (values[values.Count * 3 / 4], values[values.Count / 4]);
+        }
+
+        /// <summary>
+        /// 個体が持つ重みの平均 (Demo 8 第3段 J2)。
+        /// 進化本体はまだ無いので全個体が同じ値になるはずで、
+        /// **ここがばらついたら継承か初期化が壊れている**という監視の意味を持つ。
+        /// 将来「集団が進化したか」を見る窓口でもある。
+        /// 返すのは場の名前昇順の配列（<see cref="EntityWeights.FieldNames"/> と対応）。
+        /// </summary>
+        public static (float[] mean, float[] variance, int count) AnimalForageWeightStats(World world)
+        {
+            var mean = new float[EntityWeights.FieldCount];
+            var variance = new float[EntityWeights.FieldCount];
+            int n = 0;
+
+            foreach (var e in world.Entities)
+            {
+                if (!e.IsAnimal)
+                {
+                    continue;
+                }
+                n++;
+                for (int i = 0; i < EntityWeights.FieldCount; i++)
+                {
+                    mean[i] += e.forageWeights[i];
+                }
+            }
+            if (n == 0)
+            {
+                return (mean, variance, 0);
+            }
+            for (int i = 0; i < EntityWeights.FieldCount; i++)
+            {
+                mean[i] /= n;
+            }
+
+            foreach (var e in world.Entities)
+            {
+                if (!e.IsAnimal)
+                {
+                    continue;
+                }
+                for (int i = 0; i < EntityWeights.FieldCount; i++)
+                {
+                    float d = e.forageWeights[i] - mean[i];
+                    variance[i] += d * d;
+                }
+            }
+            for (int i = 0; i < EntityWeights.FieldCount; i++)
+            {
+                variance[i] /= n;
+            }
+            return (mean, variance, n);
         }
 
         /// <summary>植物密度 = 植物数 / 適性セル数。</summary>

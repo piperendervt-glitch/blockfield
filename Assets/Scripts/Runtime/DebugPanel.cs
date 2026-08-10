@@ -128,6 +128,20 @@ namespace BlockField
                         $"{graveDensity * 100:F2}% それ以外={elseDensity * 100:F2}% " +
                         $"比={(elseDensity > 0f ? graveDensity / elseDensity : 0f):F2}" +
                         $"（養分なしの対照は0.35。餓死は餌の乏しい所で起きるので1.0ではなく対照と比べる）");
+                    // Demo 8 第3段: 踏み荒らし（M2）と進化基盤の動作確認
+                    var (trMean, trMax) = EcologyStats.FieldStats(world.Trample);
+                    var (trampled, quiet) = EcologyStats.PlantDensityByTrample(world);
+                    var (qHigh, qLow) = EcologyStats.TrampleQuartileThresholds(world);
+                    Debug.Log($"[DebugPanel] 踏み荒らし: 平均={trMean:F4} 最大={trMax:F3} " +
+                        $"上位25%セルの植物密度={trampled * 100:F2}% 下位25%={quiet * 100:F2}% " +
+                        $"比={(quiet > 0f ? trampled / quiet : 0f):F2}（1.0未満で踏み跡の草が減っている） " +
+                        $"四分位閾値={qHigh:F3}/{qLow:F3} 踏み潰し累計={world.TrampleCrushCount}");
+
+                    var (wMean, wVar, wCount) = EcologyStats.AnimalForageWeightStats(world);
+                    Debug.Log($"[DebugPanel] 重み(採餌, n={wCount}): " +
+                        $"{string.Join(" ", System.Linq.Enumerable.Select(EntityWeights.FieldNames, (nm, i) => $"{nm}={wMean[i]:F2}±{Mathf.Sqrt(wVar[i]):F2}"))}" +
+                        "（進化は未実装なので種構成の違いだけがばらつきの源）");
+
                     Debug.Log($"[DebugPanel] 迂回: 恐怖の低い方へ動いた割合=" +
                         $"{EcologyStats.FearAvoidanceRatio(world) * 100:F1}% " +
                         $"（w_fear=0の対照は55%）標本={world.HerbivoreMovesAwayFromFear}/" +
@@ -223,6 +237,12 @@ namespace BlockField
             var (graveDensity, elseDensity) = EcologyStats.PlantDensityByDeathField(world);
             float graveRatio = elseDensity > 0f ? graveDensity / elseDensity : 0f;
 
+            // Demo 8 第3段: 踏み荒らし（茶）と進化基盤
+            var (trampleMean, trampleMax) = EcologyStats.FieldStats(world.Trample);
+            var (trampledDensity, quietDensity) = EcologyStats.PlantDensityByTrample(world);
+            float trampleRatio = quietDensity > 0f ? trampledDensity / quietDensity : 0f;
+            var (weightMean, _, weightCount) = EcologyStats.AnimalForageWeightStats(world);
+
             return
                 $"Dens P/A: {plantDensity * 100:F2}%/{animalDensity * 100:F2}% " +
                 $"(ref {EcologyStats.DioramaReference.PlantDensity * 100:F2}/" +
@@ -233,10 +253,14 @@ namespace BlockField
                 $"(ref {EcologyStats.DioramaReference.StarvationPerAnimalPerKiloTick:F2})\n" +
                 $"Fld avg/max V:{vegMean:F3}/{vegMax:F2} " +
                 $"F:{fearMean:F3}/{fearMax:F2} P:{preyMean:F3}/{preyMax:F2} " +
-                $"D:{deathMean:F3}/{deathMax:F2}\n" +
+                $"D:{deathMean:F3}/{deathMax:F2} T:{trampleMean:F3}/{trampleMax:F2}\n" +
                 $"Grave P: {graveDensity * 100:F2}% vs {elseDensity * 100:F2}% " +
                 $"= {graveRatio:F2} (ctrl 0.35)   " +
                 $"Avoid: {EcologyStats.FearAvoidanceRatio(world) * 100:F0}% (ctrl 55)\n" +
+                $"Tramp P: {trampledDensity * 100:F2}% vs {quietDensity * 100:F2}% " +
+                $"= {trampleRatio:F2}   Crush: {world.TrampleCrushCount}\n" +
+                $"W(veg/fear/prey) n={weightCount}: " +
+                $"{weightMean[5]:F2}/{weightMean[1]:F2}/{weightMean[2]:F2}\n" +
                 $"Pred/1k step: {EcologyStats.PredationPerKiloWolfStep(world):F1}   " +
                 $"FearExpo: {EcologyStats.HerbivoreFearExposure(world):F2}   " +
                 $"Ovl[Y]: {(m_FieldOverlay != null ? m_FieldOverlay.Current.ToString() : "-")}\n";

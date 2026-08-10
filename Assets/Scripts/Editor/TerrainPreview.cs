@@ -33,7 +33,7 @@ public class TerrainPreview : EditorWindow
     /// 表示する場 (Demo 8)。実機に行く前に PC で「場と生き物の位置が合うか」を
     /// 目視できるようにするための切替。
     /// </summary>
-    enum FieldLayer { Vegetation = 0, Fear = 1, Prey = 2, Death = 3 }
+    enum FieldLayer { Vegetation = 0, Fear = 1, Prey = 2, Death = 3, Trample = 4 }
 
     FieldLayer m_FieldLayer = FieldLayer.Vegetation;
 
@@ -353,6 +353,7 @@ public class TerrainPreview : EditorWindow
             FieldLayer.Fear => m_World.Fear,
             FieldLayer.Prey => m_World.Prey,
             FieldLayer.Death => m_World.Death,
+            FieldLayer.Trample => m_World.Trample,
             _ => m_World.Vegetation,
         };
         Color32 baseColor = m_FieldLayer switch
@@ -362,6 +363,7 @@ public class TerrainPreview : EditorWindow
             // マゼンタ。当初は紫 (175,70,235) にしたが、暗いうえに赤(恐怖)と
             // 見分けにくかった。青成分を最大まで振って色相を赤から離す
             FieldLayer.Death => new Color32(230, 40, 255, 0),
+            FieldLayer.Trample => new Color32(190, 120, 45, 0), // 茶色（土が見えた道）
             _ => new Color32(30, 220, 60, 0),
         };
 
