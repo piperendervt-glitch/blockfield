@@ -123,7 +123,7 @@ public class TerrainPreview : EditorWindow
         if (m_World != null)
         {
             EditorGUILayout.LabelField($"Tick: {m_World.TickCount}");
-            EditorGUILayout.LabelField($"Plants: {m_World.PlantCount}  Sheep: {m_World.SheepCount}  Pigs: {m_World.PigCount}  Wolves: {m_World.WolfCount}");
+            EditorGUILayout.LabelField($"Grass: {m_World.VegetationTotal:F0}  Sheep: {m_World.SheepCount}  Pigs: {m_World.PigCount}  Wolves: {m_World.WolfCount}");
             EditorGUILayout.LabelField($"累計 — 餓死: {m_World.StarvationCount}  捕食: {m_World.PredationCount}  出生: {m_World.BirthCount}");
 
             if (GUILayout.Button("Export CSV (Logs/population_preview.csv)"))
@@ -293,7 +293,7 @@ public class TerrainPreview : EditorWindow
         UpdateEntityDisplay();
         UpdateVegetationOverlay();
         RefreshTerrainMeshes();
-        Debug.Log($"[TerrainPreview] {ticks}ティック実行 → Tick={m_World.TickCount}, 植物={m_World.PlantCount}, " +
+        Debug.Log($"[TerrainPreview] {ticks}ティック実行 → Tick={m_World.TickCount}, 草={m_World.VegetationTotal:F0}, " +
             $"羊={m_World.SheepCount}, 豚={m_World.PigCount}, 狼={m_World.WolfCount}, " +
             $"餓死={m_World.StarvationCount}, 捕食={m_World.PredationCount}, 出生={m_World.BirthCount}");
         Repaint();
@@ -318,10 +318,7 @@ public class TerrainPreview : EditorWindow
 
             // 実機と**同じ形**を使う（EntityShape に集約）。
             // 上から見た輪郭で3種を見分けられるかを、ここで実機に行く前に確認する
-            if (!e.IsPlant)
-            {
-                go.transform.localRotation = BlockField.EntityShape.FacingToRotation(e.facing);
-            }
+            go.transform.localRotation = BlockField.EntityShape.FacingToRotation(e.facing);
             BlockField.EntityShape.Build(
                 go.transform, e.kind, m_CubeMesh, m_EntityMaterials[e.kind], k_BlockSize);
         }
@@ -434,8 +431,6 @@ public class TerrainPreview : EditorWindow
     void CreateEntityMaterials()
     {
         m_EntityMaterials.Clear();
-        AddEntityMaterial(EntityKind.GrassTuft, new Color(0.25f, 0.8f, 0.25f));
-        AddEntityMaterial(EntityKind.Flower, new Color(0.95f, 0.85f, 0.25f));
         AddEntityMaterial(EntityKind.Sheep, new Color(0.95f, 0.95f, 0.95f));
         AddEntityMaterial(EntityKind.Pig, new Color(0.95f, 0.65f, 0.7f));
         AddEntityMaterial(EntityKind.Wolf, new Color(0.55f, 0.55f, 0.6f));

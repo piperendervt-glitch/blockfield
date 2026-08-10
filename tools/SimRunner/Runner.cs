@@ -94,15 +94,20 @@ namespace SimRunner
                 Seed = seed,
                 Ticks = ticks,
                 SuitableCells = world.SuitableCellCount,
-                MinPlants = int.MaxValue,
                 MinHerbivores = int.MaxValue,
                 MinWolves = int.MaxValue,
             };
 
+            // Demo 8.5: 植物は Entity でなくなったので「最小本数」ではなく
+            // 「草の総量の最小値」を見る。安定条件の「植物≧1」は
+            // 「草が残っていること」に読み替わる
+            float minVegetation = float.MaxValue;
+
             // ティックループだけを測る。ワールド生成と Collect は含めない (M1 の基準値)。
             // ループ内の集計は個体数カウンタの読み出し（O(1)）だけに留めてあり、
             // 場の走査のような重い処理は入れていない。時間の汚染を避けるため
-            long plantSum = 0, herbivoreSum = 0, wolfSum = 0, entitySum = 0, samples = 0;
+            double plantSum = 0;
+            long herbivoreSum = 0, wolfSum = 0, entitySum = 0, samples = 0;
             var simWatch = System.Diagnostics.Stopwatch.StartNew();
 
             for (int t = 0; t < ticks; t++)
@@ -112,11 +117,11 @@ namespace SimRunner
                 if (t >= WarmupTicks)
                 {
                     int herbivores = world.SheepCount + world.PigCount;
-                    if (world.PlantCount < r.MinPlants) r.MinPlants = world.PlantCount;
+                    if (world.VegetationTotal < minVegetation) minVegetation = world.VegetationTotal;
                     if (herbivores < r.MinHerbivores) r.MinHerbivores = herbivores;
                     if (world.WolfCount < r.MinWolves) r.MinWolves = world.WolfCount;
 
-                    plantSum += world.PlantCount;
+                    plantSum += world.VegetationTotal;
                     herbivoreSum += herbivores;
                     wolfSum += world.WolfCount;
                     entitySum += world.Entities.Count;
@@ -127,7 +132,7 @@ namespace SimRunner
                 // 3,000ティックなら従来どおり10ティック間隔、10万ティックなら50ティック間隔
                 if (t % Math.Max(SeriesInterval, ticks / 2000) == 0)
                 {
-                    r.Series.Add((world.TickCount, world.PlantCount,
+                    r.Series.Add((world.TickCount, (int)world.VegetationTotal,
                         world.SheepCount + world.PigCount, world.WolfCount));
                 }
 
@@ -150,15 +155,16 @@ namespace SimRunner
 
             if (samples > 0)
             {
-                r.MeanPlantsPerTick = (double)plantSum / samples;
+                r.MeanPlantsPerTick = plantSum / samples;
                 r.MeanHerbivoresPerTick = (double)herbivoreSum / samples;
                 r.MeanWolvesPerTick = (double)wolfSum / samples;
                 r.MeanEntitiesPerTick = (double)entitySum / samples;
             }
 
-            if (r.MinPlants == int.MaxValue) r.MinPlants = world.PlantCount;
+            if (minVegetation == float.MaxValue) minVegetation = world.VegetationTotal;
             if (r.MinHerbivores == int.MaxValue) r.MinHerbivores = world.SheepCount + world.PigCount;
             if (r.MinWolves == int.MaxValue) r.MinWolves = world.WolfCount;
+            r.MinVegetation = minVegetation;
 
             Collect(world, r);
             return r;
@@ -166,7 +172,7 @@ namespace SimRunner
 
         static void Collect(World world, SeedResult r)
         {
-            r.Plants = world.PlantCount;
+            r.Plants = (int)world.VegetationTotal;
             r.Sheep = world.SheepCount;
             r.Pigs = world.PigCount;
             r.Wolves = world.WolfCount;
@@ -230,27 +236,35 @@ namespace SimRunner
                     {
                         continue;
                     }
-                    if (world.Death.GetAtColumn(x, z) >= EcologyStats.GraveyardThreshold) r.GraveCells++;
-                    else r.NonGraveCells++;
+                    // Demo 8.5: 植物は Entity でなくなったので「本数」ではなく
+                    // 草の量（植生場）を積む。分母のセル数と対で持ち、
+                    // 合算してから割れるようにする（シードごとに平均すると
+                    // 草の少ないシードに引きずられる）
+                    float veg = world.Vegetation.GetAtColumn(x, z);
+
+                    if (world.Death.GetAtColumn(x, z) >= EcologyStats.GraveyardThreshold)
+                    {
+                        r.GraveCells++;
+                        r.GraveGrass += veg;
+                    }
+                    else
+                    {
+                        r.NonGraveCells++;
+                        r.NonGraveGrass += veg;
+                    }
 
                     float tv = world.Trample.GetAtColumn(x, z);
-                    if (tv >= high) r.HighTrampleCells++;
-                    else if (tv <= low) r.LowTrampleCells++;
+                    if (tv >= high)
+                    {
+                        r.HighTrampleCells++;
+                        r.HighTrampleGrass += veg;
+                    }
+                    else if (tv <= low)
+                    {
+                        r.LowTrampleCells++;
+                        r.LowTrampleGrass += veg;
+                    }
                 }
-            }
-
-            foreach (var e in world.Entities)
-            {
-                if (!e.IsPlant)
-                {
-                    continue;
-                }
-                if (world.Death.GetAtColumn(e.cell.x, e.cell.z) >= EcologyStats.GraveyardThreshold) r.GravePlants++;
-                else r.NonGravePlants++;
-
-                float tv = world.Trample.GetAtColumn(e.cell.x, e.cell.z);
-                if (tv >= high) r.HighTramplePlants++;
-                else if (tv <= low) r.LowTramplePlants++;
             }
         }
     }

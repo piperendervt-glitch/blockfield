@@ -115,17 +115,19 @@ namespace SimRunner
                 var rs = group.ToList();
                 var a = new Aggregate { Condition = group.Key, Seeds = rs.Count };
 
-                int gc = rs.Sum(r => r.GraveCells), gp = rs.Sum(r => r.GravePlants);
-                int oc = rs.Sum(r => r.NonGraveCells), op = rs.Sum(r => r.NonGravePlants);
-                a.GraveDensity = gc > 0 ? (double)gp / gc : 0;
-                a.NonGraveDensity = oc > 0 ? (double)op / oc : 0;
-                a.GraveRatio = PooledRatio(gp, gc, op, oc);
+                // Demo 8.5: 分子は「本数」ではなく草の量（植生場の合計）。
+                // セルごとの平均を出してから比を取る（合算してから割る）
+                int gc = rs.Sum(r => r.GraveCells), oc = rs.Sum(r => r.NonGraveCells);
+                double gg = rs.Sum(r => r.GraveGrass), og = rs.Sum(r => r.NonGraveGrass);
+                a.GraveDensity = gc > 0 ? gg / gc : 0;
+                a.NonGraveDensity = oc > 0 ? og / oc : 0;
+                a.GraveRatio = a.NonGraveDensity > 0 ? a.GraveDensity / a.NonGraveDensity : 0;
 
-                int hc = rs.Sum(r => r.HighTrampleCells), hp = rs.Sum(r => r.HighTramplePlants);
-                int lc = rs.Sum(r => r.LowTrampleCells), lp = rs.Sum(r => r.LowTramplePlants);
-                a.HighTrampleDensity = hc > 0 ? (double)hp / hc : 0;
-                a.LowTrampleDensity = lc > 0 ? (double)lp / lc : 0;
-                a.TrampleRatio = PooledRatio(hp, hc, lp, lc);
+                int hc = rs.Sum(r => r.HighTrampleCells), lc = rs.Sum(r => r.LowTrampleCells);
+                double hg = rs.Sum(r => r.HighTrampleGrass), lg = rs.Sum(r => r.LowTrampleGrass);
+                a.HighTrampleDensity = hc > 0 ? hg / hc : 0;
+                a.LowTrampleDensity = lc > 0 ? lg / lc : 0;
+                a.TrampleRatio = a.LowTrampleDensity > 0 ? a.HighTrampleDensity / a.LowTrampleDensity : 0;
 
                 long away = rs.Sum(r => (long)r.MovesAwayFromFear);
                 long toward = rs.Sum(r => (long)r.MovesTowardFear);

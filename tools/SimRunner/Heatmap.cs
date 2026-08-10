@@ -131,8 +131,8 @@ namespace SimRunner
             {
                 (byte r, byte g, byte b)? c = e.kind switch
                 {
-                    EntityKind.GrassTuft => ((byte)90, (byte)230, (byte)90),
-                    EntityKind.Flower => ((byte)240, (byte)230, (byte)80),
+                    
+                    
                     EntityKind.Sheep => ((byte)255, (byte)255, (byte)255),
                     EntityKind.Pig => ((byte)245, (byte)150, (byte)175),
                     EntityKind.Wolf => ((byte)60, (byte)60, (byte)70),

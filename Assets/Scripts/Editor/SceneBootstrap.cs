@@ -139,8 +139,6 @@ public static class SceneBootstrap
         // 面明度差キューブ (ShadedCube) の頂点色を効かせるため _VERTEX_COLOR を有効化する
         var entityRenderer = dioramaGo.AddComponent<BlockField.EntityRenderer>();
         entityRenderer.terrainField = terrainField;
-        entityRenderer.grassTuftMaterial = CreateEntityMaterial("EntityGrassTuft", new Color(0.25f, 0.8f, 0.25f));
-        entityRenderer.flowerMaterial = CreateEntityMaterial("EntityFlower", new Color(0.95f, 0.85f, 0.25f));
         entityRenderer.sheepMaterial = CreateEntityMaterial("EntitySheep", new Color(0.95f, 0.95f, 0.95f));
         entityRenderer.pigMaterial = CreateEntityMaterial("EntityPig", new Color(0.95f, 0.65f, 0.7f));
         entityRenderer.wolfMaterial = CreateEntityMaterial("EntityWolf", new Color(0.55f, 0.55f, 0.6f));

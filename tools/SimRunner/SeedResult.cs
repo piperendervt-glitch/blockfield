@@ -15,7 +15,13 @@ namespace SimRunner
         public int Plants, Sheep, Pigs, Wolves;
 
         // 時間を通した最小値（warmup 以降）。M5 の判定はこれで行う
-        public int MinPlants, MinHerbivores, MinWolves;
+        public int MinHerbivores, MinWolves;
+
+        /// <summary>
+        /// 草の総量の最小値 (Demo 8.5)。植物が Entity でなくなり「最小本数」が
+        /// 存在しないため、安定条件の「植物≧1」はこれに読み替わる。
+        /// </summary>
+        public float MinVegetation;
 
         // ---- 時間平均（warmup 以降の毎ティック平均）----
         // 最終時点の1点は揺れが大きく、実装の前後を比べる基準値にならない。
@@ -52,13 +58,16 @@ namespace SimRunner
 
         // Demo 8 第2段 M2: 墓場セルとそれ以外の「植物本数 / セル数」。
         // 比は合算してから取るので、割った値ではなく素の数を持つ
-        public int GraveCells, GravePlants, NonGraveCells, NonGravePlants;
+        // Demo 8.5 で「本数」から「草の量（植生場の合計）」に変わった
+        public int GraveCells, NonGraveCells;
+        public double GraveGrass, NonGraveGrass;
 
         // Demo 8 第2段 M3: 迂回行動
         public int MovesAwayFromFear, MovesTowardFear;
 
         // Demo 8 第3段 M2: 踏み荒らし場の上位25%/下位25%
-        public int HighTrampleCells, HighTramplePlants, LowTrampleCells, LowTramplePlants;
+        public int HighTrampleCells, LowTrampleCells;
+        public double HighTrampleGrass, LowTrampleGrass;
         public double TrampleQuartileHigh, TrampleQuartileLow;
 
         // M4: 決定論の確認用
@@ -69,7 +78,8 @@ namespace SimRunner
 
         public bool GuildExtinct => MinHerbivores == 0;
         public bool WolvesExtinct => MinWolves == 0;
-        public bool PlantsExtinct => MinPlants == 0;
+        /// <summary>草が消え去ったか。Demo 8.5 で「植物が0本」から「草の総量が0」に変わった。</summary>
+        public bool PlantsExtinct => MinVegetation <= 0f;
 
         /// <summary>安定条件（ギルド・狼・植物のいずれか）に違反したシードか。</summary>
         public bool StabilityViolated => GuildExtinct || WolvesExtinct || PlantsExtinct;

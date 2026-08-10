@@ -208,10 +208,11 @@ namespace BlockField
             float cyf = lp.y / k_BlockSize;
             float czf = (lp.z + offsetZ) / k_BlockSize + 0.5f;
 
-            // 植物エンティティも遮蔽として走査（Minecraft 仕様: 植物を先にヒット）
+            // Demo 8.5: 草が場になったため「植物を狙って壊す」は廃止した。
+            // 遮蔽は地形ブロックだけを見る
             if (VoxelRaycast.Raycast(world.Grid, cxf, cyf, czf, ld.x, ld.y, ld.z,
                     k_MaxRayDistanceMeters / k_BlockSize,
-                    cell => world.TryGetEntityIndexAt(cell, out int i) && world.Entities[i].IsPlant,
+                    cell => false,
                     out var hitCell, out var hitNormal, out bool hitPlant))
             {
                 m_HasTarget = true;
@@ -332,7 +333,7 @@ namespace BlockField
                 {
                     PendingKind.Place => world.Grid.Get(pending.cell) != BlockId.Air,
                     PendingKind.BreakBlock => world.Grid.Get(pending.cell) == BlockId.Air,
-                    _ => !(world.TryGetEntityIndexAt(pending.cell, out int idx) && world.Entities[idx].IsPlant),
+                    _ => true,
                 };
 
                 if (resolved || Time.unscaledTime - pending.startTime > k_PendingTimeout)

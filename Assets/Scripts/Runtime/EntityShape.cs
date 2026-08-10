@@ -25,12 +25,6 @@ namespace BlockField
         {
             switch (kind)
             {
-                case EntityKind.GrassTuft:
-                case EntityKind.Flower:
-                    // 植物: セル中央の小さな立方体（静的）
-                    AddCube(parent, cubeMesh, material, Vector3.zero, Vector3.one * (blockSize * 0.5f));
-                    break;
-
                 case EntityKind.Sheep:
                     BuildSheep(parent, cubeMesh, material, blockSize);
                     break;

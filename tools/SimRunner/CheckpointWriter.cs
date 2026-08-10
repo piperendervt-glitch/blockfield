@@ -54,7 +54,7 @@ namespace SimRunner
         {
             var sb = new StringBuilder();
             sb.Append(condition).Append(',').Append(world.Params.seed).Append(',').Append(world.TickCount)
-              .Append(',').Append(world.PlantCount)
+              .Append(',').Append(world.VegetationTotal.ToString("0.##", CultureInfo.InvariantCulture))
               .Append(',').Append(world.SheepCount + world.PigCount)
               .Append(',').Append(world.WolfCount)
               .Append(',').Append(world.StarvationCount)

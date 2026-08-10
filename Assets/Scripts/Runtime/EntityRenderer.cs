@@ -19,16 +19,12 @@ namespace BlockField
         [SerializeField] TerrainField m_TerrainField;
         /// <summary>診断モードの判定に使う（飢餓の色分けは診断時のみ）。</summary>
         [SerializeField] RoomTerrainView m_RoomView;
-        [SerializeField] Material m_GrassTuftMaterial;
-        [SerializeField] Material m_FlowerMaterial;
         [SerializeField] Material m_SheepMaterial;
         [SerializeField] Material m_PigMaterial;
         [SerializeField] Material m_WolfMaterial;
 
         public TerrainField terrainField { get => m_TerrainField; set => m_TerrainField = value; }
         public RoomTerrainView roomView { get => m_RoomView; set => m_RoomView = value; }
-        public Material grassTuftMaterial { get => m_GrassTuftMaterial; set => m_GrassTuftMaterial = value; }
-        public Material flowerMaterial { get => m_FlowerMaterial; set => m_FlowerMaterial = value; }
         public Material sheepMaterial { get => m_SheepMaterial; set => m_SheepMaterial = value; }
         public Material pigMaterial { get => m_PigMaterial; set => m_PigMaterial = value; }
         public Material wolfMaterial { get => m_WolfMaterial; set => m_WolfMaterial = value; }
@@ -202,10 +198,7 @@ namespace BlockField
 
             // 形は EntityShape に集約（エディタプレビューと同じ形を使う）。
             // 上から見た輪郭だけで3種を見分けられることを狙っている
-            if (!e.IsPlant)
-            {
-                root.transform.localRotation = FacingToRotation(e.facing);
-            }
+            root.transform.localRotation = FacingToRotation(e.facing);
             EntityShape.Build(root.transform, e.kind, m_CubeMesh, MaterialFor(e.kind), k_BlockSize);
 
             return new Visual
@@ -307,8 +300,6 @@ namespace BlockField
         /// <summary>種→マテリアル。飢餓の色分けはこの色に**乗算**する。</summary>
         Material MaterialFor(EntityKind kind) => kind switch
         {
-            EntityKind.GrassTuft => m_GrassTuftMaterial,
-            EntityKind.Flower => m_FlowerMaterial,
             EntityKind.Sheep => m_SheepMaterial,
             EntityKind.Wolf => m_WolfMaterial,
             _ => m_PigMaterial,

@@ -97,7 +97,7 @@ namespace BlockField
                 if (world != null)
                 {
                     Debug.Log($"[DebugPanel] 生態: tick={world.TickCount} " +
-                        $"植物={world.PlantCount} 草食={world.SheepCount + world.PigCount} 狼={world.WolfCount} " +
+                        $"草={world.VegetationTotal:F0} 草食={world.SheepCount + world.PigCount} 狼={world.WolfCount} " +
                         $"適性セル={world.SuitableCellCount}");
                     Debug.Log($"[DebugPanel] 密度: 植物={EcologyStats.PlantDensity(world) * 100:F2}% " +
                         $"動物={EcologyStats.AnimalDensity(world) * 100:F2}% " +
@@ -190,7 +190,7 @@ namespace BlockField
 
             var world = m_TerrainField != null ? m_TerrainField.CurrentWorld : null;
             long tick = world?.TickCount ?? 0;
-            int plants = world?.PlantCount ?? 0;
+            float plants = world?.VegetationTotal ?? 0f;
             int animals = world?.AnimalCount ?? 0;
             int wolves = world?.WolfCount ?? 0;
             int starved = world?.StarvationCount ?? 0;
@@ -203,7 +203,7 @@ namespace BlockField
                 $"Blocks: {blocks}   Field: {field}   FPS: {fps:F1}\n" +
                 $"Seed: {seed}   Gen: {genMs}ms\n" +
                 BuildRoomText() +
-                $"Tick: {tick}  Plants: {plants}  Animals: {animals}  Wolves: {wolves}\n" +
+                $"Tick: {tick}  Grass: {plants:F0}  Animals: {animals}  Wolves: {wolves}\n" +
                 $"Starve: {starved}  Pred: {predated}  Birth: {births}\n" +
                 BuildHealthText(world) +
                 $"Last: {s_LastEvent}";
