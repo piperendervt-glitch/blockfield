@@ -154,6 +154,83 @@ double BlockAvg(Func<SeedProbe, List<(long tick, double value)>> pick, long lo, 
     return n > 0 ? sum / n : double.NaN;
 }
 
+// ---- 追加調査 A: 豚と羊に系統差があるか ----
+//
+// 羊と豚は行動パラメータが同一（中立ドリフト）というのが Demo 5b 以来の理解。
+// 10万ティックでどちらかに偏るなら、その理解が誤っているか、
+// 何かが対称性を破っている。
+Console.WriteLine();
+Console.WriteLine("=== 羊 vs 豚（warmup 後の平均、10万ティック）===");
+Console.WriteLine($"  {"seed",-8} {"羊",8} {"豚",8} {"豚/羊",8} {"豚が多い",9} {"羊が多い",9} {"同数",8}");
+double sheepAll = 0, pigAll = 0;
+int pigWins = 0;
+foreach (var r in results)
+{
+    double ratio = r.SheepMean > 0 ? r.PigMean / r.SheepMean : double.NaN;
+    sheepAll += r.SheepMean; pigAll += r.PigMean;
+    if (ratio > 1) pigWins++;
+    double tot = r.CountedTicks;
+    Console.WriteLine($"  {r.Seed,-8} {r.SheepMean,8:F2} {r.PigMean,8:F2} {ratio,8:F3} " +
+                      $"{r.PigAheadTicks / tot * 100,8:F1}% {r.SheepAheadTicks / tot * 100,8:F1}% " +
+                      $"{(tot - r.PigAheadTicks - r.SheepAheadTicks) / tot * 100,7:F1}%");
+}
+sheepAll /= results.Length; pigAll /= results.Length;
+Console.WriteLine($"  {"全体",-8} {sheepAll,8:F2} {pigAll,8:F2} {pigAll / sheepAll,8:F3}");
+Console.WriteLine($"  豚が優勢だったシード: {pigWins} / {results.Length}");
+
+// ---- 追加調査 B: 個体数の振動はシード間で同期しているか ----
+//
+// 同期していれば「共通の外部要因（場の飽和など）」、
+// していなければ「各世界に独立な捕食者-被食者の振動」。
+// 【開始ティックを変えて比べる】シードが違えば地形も乱数列も独立なので、
+// 相関が出るとすれば「全シードに共通する時間依存成分」しかありえない。
+// 立ち上がり期（0〜10,000ティック）は全シードが一斉に
+// 過剰個体数から定常へ落ちるので、そこを含めると相関が水増しされる。
+// 立ち上がりを外して残るかどうかが、本当に同期しているかの判定になる。
+Console.WriteLine();
+Console.WriteLine("=== 個体数の振動: シード間の相関（草食獣、50ティック標本）===");
+foreach (int from in new[] { Probe.WarmupTicks, 10000, 20000, 50000 })
+{
+    if (from >= ticks) continue;
+    var series = new List<double[]>();
+    foreach (var r in results)
+    {
+        var v = new List<double>();
+        foreach (var (tick, value) in r.HerbTrace) if (tick >= from) v.Add(value);
+        series.Add(v.ToArray());
+    }
+    int len = int.MaxValue;
+    foreach (var s in series) len = Math.Min(len, s.Length);
+    double sumR = 0, minR = double.MaxValue, maxR = double.MinValue; int pairs = 0;
+    for (int i = 0; i < series.Count; i++)
+    {
+        for (int j = i + 1; j < series.Count; j++)
+        {
+            double r2 = Corr(series[i], series[j], len);
+            sumR += r2; pairs++;
+            if (r2 < minR) minR = r2;
+            if (r2 > maxR) maxR = r2;
+        }
+    }
+    Console.WriteLine($"  tick {from,6} 以降（標本 {len,5}）: 平均 r = {sumR / pairs,7:F4}  " +
+                      $"（{pairs} 組の範囲 {minR:F4}〜{maxR:F4}）");
+}
+Console.WriteLine("  → 0付近なら独立、開始を遅らせても残るなら本当に同期している");
+
+static double Corr(double[] a, double[] b, int n)
+{
+    double ma = 0, mb = 0;
+    for (int i = 0; i < n; i++) { ma += a[i]; mb += b[i]; }
+    ma /= n; mb /= n;
+    double sab = 0, saa = 0, sbb = 0;
+    for (int i = 0; i < n; i++)
+    {
+        double da = a[i] - ma, db = b[i] - mb;
+        sab += da * db; saa += da * da; sbb += db * db;
+    }
+    return (saa > 0 && sbb > 0) ? sab / Math.Sqrt(saa * sbb) : double.NaN;
+}
+
 // ---- 3. 長期ドリフト ----
 Console.WriteLine();
 Console.WriteLine("=== 長期ドリフト（前半 vs 後半、warmup 後）===");
@@ -257,6 +334,16 @@ static class Probe
             if (wolf == 0) { if (wZeroStart < 0) { wZeroStart = world.TickCount; wZeroLen = 0; } wZeroLen++; }
             else if (wZeroStart >= 0) { r.WolfZeroRuns.Add((wZeroStart, wZeroLen)); wZeroStart = -1; }
 
+            // 羊と豚は行動が同一のはず。系統差が出るなら対称性が破れている
+            r.SheepSum += world.SheepCount;
+            r.PigSum += world.PigCount;
+            // 「多かった時間の割合」は羊側も数える。片側だけ数えると
+            // 同数（整数個体数では頻出）が全部相手側に計上され、
+            // 50%を割るのが当たり前になって、ありもしない非対称に見える
+            if (world.PigCount > world.SheepCount) r.PigAheadTicks++;
+            else if (world.SheepCount > world.PigCount) r.SheepAheadTicks++;
+            r.CountedTicks++;
+
             bool second = t >= half;
             if (second) { h2 += herb; w2 += wolf; v2 += veg; n2++; }
             else { h1 += herb; w1 += wolf; v1 += veg; n1++; }
@@ -302,6 +389,9 @@ sealed class SeedProbe
     public List<(long tick, double value)> DeathTrace = new();
     public List<(long tick, double value)> TrampleTrace = new();
     public List<(long tick, double value)> VegTrace = new();
+    public long SheepSum, PigSum, PigAheadTicks, SheepAheadTicks, CountedTicks;
+    public double SheepMean => CountedTicks > 0 ? (double)SheepSum / CountedTicks : 0;
+    public double PigMean => CountedTicks > 0 ? (double)PigSum / CountedTicks : 0;
     public List<(long tick, double value)> HerbTrace = new();
     public List<(long tick, double value)> WolfTrace = new();
     public double HerbFirst, HerbSecond, WolfFirst, WolfSecond, VegFirst, VegSecond;
