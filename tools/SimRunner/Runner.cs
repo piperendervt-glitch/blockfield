@@ -108,6 +108,7 @@ namespace SimRunner
             // 場の走査のような重い処理は入れていない。時間の汚染を避けるため
             double plantSum = 0;
             long herbivoreSum = 0, wolfSum = 0, entitySum = 0, samples = 0;
+            long sheepSum = 0, pigSum = 0;
             var simWatch = System.Diagnostics.Stopwatch.StartNew();
 
             for (int t = 0; t < ticks; t++)
@@ -123,6 +124,10 @@ namespace SimRunner
 
                     plantSum += world.VegetationTotal;
                     herbivoreSum += herbivores;
+                    // 種別の内訳。カウンタの読み出しだけなので O(1)、
+                    // ティック時間（M1 の基準値）を汚さない
+                    sheepSum += world.SheepCount;
+                    pigSum += world.PigCount;
                     wolfSum += world.WolfCount;
                     entitySum += world.Entities.Count;
                     samples++;
@@ -159,6 +164,8 @@ namespace SimRunner
                 r.MeanHerbivoresPerTick = (double)herbivoreSum / samples;
                 r.MeanWolvesPerTick = (double)wolfSum / samples;
                 r.MeanEntitiesPerTick = (double)entitySum / samples;
+                r.MeanSheepPerTick = (double)sheepSum / samples;
+                r.MeanPigPerTick = (double)pigSum / samples;
             }
 
             if (minVegetation == float.MaxValue) minVegetation = world.VegetationTotal;

@@ -40,6 +40,7 @@ namespace SimRunner
             // Demo 8.5（植物の場化）の基準値。時間平均・個体あたり・処理時間
             public double MeanPlantsPerTick, MeanHerbivoresPerTick, MeanWolvesPerTick;
             public double MeanEntitiesPerTick;
+            public double MeanSheepPerTick, MeanPigPerTick;
             public double StarvationPerAnimalPerKiloTick, PredationPerAnimalPerKiloTick;
             public double VegetationPerSuitableCell;
             public double MsPer1000Ticks;
@@ -152,6 +153,8 @@ namespace SimRunner
                 a.MeanHerbivoresPerTick = rs.Average(r => r.MeanHerbivoresPerTick);
                 a.MeanWolvesPerTick = rs.Average(r => r.MeanWolvesPerTick);
                 a.MeanEntitiesPerTick = rs.Average(r => r.MeanEntitiesPerTick);
+                a.MeanSheepPerTick = rs.Average(r => r.MeanSheepPerTick);
+                a.MeanPigPerTick = rs.Average(r => r.MeanPigPerTick);
                 a.StarvationPerAnimalPerKiloTick = rs.Average(r => r.StarvationPerAnimalPerKiloTick);
                 a.PredationPerAnimalPerKiloTick = rs.Average(r => r.PredationPerAnimalPerKiloTick);
                 a.VegetationPerSuitableCell = rs.Average(r => r.VegetationPerSuitableCell);
@@ -225,6 +228,8 @@ namespace SimRunner
                 sb.Append($"      \"meanHerbivoresPerTick\": {N(a.MeanHerbivoresPerTick)},\n");
                 sb.Append($"      \"meanWolvesPerTick\": {N(a.MeanWolvesPerTick)},\n");
                 sb.Append($"      \"meanEntitiesPerTick\": {N(a.MeanEntitiesPerTick)},\n");
+                sb.Append($"      \"meanSheepPerTick\": {N(a.MeanSheepPerTick)},\n");
+                sb.Append($"      \"meanPigPerTick\": {N(a.MeanPigPerTick)},\n");
                 sb.Append($"      \"starvationPerAnimalPerKiloTick\": {N(a.StarvationPerAnimalPerKiloTick)},\n");
                 sb.Append($"      \"predationPerAnimalPerKiloTick\": {N(a.PredationPerAnimalPerKiloTick)},\n");
                 sb.Append($"      \"vegetationPerSuitableCell\": {N(a.VegetationPerSuitableCell)},\n");
@@ -237,6 +242,18 @@ namespace SimRunner
                 sb.Append(string.Join(", ", a.FieldMax.Select(kv => $"\"{kv.Key}\": {N(kv.Value)}")));
                 sb.Append("}\n");
                 sb.Append(i == aggregates.Count - 1 ? "    }\n" : "    },\n");
+            }
+            sb.Append("  ],\n");
+
+            // 羊と豚の内訳はシードごとに残す。集計値だけだと
+            // 「何シードで豚が優勢か」という符号検定ができない
+            sb.Append("  \"speciesBySeed\": [\n");
+            for (int i = 0; i < results.Count; i++)
+            {
+                var r = results[i];
+                sb.Append($"    {{\"condition\": \"{r.Condition}\", \"seed\": {r.Seed}, " +
+                          $"\"sheepMean\": {N(r.MeanSheepPerTick)}, \"pigMean\": {N(r.MeanPigPerTick)}}}");
+                sb.Append(i == results.Count - 1 ? "\n" : ",\n");
             }
             sb.Append("  ],\n");
 

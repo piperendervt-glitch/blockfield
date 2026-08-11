@@ -30,6 +30,13 @@ namespace SimRunner
         public double MeanEntitiesPerTick;
 
         /// <summary>
+        /// 草食獣を種別に分けた時間平均。羊と豚は行動パラメータが同一なので
+        /// 期待値は等しく、差が出るなら対称性が破れている（中立ドリフトの検定用）。
+        /// MeanHerbivoresPerTick = MeanSheepPerTick + MeanPigPerTick。
+        /// </summary>
+        public double MeanSheepPerTick, MeanPigPerTick;
+
+        /// <summary>
         /// 個体あたりの餓死・捕食（1個体1000ティックあたり）。
         /// 絶対数はスケールと個体数に比例して増えるため、実装の前後を
         /// 比べるには個体あたりに正規化する必要がある。
