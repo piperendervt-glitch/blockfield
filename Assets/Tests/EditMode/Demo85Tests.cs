@@ -413,36 +413,73 @@ namespace BlockField.Tests.EditMode
         ///
         /// どちらも「τや釣り合い点を変えたのに表示の正規化を直さなかった」ことが原因。
         /// 目視に頼らずここで捕まえる。
+        ///
+        /// 【1シードから24シードの合算に変えた理由 (Demo 8 第4段 4a)】
+        /// コロニー場は繁殖の痕跡で、繁殖は 1000ティックあたり 7.25 回しか起きない。
+        /// 48シードのうち痕跡が1セルも立たないシードが 豚 11 / 羊 28 / 狼 33 あり、
+        /// **1シードでは分布を測れない**（表示基準値が正しくても標本が空になる）。
+        /// CLAUDE.md の「生態系の判定は最低48シード」と同じ理由で、
+        /// 標本の足りない場を除外するのではなく、標本のほうを増やす。
+        /// シードは互いに独立なので並列に回してよい（決定論は各ワールド内で閉じている）。
         /// </summary>
         [Test]
         public void Display_FieldScalesMatchTheMeasuredDistribution()
         {
-            var world = MakeDiorama(12345u);
-            for (int t = 0; t < 1500; t++)
-            {
-                Simulation.Tick(world, world.Rng, SimParams.Default);
-            }
+            const int seedCount = 24;
+            const int ticks = 1500;
 
-            foreach (var kv in world.Fields)
+            var pooled = new System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<float>>();
+            var gate = new object();
+
+            System.Threading.Tasks.Parallel.For(0, seedCount, i =>
             {
-                if (kv.Key == SuitabilityField.FieldName || kv.Value is not ScalarField field)
+                // SimRunner と同じシード列（1000 + i × 7919）。実測の裏取りと母集団を揃える
+                var world = MakeDiorama(1000u + (uint)i * 7919u);
+                for (int t = 0; t < ticks; t++)
                 {
-                    continue; // 適性場は静的で表示対象外
+                    Simulation.Tick(world, world.Rng, SimParams.Default);
                 }
 
-                // 基準値の根拠と同じ母集団（0.02 以上のセル）で 90%点を取る
-                var values = new System.Collections.Generic.List<float>();
-                for (int i = 0; i < field.Length; i++)
+                var local = new System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<float>>();
+                foreach (var kv in world.Fields)
                 {
-                    float v = field.GetByIndex(i);
-                    if (v >= 0.02f)
+                    if (kv.Key == SuitabilityField.FieldName || kv.Value is not ScalarField field)
                     {
-                        values.Add(v);
+                        continue; // 適性場は静的で表示対象外
+                    }
+
+                    // 基準値の根拠と同じ母集団（0.02 以上のセル）で 90%点を取る
+                    var values = new System.Collections.Generic.List<float>();
+                    for (int j = 0; j < field.Length; j++)
+                    {
+                        float v = field.GetByIndex(j);
+                        if (v >= 0.02f)
+                        {
+                            values.Add(v);
+                        }
+                    }
+                    local[kv.Key] = values;
+                }
+
+                lock (gate)
+                {
+                    foreach (var kv in local)
+                    {
+                        if (!pooled.TryGetValue(kv.Key, out var list))
+                        {
+                            pooled[kv.Key] = list = new System.Collections.Generic.List<float>();
+                        }
+                        list.AddRange(kv.Value);
                     }
                 }
+            });
 
+            foreach (var kv in pooled)
+            {
+                var values = kv.Value;
                 Assert.Greater(values.Count, 20,
-                    $"{kv.Key}: 0.02以上のセルが {values.Count} しかなく、分布を判定できない");
+                    $"{kv.Key}: {seedCount}シード合算でも 0.02以上のセルが {values.Count} しかなく、" +
+                    "分布を判定できない");
 
                 values.Sort();
                 float p90 = values[(int)(values.Count * 0.90)];
@@ -450,7 +487,7 @@ namespace BlockField.Tests.EditMode
 
                 Assert.IsTrue(EcologyStats.DisplayScaleMatchesDistribution(kv.Key, p90),
                     $"{kv.Key}: 表示基準値 {scale:F2} が実測の90%点 {p90:F3} と乖離している" +
-                    $"（比 {p90 / scale:F2}、許容 0.5〜2.0）。" +
+                    $"（比 {p90 / scale:F2}、許容 0.5〜2.0、{seedCount}シード合算）。" +
                     "小さすぎると濃淡が潰れ、大きすぎると全部が最大の濃さに張り付く");
             }
         }
