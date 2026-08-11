@@ -204,10 +204,16 @@ namespace BlockField
             int predated = world?.PredationCount ?? 0;
             int births = world?.BirthCount ?? 0;
 
+            // 【FPS を先頭行に置く】M6/M7 の判定に使う最重要指標なので、
+            // 視野の中心に最も近い行（＝パネルの上端）に置く。
+            // 以前は3行目にあり、パネルが伸びてグラフの下に潜った際に
+            // 隠れる3行のちょうど中に入っていた（実機で読めなくなった）。
+            // 重なり自体はグラフをパネルの子にして解消したが、
+            // 「最重要の数値を最も読みやすい位置に」は独立に守る
             return
-                $"USE_SCENE: {perm}   Planes: {planes}   RayHit: {rayHit}\n" +
+                $"FPS: {fps:F1}   Blocks: {blocks}   Field: {field}\n" +
                 $"Origin: {origin}   AnchorSaved: {(anchorSaved ? "Y" : "N")}\n" +
-                $"Blocks: {blocks}   Field: {field}   FPS: {fps:F1}\n" +
+                $"USE_SCENE: {perm}   Planes: {planes}   RayHit: {rayHit}\n" +
                 $"Seed: {seed}   Gen: {genMs}ms\n" +
                 BuildRoomText() +
                 $"Tick: {tick}  Grass: {plants:F0}  Animals: {animals}  Wolves: {wolves}\n" +

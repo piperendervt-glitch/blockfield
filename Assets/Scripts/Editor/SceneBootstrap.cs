@@ -196,7 +196,11 @@ public static class SceneBootstrap
         // HMD内デバッグパネル (World Space Canvas、カメラ前下方 0.6m に固定)
         var canvasGo = new GameObject("Debug Panel");
         canvasGo.transform.SetParent(camGo.transform, false);
-        canvasGo.transform.localPosition = new Vector3(0f, -0.25f, 0.6f);
+        // グラフをパネルの上端に載せたぶん、全体を下げて視野に収める。
+        // 0.0007 スケールで パネル620px=0.434m、グラフ143px+隙間10px=0.107m、
+        // 合計 0.541m。0.6m 前方に置くと下端 -0.522m(-41.0°)、
+        // 上端 +0.019m(+1.8°) で、Quest 3 の垂直FOV(±48°)に収まる
+        canvasGo.transform.localPosition = new Vector3(0f, -0.305f, 0.6f);
         canvasGo.transform.localScale = Vector3.one * 0.0007f;
         var canvas = canvasGo.AddComponent<Canvas>();
         canvas.renderMode = RenderMode.WorldSpace;
@@ -240,24 +244,34 @@ public static class SceneBootstrap
 
         // 個体数の時系列グラフ (Demo 5a)。パネルの真上に幅30cmで置く。
         // Canvas のスケールが 0.0007 なので 430px ≒ 0.30m
-        var graphCanvasGo = new GameObject("Population Graph");
-        graphCanvasGo.transform.SetParent(camGo.transform, false);
-        graphCanvasGo.transform.localPosition = new Vector3(0f, -0.055f, 0.6f);
-        graphCanvasGo.transform.localScale = Vector3.one * 0.0007f;
-        var graphCanvas = graphCanvasGo.AddComponent<Canvas>();
-        graphCanvas.renderMode = RenderMode.WorldSpace;
-        var graphRect = graphCanvasGo.GetComponent<RectTransform>();
+        //
+        // 【パネルの子にして上端に張り付ける理由】
+        // 以前はカメラ直下の独立 Canvas で、パネルとは別の localPosition を
+        // 持っていた。パネルは行が増えるたびに sizeDelta.y を広げるが、
+        // 中心アンカーなので**高さを増やすと上端が伸びてグラフの下に潜り込む**。
+        // 実際 Demo 8 で2行増やして 620px にした結果、上から3行ぶん
+        // （USE_SCENE / Origin / **FPS**）がグラフに隠れ、実機セッション中に
+        // FPS を読めなくなった。
+        // 上端アンカー + pivot 下端にすると、パネルが何行増えても
+        // グラフはその上へ押し出されるだけで、重なりが**構造的に起こらない**。
+        var graphGo = new GameObject("Population Graph");
+        graphGo.transform.SetParent(canvasGo.transform, false);
+        var graphRect = graphGo.AddComponent<RectTransform>();
+        graphRect.anchorMin = new Vector2(0.5f, 1f);   // パネル上端の中央に
+        graphRect.anchorMax = new Vector2(0.5f, 1f);
+        graphRect.pivot = new Vector2(0.5f, 0f);       // 自分の下端を基準に上へ伸ばす
         graphRect.sizeDelta = new Vector2(430f, 143f); // 300x100 のテクスチャと同じ比率
+        graphRect.anchoredPosition = new Vector2(0f, 10f); // パネル上端から10pxの隙間
 
         var graphImageGo = new GameObject("Graph Image");
-        graphImageGo.transform.SetParent(graphCanvasGo.transform, false);
+        graphImageGo.transform.SetParent(graphGo.transform, false);
         var rawImage = graphImageGo.AddComponent<RawImage>();
         rawImage.rectTransform.anchorMin = Vector2.zero;
         rawImage.rectTransform.anchorMax = Vector2.one;
         rawImage.rectTransform.offsetMin = Vector2.zero;
         rawImage.rectTransform.offsetMax = Vector2.zero;
 
-        var graph = graphCanvasGo.AddComponent<BlockField.PopulationGraph>();
+        var graph = graphGo.AddComponent<BlockField.PopulationGraph>();
         graph.terrainField = terrainField;
         graph.image = rawImage;
 
