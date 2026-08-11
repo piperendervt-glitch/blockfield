@@ -359,6 +359,26 @@ namespace BlockField.SimCore.Ecology
         /// <summary>隣接ペア成立時の毎ティック繁殖確率。</summary>
         public float breedChance;
 
+        // --- Demo 8 第4段 K2: 結合行列 ---
+
+        /// <summary>
+        /// 場と場の結合 (Demo 8 第4段 K2)。**null なら既定の2結合**
+        /// （<see cref="DefaultCouplings"/>）が使われる。
+        ///
+        /// 【なぜ既定値を null にするか — 外部互換性のため】
+        /// <see cref="Default"/> に結合の配列を焼き込んでしまうと、
+        /// 呼び出し側が今までどおり <c>p.deathNutrientGrowth = 0f</c> と書いても
+        /// 配列の中の係数は 0.05 のまま残り、**対照条件が静かに効かなくなる**。
+        /// 既存のパラメータ名を一次情報のまま残し、結合はそこから毎回導くことで、
+        /// 移設の前後で外から見た挙動を完全に同じに保つ。
+        ///
+        /// 明示的に結合を組み替えたい実験（第4.5段の進化、盗聴の重み付けなど）は
+        /// この配列を直接差し替える。差し替えた場合、上記のスカラー
+        /// （<see cref="deathNutrientGrowth"/> / <see cref="trampleSuppression"/>）は
+        /// 参照されなくなる。
+        /// </summary>
+        public FieldCoupling[] couplings;
+
         public static SimParams Default => new SimParams
         {
             // 10 だと植物が上限に張り付き続け（実測61%の時間）、場としての情報量が落ちる。
@@ -441,6 +461,30 @@ namespace BlockField.SimCore.Ecology
         };
 
         /// <summary>
+        /// 既定の結合 (Demo 8 第4段 K2)。移設前に <see cref="Simulation"/> の成長計算へ
+        /// 直接書かれていた2本を、そのままデータにしたもの。
+        ///
+        /// **並び順が適用順である。** 抑制どうしは掛け算の順、促進どうしは足し算の順が
+        /// そのまま浮動小数の演算順になるので、並べ替えると ContentHash が変わる。
+        /// </summary>
+        public FieldCoupling[] DefaultCouplings() => new[]
+        {
+            // 死の場 → 植生: 死骸が養分になって草を育てる (Demo 8 第2段 I2)
+            new FieldCoupling(
+                FieldId.Death, FieldId.Vegetation, deathNutrientGrowth, CouplingForm.GrowthBoost),
+
+            // 踏み荒らし場 → 植生: 通った跡の草の成長を抑える (Demo 8 第3段 J1)
+            new FieldCoupling(
+                FieldId.Trample, FieldId.Vegetation, trampleSuppression, CouplingForm.GrowthSuppress),
+        };
+
+        /// <summary>
+        /// 実際に適用する結合。明示指定があればそれを、無ければ
+        /// <see cref="DefaultCouplings"/> を返す。
+        /// </summary>
+        public FieldCoupling[] ResolveCouplings() => couplings ?? DefaultCouplings();
+
+        /// <summary>
         /// 個体数まわりを、ワールドの適性セル数に比例させて絶対数へ換算する (Demo 5a)。
         /// 確率・速度は密度と無関係なのでそのまま残す。
         ///
@@ -463,6 +507,11 @@ namespace BlockField.SimCore.Ecology
             r.animalCap = Scale(animalCap, suitableCells);
             r.animalSpawnCap = Scale(animalSpawnCap, suitableCells);
             r.wolfCap = Scale(wolfCap, suitableCells);
+
+            // 結合はここで一度だけ確定させる (Demo 8 第4段 K2)。Resolve は
+            // 毎ティック先頭で1回呼ばれるので、成長計算はセルのループの外で
+            // 配列を1つ受け取るだけになる。結合はセル数に依存しないので換算はしない
+            r.couplings = ResolveCouplings();
             return r;
         }
 

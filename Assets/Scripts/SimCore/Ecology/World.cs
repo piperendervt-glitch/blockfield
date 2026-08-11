@@ -40,6 +40,21 @@ namespace BlockField.SimCore.Ecology
         /// 知らずに回るための辞書。決定論のため名前昇順で走査する（m_FieldOrder）。
         /// </summary>
         public IReadOnlyDictionary<string, IField> Fields => m_Fields;
+
+        /// <summary>
+        /// 識別子から場を引く (Demo 8 第4段 K2)。結合の適用は毎ティック全セルを
+        /// 回る経路にあるため、<see cref="Fields"/> の辞書ではなく分岐で解決する。
+        /// </summary>
+        public ScalarField GetField(FieldId id) => id switch
+        {
+            FieldId.Death => Death,
+            FieldId.Fear => Fear,
+            FieldId.Prey => Prey,
+            FieldId.Suitability => Suitability,
+            FieldId.Trample => Trample,
+            FieldId.Vegetation => Vegetation,
+            _ => throw new ArgumentOutOfRangeException(nameof(id), $"未知の場: {id}"),
+        };
         public TerrainParams Params { get; }
         public Mulberry32 Rng { get; }
         public PopulationLog PopulationLog { get; }

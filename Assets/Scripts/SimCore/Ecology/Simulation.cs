@@ -7,10 +7,18 @@ namespace BlockField.SimCore.Ecology
 {
     /// <summary>
     /// シムティック (Demo 2 D1/D3/D4 + Demo 3 E1-E4)。ワールド状態への決定論的な更新の入口。
-    /// ティック内の処理順は固定:
-    /// プレイヤー操作適用 → 植物スポーン → 動物スポーン → 植生場更新 →
-    /// 草食獣（摂食/餓死/移動）→ 狼（捕食）→ 繁殖。
-    /// RNG 消費順もこの順で固定されるため、同一シード＋同一ティック数で同一結果になる。
+    ///
+    /// ティック内の処理順は固定（Demo 8 第4段 4a で実際の実装に合わせて書き直した。
+    /// 「植物スポーン」は Demo 8.5 で草が場になったときに消えている）:
+    ///   パラメータの解決 → (最初のティックのみ) 草の初期値 →
+    ///   プレイヤー操作適用 → 動物スポーン →
+    ///   植生の成長と結合の適用 → 全ての場の更新（拡散・減衰） →
+    ///   草食獣（摂食/餓死/移動）→ 狼（餓死/捕食/追跡）→ 踏み潰し → 繁殖 →
+    ///   個体数の記録 → ティック加算
+    ///
+    /// このうち **RNG を消費するのは 動物スポーン → 草食獣 → 狼 → 繁殖 の4つだけ**で、
+    /// 場の更新・踏み潰し・草の初期値・プレイヤー操作は消費しない。
+    /// 消費順がこの順で固定されるため、同一シード＋同一ティック数で同一結果になる。
     /// </summary>
     public static class Simulation
     {
@@ -141,11 +149,81 @@ namespace BlockField.SimCore.Ecology
             }
         }
 
+        /// <summary>
+        /// 解決済みの結合 (Demo 8 第4段 K2)。<see cref="FieldId"/> を場の参照に
+        /// 変換したもの。セルのループの中で識別子から場を引き直さないための形。
+        /// </summary>
+        readonly struct BoundCoupling
+        {
+            public readonly ScalarField source;
+            public readonly float coefficient;
+
+            public BoundCoupling(ScalarField source, float coefficient)
+            {
+                this.source = source;
+                this.coefficient = coefficient;
+            }
+        }
+
+        /// <summary>
+        /// 指定の場を target とする結合のうち、形が一致するものを場の参照に解決する
+        /// (Demo 8 第4段 K2)。**並び順は <see cref="SimParams.couplings"/> のまま**で、
+        /// これがそのまま適用順＝浮動小数の演算順になる。
+        /// </summary>
+        static BoundCoupling[] BindCouplings(
+            World world, FieldCoupling[] couplings, FieldId target, CouplingForm form)
+        {
+            int n = 0;
+            for (int i = 0; i < couplings.Length; i++)
+            {
+                if (couplings[i].target == target && couplings[i].form == form)
+                {
+                    n++;
+                }
+            }
+
+            var bound = new BoundCoupling[n];
+            int k = 0;
+            for (int i = 0; i < couplings.Length; i++)
+            {
+                var c = couplings[i];
+                if (c.target == target && c.form == form)
+                {
+                    bound[k++] = new BoundCoupling(world.GetField(c.source), c.coefficient);
+                }
+            }
+            return bound;
+        }
+
         static void GrowVegetation(World world, SimParams p)
         {
+            // 【結合行列 (Demo 8 第4段 K2)】「死の場が育てる」「踏み荒らしが抑える」を
+            // ここに直書きするのをやめ、**自分 (植生) を target とする結合を全て適用する**
+            // という1つの規則にした。場が増えても触るのは SimParams の結合リストだけになる。
+            //
+            // 移設は純粋なリファクタリングであり、計算式も適用順も変えていない
+            // （判定 M0a: 48シードで ContentHash が移設前と完全一致）。
+            var couplings = p.ResolveCouplings();
+            var suppressors = BindCouplings(
+                world, couplings, FieldId.Vegetation, CouplingForm.GrowthSuppress);
+            var boosters = BindCouplings(
+                world, couplings, FieldId.Vegetation, CouplingForm.GrowthBoost);
+
             bool grow = p.vegetationGrowth > 0f;
-            bool nutrient = p.deathNutrientGrowth > 0f;
-            if (!grow && !nutrient)
+
+            // 移設前の `bool nutrient = p.deathNutrientGrowth > 0f` の一般化。
+            // 係数0の促進結合は値を1ビットも変えない（current + 0×source = current）ので、
+            // 全ての促進が0なら成長と合わせて丸ごと飛ばせる
+            bool boost = false;
+            for (int i = 0; i < boosters.Length; i++)
+            {
+                if (boosters[i].coefficient > 0f)
+                {
+                    boost = true;
+                    break;
+                }
+            }
+            if (!grow && !boost)
             {
                 return;
             }
@@ -159,8 +237,6 @@ namespace BlockField.SimCore.Ecology
             var cells = world.SuitableCellIndices;
             var vegetation = world.Vegetation;
             var suitabilityField = world.Suitability;
-            var trampleField = world.Trample;
-            var deathField = world.Death;
 
             for (int i = 0; i < cells.Length; i++)
             {
@@ -172,27 +248,43 @@ namespace BlockField.SimCore.Ecology
                     float room = 1f - current;
                     if (room > 0f)
                     {
-                        // 踏み荒らしが成長を抑える (Demo 8 第3段 J1)。
-                        // 死の場と対になる経路。下限を設けるのは、一度踏まれた筋が
-                        // 二度と草の生えない不可逆な傷になるのを避けるため
-                        float trampled = 1f - p.trampleSuppression * trampleField.GetByIndex(c);
-                        if (trampled < p.trampleSuppressionFloor)
+                        // 抑制結合: 成長量に (1 - 係数 × source) を掛ける
+                        // （踏み荒らし→植生がこれ。Demo 8 第3段 J1）。
+                        // 下限を設けるのは、一度踏まれた筋が二度と草の生えない
+                        // 不可逆な傷になるのを避けるため。
+                        // 初期値 1f から掛けていくのは、結合が1本のときに
+                        // 1f × s = s と厳密に一致する（IEEE754 で1倍は誤差なし）ため
+                        float suppression = 1f;
+                        for (int k = 0; k < suppressors.Length; k++)
                         {
-                            trampled = p.trampleSuppressionFloor;
+                            float s = 1f - suppressors[k].coefficient
+                                * suppressors[k].source.GetByIndex(c);
+                            if (s < p.trampleSuppressionFloor)
+                            {
+                                s = p.trampleSuppressionFloor;
+                            }
+                            suppression *= s;
                         }
 
                         float grown = current + p.vegetationGrowth * suitabilityField.GetByIndex(c)
-                            * Math.Max(current, p.vegetationFloor) * room * trampled;
+                            * Math.Max(current, p.vegetationFloor) * room * suppression;
                         current = grown > 1f ? 1f : grown;
                     }
                 }
 
-                if (nutrient)
+                // 促進結合: 係数 × source をそのまま足す
+                // （死の場→植生の養分がこれ。Demo 8 第2段 I2）
+                for (int k = 0; k < boosters.Length; k++)
                 {
-                    float death = deathField.GetByIndex(c);
-                    if (death > 0f)
+                    float coefficient = boosters[k].coefficient;
+                    if (coefficient <= 0f)
                     {
-                        float fed = current + p.deathNutrientGrowth * death;
+                        continue;
+                    }
+                    float source = boosters[k].source.GetByIndex(c);
+                    if (source > 0f)
+                    {
+                        float fed = current + coefficient * source;
                         current = fed > 1f ? 1f : fed;
                     }
                 }
@@ -482,9 +574,32 @@ namespace BlockField.SimCore.Ecology
         }
 
         /// <summary>
-        /// 繁殖 (E4): 隣接する同種の動物ペア（双方 hunger &lt; 0.3、クールダウン0）が
-        /// 確率 0.1 で隣接空きセルに子をスポーン。親は hunger +0.3、20ティックのクールダウン。
-        /// ペアは低い id 側だけが処理する（二重判定防止）。新生児は次ティックから行動。
+        /// 繁殖 (E4)。隣接する同種の動物ペアが子を1つ産む。
+        ///
+        /// 【判定と RNG 消費の順 — Demo 8 第4段 4a で実装に合わせて書き直した】
+        /// 個体ごとに id 昇順で、
+        ///   1. クールダウン &gt; 0 なら 1 減らして終わり（RNG 非消費）
+        ///   2. 自分の hunger が <see cref="SimParams.breedHungerMax"/>（既定 0.4）以上なら不成立
+        ///   3. <see cref="FindBreedPartner"/> で相手を探す（RNG 非消費）
+        ///   4. 確率 <see cref="SimParams.breedChance"/>（既定 0.2）の抽選 ← **最初の RNG 消費**
+        ///   5. <see cref="SimParams.animalCap"/> の判定
+        ///   6. 隣接空きセルを固定順で探し、見つかるまで <see cref="World.TrySpawn"/>
+        ///      （子の向きに 1 回ずつ RNG を消費する。**試行ごとに消費する**ので、
+        ///       塞がっている方向があるとその分だけ余分に消費される）
+        /// この順序は乱数列そのものなので、判定を1つ入れ替えるだけで世界が別物になる。
+        ///
+        /// 成立すると親双方に hunger +0.3 と 20 ティックのクールダウン、
+        /// 子にも 20 ティックのクールダウン（即時繁殖の防止）が入る。
+        ///
+        /// ペアは**低い id 側だけが処理する**（<see cref="FindBreedPartner"/> が
+        /// 相手の id &gt; 自分の id を要求するため。二重判定の防止）。
+        /// その副作用として、相手（＝高い id 側）はこのティックのループでこの後に
+        /// 訪問され、入ったばかりのクールダウンが 1 減る — つまり**親Bのクールダウンは
+        /// 親Aより 1 ティック短い**。既存挙動の保存を優先し、本段では修正しない
+        /// （Demo 8 第4段 prereg に記録）。
+        ///
+        /// ループは繁殖前の個体数までしか回さないので、このティックで生まれた子は
+        /// 走査対象にならない（新生児は次ティックから行動する）。
         /// </summary>
         static void Breed(World world, Mulberry32 rng, SimParams p)
         {
