@@ -14,9 +14,12 @@ namespace BlockField
     /// 【切替の割り当て: 左手Y】
     /// 右手B＝診断モード、左手X＝MR/VR切替 で埋まっているため、空いている
     /// 左手Y (secondaryButton) を場の切替に使う。押すたびに
-    /// マーカー → 植生（緑）→ 恐怖（赤）→ 獲物（青）→ 死（マゼンタ）
-    /// → 踏み荒らし（茶）→ 非表示 を巡回する。
+    /// マーカー → 植生（シアン）→ 恐怖（赤）→ 獲物（青）→ 死（マゼンタ）
+    /// → 踏み荒らし（茶）→ コロニー羊（クリーム）→ コロニー豚（ピンク）
+    /// → コロニー狼（青灰）→ 非表示 を巡回する。
     /// 同時に出すと色が混ざって読めないので1つずつ見る。
+    /// 巡回が10状態と長くなったので、実機では現在の場をログとパネルに出す
+    /// （装着中は押した回数を数えていられないため）。
     ///
     /// 【表示と真実の分離】場を**読むだけ**で World には触らない。
     /// </summary>
@@ -55,11 +58,24 @@ namespace BlockField
             /// <summary>踏み荒らし場 (Demo 8 第3段)。茶色。</summary>
             Trample = 5,
 
+            // コロニー場 (Demo 8 第4段 K1)。種ごとに3枚あり、それぞれ持ち主の色で出す。
+            // **痕跡が薄いことを承知で見ること** — 繁殖は 1000ティックあたり 7.25 回しか
+            // 起きないので、5分（約300ティック）のセッションでは数セルしか立たない
+
+            /// <summary>コロニー場・羊（クリーム）。</summary>
+            ColonySheep = 6,
+
+            /// <summary>コロニー場・豚（ピンク）。</summary>
+            ColonyPig = 7,
+
+            /// <summary>コロニー場・狼（青灰）。</summary>
+            ColonyWolf = 8,
+
             /// <summary>何も出さない（地形と生き物だけを見る）。</summary>
-            None = 6,
+            None = 9,
         }
 
-        const int k_LayerCount = 7;
+        const int k_LayerCount = 10;
 
         [SerializeField] RoomTerrainBuilder m_Builder;
         [SerializeField] TerrainField m_TerrainField;
@@ -186,6 +202,9 @@ namespace BlockField
                 Layer.Prey => world.Prey,
                 Layer.Death => world.Death,
                 Layer.Trample => world.Trample,
+                Layer.ColonySheep => world.ColonySheep,
+                Layer.ColonyPig => world.ColonyPig,
+                Layer.ColonyWolf => world.ColonyWolf,
                 _ => null,
             };
             if (field == null)
@@ -211,6 +230,12 @@ namespace BlockField
                 // 踏み荒らしは茶色（土が見えた道）。緑・赤・青・マゼンタのどれとも
                 // 色相が離れており、意味とも一致する
                 Layer.Trample => new Color32(190, 120, 45, 255),
+                // コロニー場は**その種の色**で描く (Demo 8 第4段 K1)。3枚あるので
+                // 意味（繁殖）ではなく持ち主で区別するほうが読み違えない。
+                // 狼だけは生き物の暗い灰のままだと地形の上で沈むので明度を上げる
+                Layer.ColonySheep => new Color32(255, 245, 200, 255),
+                Layer.ColonyPig => new Color32(250, 140, 180, 255),
+                Layer.ColonyWolf => new Color32(170, 170, 210, 255),
                 _ => new Color32(70, 130, 245, 255),
             };
 

@@ -262,8 +262,11 @@ namespace SimRunner
             for (int i = 0; i < results.Count; i++)
             {
                 var r = results[i];
+                // hashExColony はコロニー場（Demo 8 第4段 K1）を除いた部分。
+                // 場を足した前後で「他は何も変わっていない」を照合するために残す
                 sb.Append($"    {{\"condition\": \"{r.Condition}\", \"seed\": {r.Seed}, " +
-                          $"\"hash\": \"{r.ContentHash:X16}\"}}");
+                          $"\"hash\": \"{r.ContentHash:X16}\", " +
+                          $"\"hashExColony\": \"{r.ContentHashExcludingColony:X16}\"}}");
                 sb.Append(i == results.Count - 1 ? "\n" : ",\n");
             }
             sb.Append("  ]\n}\n");

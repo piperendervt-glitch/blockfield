@@ -27,6 +27,13 @@ namespace SimRunner
             PreyField.FieldName => (70, 130, 245),
             DeathField.FieldName => (230, 40, 255),
             TrampleField.FieldName => (190, 120, 45),
+            // コロニー場は**その種の色**で描く (Demo 8 第4段 K1)。
+            // 3枚あるので意味（繁殖）ではなく持ち主で区別するほうが読み違えない。
+            // 狼だけは地形の上で見えるよう、生き物の暗い灰 (60,60,70) ではなく
+            // 明度を上げた青灰にしている
+            "colony-sheep" => (255, 245, 200),
+            "colony-pig" => (250, 140, 180),
+            "colony-wolf" => (170, 170, 210),
             _ => (200, 200, 200), // suitability
         };
 

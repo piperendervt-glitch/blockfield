@@ -675,6 +675,12 @@ namespace BlockField.SimCore.Ecology
                 child.breedCooldown = k_BreedCooldownTicks;
                 world.UpdateEntity(childIndex, child);
 
+                // コロニー場への書き込み (Demo 8 第4段 K1)。出生セルへ自種の場だけを書く。
+                // 死の場・踏み荒らし場と同じく「何が起きた場所か」を空間が覚える形で、
+                // ここに残るのは**次の世代が生まれた**という出来事である。
+                // 4a では誰も読まない（読むのは 4b の繁殖判定と 4c の群れ行動）
+                DepositColony(world, p, child.kind, child.cell);
+
                 // 親双方に繁殖コスト＋クールダウン
                 e.hunger += k_BreedCost;
                 e.breedCooldown = k_BreedCooldownTicks;
@@ -685,6 +691,26 @@ namespace BlockField.SimCore.Ecology
                 partner.breedCooldown = k_BreedCooldownTicks;
                 world.UpdateEntity(partnerIndex, partner);
             }
+        }
+
+        /// <summary>
+        /// 繁殖が成立した場所に痕跡を残す (Demo 8 第4段 K1)。
+        ///
+        /// **RNG を消費しない。** 消費すると乱数列が変わって世界そのものが別物になり、
+        /// 「場を1枚足しただけ」という 4a の前提が崩れる（判定 M0b は
+        /// コロニー場を除いた部分のハッシュが移設前と完全一致することで確認する）。
+        ///
+        /// 書き込むのは**自種の場だけ**である。他種のコロニー場を読む「盗聴」は
+        /// 器（重み）だけ作って重み0で寝かせてあるが、書き込みまで混ぜてしまうと
+        /// 場そのものが「誰の集落か」を表さなくなる（prereg 判断2）。
+        /// </summary>
+        static void DepositColony(World world, SimParams p, EntityKind kind, Int3 cell)
+        {
+            if (!world.InBounds(cell.x, cell.z))
+            {
+                return;
+            }
+            world.Colony(kind).Deposit(cell, p.colonyDeposit);
         }
 
         /// <summary>

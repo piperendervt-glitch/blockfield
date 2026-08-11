@@ -33,7 +33,14 @@ public class TerrainPreview : EditorWindow
     /// 表示する場 (Demo 8)。実機に行く前に PC で「場と生き物の位置が合うか」を
     /// 目視できるようにするための切替。
     /// </summary>
-    enum FieldLayer { Vegetation = 0, Fear = 1, Prey = 2, Death = 3, Trample = 4 }
+    enum FieldLayer
+    {
+        Vegetation = 0, Fear = 1, Prey = 2, Death = 3, Trample = 4,
+        // コロニー場 (Demo 8 第4段 K1)。痕跡が薄いので、他の場と同じつもりで
+        // 見ると「何も出ていない」と誤読しやすい。1,500ティック回して
+        // ようやく数セル〜数十セル立つ
+        ColonySheep = 5, ColonyPig = 6, ColonyWolf = 7,
+    }
 
     FieldLayer m_FieldLayer = FieldLayer.Vegetation;
 
@@ -434,6 +441,9 @@ public class TerrainPreview : EditorWindow
             FieldLayer.Prey => m_World.Prey,
             FieldLayer.Death => m_World.Death,
             FieldLayer.Trample => m_World.Trample,
+            FieldLayer.ColonySheep => m_World.ColonySheep,
+            FieldLayer.ColonyPig => m_World.ColonyPig,
+            FieldLayer.ColonyWolf => m_World.ColonyWolf,
             _ => m_World.Vegetation,
         };
         Color32 baseColor = m_FieldLayer switch
@@ -444,6 +454,11 @@ public class TerrainPreview : EditorWindow
             // 見分けにくかった。青成分を最大まで振って色相を赤から離す
             FieldLayer.Death => new Color32(230, 40, 255, 0),
             FieldLayer.Trample => new Color32(190, 120, 45, 0), // 茶色（土が見えた道）
+            // コロニー場はその種の色。狼は暗い灰のままだと沈むので明度を上げる
+            // （FieldOverlayView / SimRunner の Heatmap と同じ色）
+            FieldLayer.ColonySheep => new Color32(255, 245, 200, 0),
+            FieldLayer.ColonyPig => new Color32(250, 140, 180, 0),
+            FieldLayer.ColonyWolf => new Color32(170, 170, 210, 0),
             // 植生場はシアン。緑にすると地形の草ブロックと同系色で
             // 図と地が分離しない（FieldOverlayView と同じ理由・同じ色）
             _ => new Color32(60, 230, 220, 0),

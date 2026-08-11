@@ -29,9 +29,17 @@ namespace BlockField.SimCore.Ecology
     public struct EntityWeights : IEquatable<EntityWeights>
     {
         /// <summary>場の数。<see cref="World.Fields"/> の数と一致すること（テストで検証）。</summary>
-        public const int FieldCount = 6;
+        public const int FieldCount = 9;
 
         // --- 場の名前昇順 ---
+
+        // コロニー場の3枚 (Demo 8 第4段 K1)。**器だけ作って初期値0で寝かせている。**
+        // 自種への重みは 4c (K4) で群れ行動として配線し、他種への重み（盗聴）は
+        // 第4.5段の進化が発見するかという問いとして温存する（prereg 判断2）
+        public float colonyPig;
+        public float colonySheep;
+        public float colonyWolf;
+
         public float death;
         public float fear;
         public float prey;
@@ -50,7 +58,10 @@ namespace BlockField.SimCore.Ecology
         /// </summary>
         public float Score(World world, int x, int z)
         {
-            return death * world.Death.GetAtColumn(x, z)
+            return colonyPig * world.ColonyPig.GetAtColumn(x, z)
+                + colonySheep * world.ColonySheep.GetAtColumn(x, z)
+                + colonyWolf * world.ColonyWolf.GetAtColumn(x, z)
+                + death * world.Death.GetAtColumn(x, z)
                 + fear * world.Fear.GetAtColumn(x, z)
                 + prey * world.Prey.GetAtColumn(x, z)
                 + suitability * world.Suitability.GetAtColumn(x, z)
@@ -61,18 +72,26 @@ namespace BlockField.SimCore.Ecology
         /// <summary>名前昇順の i 番目の重み（統計・ハッシュ用）。</summary>
         public float this[int index] => index switch
         {
-            0 => death,
-            1 => fear,
-            2 => prey,
-            3 => suitability,
-            4 => trample,
-            5 => vegetation,
+            0 => colonyPig,
+            1 => colonySheep,
+            2 => colonyWolf,
+            3 => death,
+            4 => fear,
+            5 => prey,
+            6 => suitability,
+            7 => trample,
+            8 => vegetation,
             _ => throw new ArgumentOutOfRangeException(nameof(index)),
         };
 
         /// <summary>名前昇順の場の名前（重みの並びと対応することをテストで検証する）。</summary>
         public static readonly string[] FieldNames =
         {
+            // 名前の定義は ColonyField 側が一次情報。並びは名前昇順
+            // （colony-pig → colony-sheep → colony-wolf）で、テストで検証する
+            ColonyField.NameFor(EntityKind.Pig),
+            ColonyField.NameFor(EntityKind.Sheep),
+            ColonyField.NameFor(EntityKind.Wolf),
             DeathField.FieldName,
             FearField.FieldName,
             PreyField.FieldName,
@@ -111,7 +130,9 @@ namespace BlockField.SimCore.Ecology
         };
 
         public bool Equals(EntityWeights other) =>
-            death.Equals(other.death) && fear.Equals(other.fear) && prey.Equals(other.prey)
+            colonyPig.Equals(other.colonyPig) && colonySheep.Equals(other.colonySheep)
+            && colonyWolf.Equals(other.colonyWolf)
+            && death.Equals(other.death) && fear.Equals(other.fear) && prey.Equals(other.prey)
             && suitability.Equals(other.suitability) && trample.Equals(other.trample)
             && vegetation.Equals(other.vegetation);
 
@@ -121,7 +142,10 @@ namespace BlockField.SimCore.Ecology
         {
             unchecked
             {
-                int h = death.GetHashCode();
+                int h = colonyPig.GetHashCode();
+                h = h * 397 ^ colonySheep.GetHashCode();
+                h = h * 397 ^ colonyWolf.GetHashCode();
+                h = h * 397 ^ death.GetHashCode();
                 h = h * 397 ^ fear.GetHashCode();
                 h = h * 397 ^ prey.GetHashCode();
                 h = h * 397 ^ suitability.GetHashCode();

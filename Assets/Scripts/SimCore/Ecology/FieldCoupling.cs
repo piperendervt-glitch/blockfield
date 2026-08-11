@@ -15,12 +15,17 @@ namespace BlockField.SimCore.Ecology
     /// </summary>
     public enum FieldId
     {
-        Death = 0,
-        Fear = 1,
-        Prey = 2,
-        Suitability = 3,
-        Trample = 4,
-        Vegetation = 5,
+        // コロニー場 (Demo 8 第4段 K1)。名前昇順なので死の場より前に来る
+        ColonyPig = 0,
+        ColonySheep = 1,
+        ColonyWolf = 2,
+
+        Death = 3,
+        Fear = 4,
+        Prey = 5,
+        Suitability = 6,
+        Trample = 7,
+        Vegetation = 8,
     }
 
     /// <summary>

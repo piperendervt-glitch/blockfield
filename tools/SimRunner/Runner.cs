@@ -190,6 +190,7 @@ namespace SimRunner
             r.MovesAwayFromFear = world.HerbivoreMovesAwayFromFear;
             r.MovesTowardFear = world.HerbivoreMovesTowardFear;
             r.ContentHash = world.ComputeContentHash();
+            r.ContentHashExcludingColony = world.ComputeContentHash(ColonyField.AllNames);
 
             foreach (var kv in world.Fields)
             {

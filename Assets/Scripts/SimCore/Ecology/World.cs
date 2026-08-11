@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using BlockField.SimCore.Rng;
 using BlockField.SimCore.Terrain;
@@ -35,6 +35,24 @@ namespace BlockField.SimCore.Ecology
         /// <summary>踏み荒らし場 (Demo 8 第3段)。動物の通行で植生を抑える。死の場と対になる。</summary>
         public TrampleField Trample { get; }
 
+        /// <summary>コロニー場・羊 (Demo 8 第4段 K1)。繁殖が成立した場所に残る。</summary>
+        public ColonyField ColonySheep { get; }
+
+        /// <summary>コロニー場・豚 (Demo 8 第4段 K1)。</summary>
+        public ColonyField ColonyPig { get; }
+
+        /// <summary>コロニー場・狼 (Demo 8 第4段 K1)。狼も繁殖するので対称に持つ（prereg 判断1）。</summary>
+        public ColonyField ColonyWolf { get; }
+
+        /// <summary>種から自種のコロニー場を引く (Demo 8 第4段 K1)。</summary>
+        public ColonyField Colony(EntityKind kind) => kind switch
+        {
+            EntityKind.Sheep => ColonySheep,
+            EntityKind.Pig => ColonyPig,
+            EntityKind.Wolf => ColonyWolf,
+            _ => throw new ArgumentOutOfRangeException(nameof(kind), $"未知の種: {kind}"),
+        };
+
         /// <summary>
         /// 場の一元管理 (Demo 4.5 作業1)。ContentHash 計算と更新ループが場の種類を
         /// 知らずに回るための辞書。決定論のため名前昇順で走査する（m_FieldOrder）。
@@ -47,6 +65,9 @@ namespace BlockField.SimCore.Ecology
         /// </summary>
         public ScalarField GetField(FieldId id) => id switch
         {
+            FieldId.ColonyPig => ColonyPig,
+            FieldId.ColonySheep => ColonySheep,
+            FieldId.ColonyWolf => ColonyWolf,
             FieldId.Death => Death,
             FieldId.Fear => Fear,
             FieldId.Prey => Prey,
@@ -55,6 +76,7 @@ namespace BlockField.SimCore.Ecology
             FieldId.Vegetation => Vegetation,
             _ => throw new ArgumentOutOfRangeException(nameof(id), $"未知の場: {id}"),
         };
+
         public TerrainParams Params { get; }
         public Mulberry32 Rng { get; }
         public PopulationLog PopulationLog { get; }
@@ -214,6 +236,9 @@ namespace BlockField.SimCore.Ecology
             Prey = new PreyField(p.width, p.depth);
             Death = new DeathField(p.width, p.depth);
             Trample = new TrampleField(p.width, p.depth);
+            ColonySheep = new ColonyField(EntityKind.Sheep, p.width, p.depth);
+            ColonyPig = new ColonyField(EntityKind.Pig, p.width, p.depth);
+            ColonyWolf = new ColonyField(EntityKind.Wolf, p.width, p.depth);
             SuitableCellCount = CountSuitableCells(Suitability, p.width, p.depth);
             SuitableCellIndices = CollectSuitableCells(Suitability, p.width, p.depth);
 
@@ -223,6 +248,9 @@ namespace BlockField.SimCore.Ecology
             RegisterField(Prey);
             RegisterField(Death);
             RegisterField(Trample);
+            RegisterField(ColonySheep);
+            RegisterField(ColonyPig);
+            RegisterField(ColonyWolf);
         }
 
         /// <summary>
@@ -253,6 +281,9 @@ namespace BlockField.SimCore.Ecology
             Prey = new PreyField(p.width, p.depth);
             Death = new DeathField(p.width, p.depth);
             Trample = new TrampleField(p.width, p.depth);
+            ColonySheep = new ColonyField(EntityKind.Sheep, p.width, p.depth);
+            ColonyPig = new ColonyField(EntityKind.Pig, p.width, p.depth);
+            ColonyWolf = new ColonyField(EntityKind.Wolf, p.width, p.depth);
             SuitableCellCount = CountSuitableCells(Suitability, p.width, p.depth);
             SuitableCellIndices = CollectSuitableCells(Suitability, p.width, p.depth);
 
@@ -262,6 +293,9 @@ namespace BlockField.SimCore.Ecology
             RegisterField(Prey);
             RegisterField(Death);
             RegisterField(Trample);
+            RegisterField(ColonySheep);
+            RegisterField(ColonyPig);
+            RegisterField(ColonyWolf);
         }
 
         /// <summary>
@@ -754,18 +788,39 @@ namespace BlockField.SimCore.Ecology
 
         /// <summary>
         /// ワールド全体の決定論的コンテンツハッシュ。
-        /// 地形 → 適性場 → 植生場 → エンティティ（id順、hunger/breedCooldown含む）→ ティック数。
+        /// 地形 → 場（名前昇順）→ エンティティ（id順、hunger/breedCooldown/重み含む）→ ティック数。
         /// </summary>
-        public ulong ComputeContentHash()
+        public ulong ComputeContentHash() => ComputeContentHash(null);
+
+        /// <summary>
+        /// 場の一部を除いたコンテンツハッシュ (Demo 8 第4段 K1)。
+        /// <paramref name="excludedFields"/> に挙げた名前の場と、
+        /// **個体が持つその場の重み**を畳み込みから外す。null なら全て含む
+        /// （＝<see cref="ComputeContentHash"/>）。
+        ///
+        /// 【何のためにあるか】「場を1枚足しただけで、他は何も変えていない」を
+        /// 証明するための道具である。場を足すとハッシュは必ず変わるので、
+        /// 全体のハッシュでは「足した分だけ変わったのか、個体の状態まで
+        /// 変わってしまったのか」を区別できない。足した場を除いた部分が
+        /// 移行前のハッシュと**完全一致**すれば、RNG を消費していないことも
+        /// 既存の場に手が入っていないことも同時に言える（判定 M0b）。
+        ///
+        /// 除外しても残りの畳み込み順は名前昇順のまま変わらないので、
+        /// 場を足す前のハッシュとそのまま比較できる。
+        /// </summary>
+        public ulong ComputeContentHash(ICollection<string> excludedFields)
         {
             const ulong prime = 1099511628211UL;
 
             ulong hash = Grid.ComputeContentHash();
 
-            // 場は名前昇順で畳み込む（辞書の列挙順は不定なため）。
-            // 現行の順序は suitability → vegetation で、辞書化前と同一。
+            // 場は名前昇順で畳み込む（辞書の列挙順は不定なため）
             foreach (var name in m_FieldOrder)
             {
+                if (excludedFields != null && excludedFields.Contains(name))
+                {
+                    continue;
+                }
                 hash = m_Fields[name].AccumulateHash(hash, prime);
             }
 
@@ -782,9 +837,15 @@ namespace BlockField.SimCore.Ecology
 
                 // 個体の重み (Demo 8 第3段 J2)。進化が入ると個体差そのものが
                 // 世界の状態になるので、最初からハッシュ対象にしておく。
-                // 場の名前昇順で畳み込む（EntityWeights のメンバ順と一致）
+                // 場の名前昇順で畳み込む（EntityWeights のメンバ順と一致）。
+                // 除外された場の重みも飛ばす — 場を1枚足すと重みも1つ増えるので、
+                // ここを飛ばさないと「場を除いた部分」が移行前と一致しない
                 for (int w = 0; w < EntityWeights.FieldCount; w++)
                 {
+                    if (excludedFields != null && excludedFields.Contains(EntityWeights.FieldNames[w]))
+                    {
+                        continue;
+                    }
                     hash = FoldUInt(hash, (uint)BitConverter.SingleToInt32Bits(e.forageWeights[w]), prime);
                     hash = FoldUInt(hash, (uint)BitConverter.SingleToInt32Bits(e.wanderWeights[w]), prime);
                 }

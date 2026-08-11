@@ -80,6 +80,17 @@ namespace SimRunner
         // M4: 決定論の確認用
         public ulong ContentHash;
 
+        /// <summary>
+        /// コロニー場（3枚）と、その重みを除いた ContentHash (Demo 8 第4段 K1)。
+        ///
+        /// 場を1枚足せば全体のハッシュは必ず変わるので、それだけでは
+        /// 「足した分だけ変わったのか、既存の状態まで変わってしまったのか」を
+        /// 区別できない。除いた部分が**追加前のハッシュと完全一致**すれば、
+        /// 出生時の書き込みが RNG を消費しておらず、既存の場にも個体にも
+        /// 手が入っていないことを一度に言える（判定 M0b）。
+        /// </summary>
+        public ulong ContentHashExcludingColony;
+
         /// <summary>個体数の時系列（CSV 用。間引いて持つ）。</summary>
         public List<(long tick, int plants, int herbivores, int wolves)> Series = new();
 
