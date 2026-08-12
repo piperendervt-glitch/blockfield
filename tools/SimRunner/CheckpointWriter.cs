@@ -47,6 +47,19 @@ namespace SimRunner
             {
                 header.Append(",w_").Append(n).Append("_mean,w_").Append(n).Append("_sd");
             }
+
+            // 群れの長期動態 (Demo 8 第4段 K4 以降)。**その時点の瞬間値**である
+            // （summary.json の群れ指標は時間平均なので別物）。
+            // 拠点が永続するのか、移動・分裂・消滅するのかは時系列でしか見えないので、
+            // ここに時刻つきで残す。個体が居ない種は空欄にする
+            // （0 を書くと「居なかった」と「群れていなかった」が混ざる）
+            foreach (var (_, species) in Runner.FlockSpecies)
+            {
+                header.Append(",flock_").Append(species).Append("_count")
+                      .Append(",flock_").Append(species).Append("_neighbor")
+                      .Append(",flock_").Append(species).Append("_pairdist")
+                      .Append(",flock_").Append(species).Append("_concentration");
+            }
             m_Writer.WriteLine(header.ToString());
         }
 
@@ -72,6 +85,28 @@ namespace SimRunner
             for (int i = 0; i < EntityWeights.FieldCount; i++)
             {
                 sb.Append(',').Append(F(wMean[i])).Append(',').Append(F(Math.Sqrt(wVar[i])));
+            }
+
+            foreach (var (kind, _) in Runner.FlockSpecies)
+            {
+                int count = 0;
+                foreach (var e in world.Entities)
+                {
+                    if (e.kind == kind) count++;
+                }
+                sb.Append(',').Append(count);
+
+                sb.Append(',');
+                if (EcologyStats.TrySameSpeciesNeighborMean(world, kind, out float nm))
+                {
+                    sb.Append(F(nm));
+                }
+                sb.Append(',');
+                if (EcologyStats.TrySameSpeciesPairDistanceMedian(world, kind, out float pd))
+                {
+                    sb.Append(F(pd));
+                }
+                sb.Append(',').Append(F(EcologyStats.FieldTop10Concentration(world.Colony(kind))));
             }
 
             lock (m_Gate)
