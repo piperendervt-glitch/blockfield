@@ -14,10 +14,10 @@ namespace BlockField.SimCore.Ecology
     ///   プレイヤー操作適用 → 動物スポーン →
     ///   植生の成長と結合の適用 → 全ての場の更新（拡散・減衰） →
     ///   草食獣（摂食/餓死/移動）→ 狼（餓死/捕食/追跡）→ 踏み潰し → 繁殖 →
-    ///   個体数の記録 → ティック加算
+    ///   コロニー場への滞在の書き込み → 個体数の記録 → ティック加算
     ///
     /// このうち **RNG を消費するのは 動物スポーン → 草食獣 → 狼 → 繁殖 の4つだけ**で、
-    /// 場の更新・踏み潰し・草の初期値・プレイヤー操作は消費しない。
+    /// 場の更新・踏み潰し・コロニー場への書き込み・草の初期値・プレイヤー操作は消費しない。
     /// 消費順がこの順で固定されるため、同一シード＋同一ティック数で同一結果になる。
     /// </summary>
     public static class Simulation
@@ -71,6 +71,7 @@ namespace BlockField.SimCore.Ecology
             UpdateWolves(world, rng, p);
             CrushTrampledGrass(world, p);
             Breed(world, rng, p);
+            DepositColonyPresence(world, p);
 
             world.PopulationLog.Record(world);
             world.TickCount++;
@@ -710,7 +711,53 @@ namespace BlockField.SimCore.Ecology
             {
                 return;
             }
-            world.Colony(kind).Deposit(cell, p.colonyDeposit);
+            world.Colony(kind).Deposit(cell, p.colonyBreedDeposit);
+        }
+
+        /// <summary>
+        /// 存在の痕跡 (Demo 8 第4段 4a 追補)。生きている動物が、そのティックの
+        /// 最終位置の自種コロニー場へ <see cref="SimParams.colonyPresenceDeposit"/> を書く。
+        ///
+        /// 【なぜ二層にしたか】4b で消す <see cref="FindBreedPartner"/> が見ているのは
+        /// 「隣に相手が**存在するか**」である。繁殖イベントだけを覚える場は
+        /// 置換元と意味がずれており、その症状が「場が0から立ち上がらない」
+        /// 自己閉塞だった（4a 実測: 48シード中 羊28 / 狼33 で痕跡ゼロ）。
+        /// 存在の痕跡こそが置換元と揃った空間統計である。
+        ///
+        /// 【なぜ独立したパスにするか】獲物場・恐怖場のように移動処理の中へ埋めると、
+        /// 草食獣と狼で書く場所が二手に分かれ、「全ての動物が等しく書く」ことが
+        /// 読み取れなくなる。存在の痕跡は種によらず同じ規則なので、
+        /// 種ごとの更新が全て終わったあとに1つのループで書く。
+        ///
+        /// 【RNG を消費しない】ティック内のどこに置いても乱数列は動かない。
+        /// 繁殖の**後**に置いてあるので、その位置は
+        ///   - 生きて1ティックを終えた個体の最終位置になる
+        ///     （このティックに死んだ個体は既に取り除かれている）
+        ///   - 新生児も出生セルへ書く（繁殖 deposit 1.0 が既にあるので飽和して変わらない）
+        /// 上限 1.0 で飽和するため、書き込み順に依存しない
+        /// （個体は id 昇順の固定順で走査するので、いずれにせよ決定論的）。
+        /// </summary>
+        static void DepositColonyPresence(World world, SimParams p)
+        {
+            if (p.colonyPresenceDeposit <= 0f)
+            {
+                return;
+            }
+
+            var entities = world.Entities;
+            for (int i = 0; i < entities.Count; i++)
+            {
+                var e = entities[i];
+                if (!e.IsAnimal)
+                {
+                    continue;
+                }
+                if (!world.InBounds(e.cell.x, e.cell.z))
+                {
+                    continue;
+                }
+                world.Colony(e.kind).Deposit(e.cell, p.colonyPresenceDeposit);
+            }
         }
 
         /// <summary>

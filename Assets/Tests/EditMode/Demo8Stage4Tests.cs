@@ -218,7 +218,7 @@ namespace BlockField.Tests.EditMode
 
         /// <summary>
         /// 書き込まれるのは**出生セル**であり、量は
-        /// <see cref="SimParams.colonyDeposit"/>（上限1.0で飽和）であること。
+        /// <see cref="SimParams.colonyBreedDeposit"/>（上限1.0で飽和）であること。
         ///
         /// 場の更新（拡散・減衰）はティック内で繁殖より**前**に走るので、
         /// 出生したティックの終わりでは書き込んだ値がそのまま残っている。
@@ -249,6 +249,116 @@ namespace BlockField.Tests.EditMode
 
             Assert.Greater(max, 0f, "狼が繁殖したのに狼のコロニー場が空");
             Assert.Greater(mean, 0f);
+        }
+
+        /// <summary>
+        /// **滞在しているだけで自種の場が濃くなること (4a 追補の第1層)。**
+        ///
+        /// 拡散と減衰を止めてあるので、値は毎ティックの書き込みの単純な積算になる。
+        /// 「1頭 × 10ティック = colonyPresenceDeposit × 10」を厳密に要求することで、
+        /// 書き込みが毎ティック1回だけ起きること（二重書き込みも取りこぼしもないこと）を固定する。
+        /// </summary>
+        [Test]
+        public void Colony_PresenceAccumulatesUnderAStandingAnimal()
+        {
+            const int ticks = 10;
+
+            foreach (var kind in new[] { EntityKind.Sheep, EntityKind.Pig, EntityKind.Wolf })
+            {
+                var world = MakeDiorama(k_Seeds[0]);
+                var p = SimParams.Default;
+                p.animalSpawnChance = 0f;    // 他の個体を湧かせない（他所からの書き込みを排除）
+                p.hungerPerTick = 0f;        // 餓死・採餌行動を止める
+                p.wolfHungerPerTick = 0f;
+                p.moveChance = 0f;           // 動かない → 同じセルに積もる
+                p.colonyDiffuse = 0f;        // にじみと減衰を止め、積算そのものを見る
+                p.colonyDecay = 0f;
+
+                var (x, z) = FindFlatCell(world);
+                Assert.GreaterOrEqual(world.TrySpawn(kind, x, z, 0, p), 0, $"{kind} を置けない");
+
+                for (int t = 0; t < ticks; t++)
+                {
+                    Simulation.Tick(world, world.Rng, p);
+                }
+
+                Assert.AreEqual(ticks * p.colonyPresenceDeposit,
+                    world.Colony(kind).GetAtColumn(x, z), 1e-5f,
+                    $"{kind}: 滞在 {ticks} ティックの積算が deposit × ティック数と違う");
+
+                foreach (var other in new[] { EntityKind.Sheep, EntityKind.Pig, EntityKind.Wolf })
+                {
+                    if (other == kind)
+                    {
+                        continue;
+                    }
+                    Assert.AreEqual(0f, EcologyStats.ColonyStats(world, other).max,
+                        $"{kind} が居るだけで {other} のコロニー場が増えた");
+                }
+            }
+        }
+
+        /// <summary>
+        /// **滞在の書き込みが、場を0から立ち上げていること (4a 追補の主目的)。**
+        ///
+        /// 【この判定が要る理由 — 4b の自己閉塞】4b は「自セルのコロニー場（自種）が
+        /// 閾値以上なら繁殖できる」に置き換える。場が0から始まる以上、
+        /// 繁殖イベントだけを書いていると
+        ///   最初の繁殖が起きない → 場が立たない → 永久に繁殖しない
+        /// という鶏と卵になり、**閾値をどう選んでも解けない**。
+        /// 実際 4a の実測では 48シード中 羊28 / 狼33 で痕跡が1セルも立たなかった。
+        ///
+        /// ここでは滞在の書き込みを 0 にした対照と並べ、
+        /// 「立ち上がらない」→「全シードで立つ」に変わったことを固定する。
+        /// 対照を並べるのは、単に「場が空でない」だけを見ても
+        /// **どちらの層のおかげか**が言えないため。
+        /// </summary>
+        [Test]
+        public void Colony_PresenceIsWhatLiftsTheFieldOffZero()
+        {
+            const int seedCount = 8;
+            const int ticks = 800;
+
+            int Empty(float presenceDeposit)
+            {
+                int empty = 0;
+                var gate = new object();
+
+                System.Threading.Tasks.Parallel.For(0, seedCount, i =>
+                {
+                    // SimRunner と同じシード列（1000 + i × 7919）
+                    var world = MakeDiorama(1000u + (uint)i * 7919u);
+                    var p = SimParams.Default;
+                    p.colonyPresenceDeposit = presenceDeposit;
+
+                    for (int t = 0; t < ticks; t++)
+                    {
+                        Simulation.Tick(world, world.Rng, p);
+                    }
+
+                    int local = 0;
+                    foreach (var kind in new[] { EntityKind.Sheep, EntityKind.Pig, EntityKind.Wolf })
+                    {
+                        if (EcologyStats.ColonyStats(world, kind).max <= 0f)
+                        {
+                            local++;
+                        }
+                    }
+                    lock (gate)
+                    {
+                        empty += local;
+                    }
+                });
+                return empty;
+            }
+
+            Assert.Greater(Empty(0f), 0,
+                "繁殖だけを書く設定で全ての場が立ってしまった。" +
+                "自己閉塞の対照が成立しておらず、この判定が意味を失っている");
+
+            Assert.AreEqual(0, Empty(SimParams.Default.colonyPresenceDeposit),
+                $"滞在の書き込みを入れても、{seedCount}シード×{ticks}ティックで" +
+                "痕跡が1セルも立たない種がある（4b の閾値判定が自己閉塞する）");
         }
 
         /// <summary>
