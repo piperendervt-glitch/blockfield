@@ -32,6 +32,22 @@ namespace SimRunner
             "踏み荒らしの効果のみ無効（書き込みは残す）。Demo 8 第3段 M2 の対照",
             Tweak(p => { p.trampleSuppression = 0f; p.trampleCrushRate = 0f; return p; }));
 
+        /// <summary>
+        /// 踏み荒らし→植生の**結合だけ**を切る (第4.5段の先行課題: アブレーション)。
+        ///
+        /// 【なぜ trample-off と別に要るか】trample-off は成長抑制
+        /// (<see cref="SimParams.trampleSuppression"/>) と踏み潰し
+        /// (<see cref="SimParams.trampleCrushRate"/>) を**同時に**切るので、
+        /// 「結合が効いているか」の問いには答えられない。踏み荒らし場が植生へ
+        /// 及ぼす経路は2本あり、結合行列に載っているのは前者だけである。
+        /// 48シードの実測では、踏跡の植物密度比への寄与は
+        /// 抑制が約2/3（0.731→0.945）、踏み潰しが残り約1/3（→1.051）だった。
+        /// </summary>
+        public static readonly Condition TrampleSuppressOff = new Condition(
+            "trample-suppress-off",
+            "踏み荒らし→植生の結合のみ無効（踏み潰しは残す）。結合行列のアブレーション用",
+            Tweak(p => { p.trampleSuppression = 0f; return p; }));
+
         public static readonly Condition NutrientOff = new Condition(
             "nutrient-off",
             "死の場の養分効果のみ無効。Demo 8 第2段 M2 の対照",
@@ -109,6 +125,7 @@ namespace SimRunner
             {
                 [Default.Name] = Default,
                 [TrampleOff.Name] = TrampleOff,
+                [TrampleSuppressOff.Name] = TrampleSuppressOff,
                 [NutrientOff.Name] = NutrientOff,
                 [FearOff.Name] = FearOff,
             };
