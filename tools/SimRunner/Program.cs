@@ -38,11 +38,17 @@ Console.WriteLine($"  出力: {Path.GetFullPath(opts.OutDir)}");
 
 // チェックポイント（長時間実験の途中経過）。場の名前を得るために空のワールドを1つ作る
 CheckpointWriter? checkpoints = null;
+WeightLog? weightLog = null;
 if (opts.CheckpointInterval > 0)
 {
     var probe = Runner.MakeWorld(seeds[0], opts.Size);
     checkpoints = new CheckpointWriter(Path.Combine(opts.OutDir, "checkpoints.csv"), probe.Fields.Keys);
-    Console.WriteLine($"  チェックポイント: {opts.CheckpointInterval} ティックごとに checkpoints.csv へ追記");
+    // 重みの時系列は縦持ちの別ファイル (Demo 8 第4.5段 K2)。
+    // 種×モード×場×統計 = 108系列あり、横持ちだと列が読めなくなる
+    weightLog = new WeightLog(Path.Combine(opts.OutDir, "weights.csv"));
+    checkpoints.m_Weights = weightLog;
+    Console.WriteLine($"  チェックポイント: {opts.CheckpointInterval} ティックごとに " +
+                      "checkpoints.csv / weights.csv へ追記");
 }
 
 var sw = Stopwatch.StartNew();
@@ -61,6 +67,7 @@ var results = Runner.Run(conditions, seeds, opts.Ticks, opts.Size, opts.Parallel
     checkpoints, opts.CheckpointInterval, opts.Control);
 sw.Stop();
 checkpoints?.Dispose();
+weightLog?.Dispose();
 
 Console.WriteLine($"シミュレーション完了: {sw.Elapsed.TotalSeconds:F1} 秒 " +
                   $"({sw.Elapsed.TotalSeconds / (conditions.Count * seeds.Length):F2} 秒/ラン)");

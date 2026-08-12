@@ -60,10 +60,18 @@ namespace SimRunner
                       .Append(",flock_").Append(species).Append("_pairdist")
                       .Append(",flock_").Append(species).Append("_concentration");
             }
+
+            // 認知範囲 (Demo 8 第4.5段 K2)。進化が「何を覚える系」を選ぶかの見出し指標。
+            // 重み成分ごとの平均・分散は列が多すぎるので weights.csv（縦持ち）に分けた
+            foreach (var (_, species) in Runner.FlockSpecies)
+            {
+                header.Append(",cog_").Append(species).Append("_time")
+                      .Append(",cog_").Append(species).Append("_space");
+            }
             m_Writer.WriteLine(header.ToString());
         }
 
-        public void Write(string condition, World world)
+        public void Write(string condition, World world, SimParams p)
         {
             var sb = new StringBuilder();
             sb.Append(condition).Append(',').Append(world.Params.seed).Append(',').Append(world.TickCount)
@@ -109,11 +117,30 @@ namespace SimRunner
                 sb.Append(',').Append(F(EcologyStats.FieldTop10Concentration(world.Colony(kind))));
             }
 
+            foreach (var (kind, _) in Runner.FlockSpecies)
+            {
+                var (t, s, n) = EcologyStats.SpeciesCognitiveRange(world, kind, p);
+                sb.Append(',');
+                if (n > 0) sb.Append(F(t));
+                sb.Append(',');
+                if (n > 0) sb.Append(F(s));
+            }
+
             lock (m_Gate)
             {
                 m_Writer.WriteLine(sb.ToString());
             }
+
+            m_Weights?.Write(condition, world);
         }
+
+        /// <summary>
+        /// 重み成分ごとの統計を出す先 (Demo 8 第4.5段 K2)。
+        /// 種 × モード（採餌/徘徊）× 9成分 = 54系列あるので、
+        /// checkpoints.csv に横持ちすると列が100を超えて読めなくなる。
+        /// **縦持ちの別ファイル**にしてある。
+        /// </summary>
+        public WeightLog? m_Weights;
 
         static string F(double v) => v.ToString("0.######", CultureInfo.InvariantCulture);
 

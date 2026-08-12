@@ -196,7 +196,7 @@ namespace SimRunner
 
                 if (checkpoints != null && checkpointInterval > 0 && world.TickCount % checkpointInterval == 0)
                 {
-                    checkpoints.Write(condition.Name, world);
+                    checkpoints.Write(condition.Name, world, p);
                 }
             }
 
@@ -205,7 +205,7 @@ namespace SimRunner
             if (checkpoints != null && checkpointInterval > 0 &&
                 world.TickCount % checkpointInterval != 0)
             {
-                checkpoints.Write(condition.Name, world);
+                checkpoints.Write(condition.Name, world, p);
             }
 
             simWatch.Stop();

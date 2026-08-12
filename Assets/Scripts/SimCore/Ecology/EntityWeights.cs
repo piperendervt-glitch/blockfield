@@ -69,6 +69,28 @@ namespace BlockField.SimCore.Ecology
                 + vegetation * world.Vegetation.GetAtColumn(x, z);
         }
 
+        /// <summary>
+        /// 名前昇順の i 番目の重みを書き換える (Demo 8 第4.5段 K1)。
+        /// 変異は「どの成分か」を添字で回すので、名前ではなく位置で書ける口が要る。
+        /// 並びは <see cref="FieldNames"/> と一致する（テストで検証）。
+        /// </summary>
+        public void SetByIndex(int index, float value)
+        {
+            switch (index)
+            {
+                case 0: colonyPig = value; break;
+                case 1: colonySheep = value; break;
+                case 2: colonyWolf = value; break;
+                case 3: death = value; break;
+                case 4: fear = value; break;
+                case 5: prey = value; break;
+                case 6: suitability = value; break;
+                case 7: trample = value; break;
+                case 8: vegetation = value; break;
+                default: throw new ArgumentOutOfRangeException(nameof(index));
+            }
+        }
+
         /// <summary>名前昇順の i 番目の重み（統計・ハッシュ用）。</summary>
         public float this[int index] => index switch
         {

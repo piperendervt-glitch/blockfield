@@ -29,6 +29,163 @@ namespace BlockField.SimCore.Ecology
         /// <summary>群れ指標の近傍半径（セル）。水平距離で測る。</summary>
         public const float FlockNeighborRadius = 3f;
 
+        // ===== 認知範囲指標 (Demo 8 第4.5段 K2) =====
+        //
+        // 「その個体が**どれだけ遠くの過去/場所**を参照して動いているか」を
+        // 1つの数に落とす。進化が「何を覚える系」を選ぶかを追うための指標で、
+        // Levin の Cognitive Light Cone を本プロジェクトの測定量に翻訳したもの。
+        //
+        //   時間深度 = Σ |w_i| × τ_i     τ_i = 1/減衰率（その場が記憶を保つ長さ）
+        //   空間半径 = Σ |w_i| × L_i     L_i = 拡散の到達距離
+        //
+        // 重みの絶対値を使うのは、避ける（負の重み）ことも「読んでいる」ことに
+        // 変わりないため。恐怖場の w=-1.5 は、恐怖場を1.5の強さで参照している。
+
+        /// <summary>
+        /// 場の時定数 τ = 1/減衰率（ティック）。名前昇順の添字で引く。
+        ///
+        /// **静的な場（適性場）は 0 とする。** 変化しない場は過去の出来事を
+        /// 何も覚えていないので、「時間深度」への寄与は 0 が正しい
+        /// （無限に持続することと、履歴を持つことは別である）。
+        /// </summary>
+        public static float FieldTau(int fieldIndex, SimParams p)
+        {
+            float decay = fieldIndex switch
+            {
+                0 or 1 or 2 => p.colonyDecay,   // colony-pig / -sheep / -wolf
+                3 => p.deathDecay,
+                4 => p.fearDecay,
+                5 => p.preyDecay,
+                6 => 0f,                        // suitability（静的）
+                7 => p.trampleDecay,
+                8 => p.vegetationDecay,
+                _ => throw new System.ArgumentOutOfRangeException(nameof(fieldIndex)),
+            };
+            return decay > 0f ? 1f / decay : 0f;
+        }
+
+        /// <summary>
+        /// 場の到達距離 L（セル）。拡散と減衰の釣り合いから決まる長さで、
+        /// L = sqrt(パス数 × 拡散率 / 4 / 減衰率)。
+        /// 既存の設計コメント（獲物場 L≈2.4、コロニー場 L≈1.4）と同じ式である。
+        ///
+        /// 静的な場（適性場）は拡散しないので 0。
+        /// </summary>
+        public static float FieldReach(int fieldIndex, SimParams p)
+        {
+            (float diffuse, int passes, float decay) = fieldIndex switch
+            {
+                0 or 1 or 2 => (p.colonyDiffuse, p.colonyDiffusePasses, p.colonyDecay),
+                3 => (p.deathDiffuse, p.deathDiffusePasses, p.deathDecay),
+                4 => (p.fearDiffuse, 1, p.fearDecay),
+                5 => (p.preyDiffuse, p.preyDiffusePasses, p.preyDecay),
+                6 => (0f, 0, 0f),               // suitability（静的）
+                7 => (p.trampleDiffuse, p.trampleDiffusePasses, p.trampleDecay),
+                8 => (p.vegetationDiffuse, 1, p.vegetationDecay),
+                _ => throw new System.ArgumentOutOfRangeException(nameof(fieldIndex)),
+            };
+            if (decay <= 0f || diffuse <= 0f || passes < 1)
+            {
+                return 0f;
+            }
+            return (float)System.Math.Sqrt(passes * diffuse / 4.0 / decay);
+        }
+
+        /// <summary>
+        /// 重み1組の認知範囲（時間深度・空間半径）。
+        /// </summary>
+        public static (float timeDepth, float spatialReach) CognitiveRange(EntityWeights w, SimParams p)
+        {
+            float t = 0f, s = 0f;
+            for (int i = 0; i < EntityWeights.FieldCount; i++)
+            {
+                float a = System.Math.Abs(w[i]);
+                t += a * FieldTau(i, p);
+                s += a * FieldReach(i, p);
+            }
+            return (t, s);
+        }
+
+        /// <summary>
+        /// 種ごとの認知範囲の平均（採餌時と徘徊時を合算した重みで測る）。
+        /// 個体が居なければ count = 0 を返す。
+        /// </summary>
+        public static (float timeDepth, float spatialReach, int count) SpeciesCognitiveRange(
+            World world, EntityKind kind, SimParams p)
+        {
+            float t = 0f, s = 0f;
+            int n = 0;
+            foreach (var e in world.Entities)
+            {
+                if (e.kind != kind)
+                {
+                    continue;
+                }
+                var (ft, fs) = CognitiveRange(e.forageWeights, p);
+                var (wt, ws) = CognitiveRange(e.wanderWeights, p);
+                t += ft + wt;
+                s += fs + ws;
+                n++;
+            }
+            return n == 0 ? (0f, 0f, 0) : (t / n, s / n, n);
+        }
+
+        /// <summary>
+        /// 種ごとの重みの平均・分散 (Demo 8 第4.5段 K2)。
+        /// <paramref name="wandering"/> が true なら徘徊時の重みを見る。
+        ///
+        /// **徘徊側も要る。** 群れ重み (colonySelfWeight) は徘徊時の重みにしか
+        /// 入らない（第4段 K4）ので、採餌側だけ見ていると E1 の対象が観察できない。
+        /// </summary>
+        public static (float[] mean, float[] variance, int count) SpeciesWeightStats(
+            World world, EntityKind kind, bool wandering)
+        {
+            var mean = new float[EntityWeights.FieldCount];
+            var variance = new float[EntityWeights.FieldCount];
+            int n = 0;
+
+            foreach (var e in world.Entities)
+            {
+                if (e.kind != kind)
+                {
+                    continue;
+                }
+                n++;
+                var w = wandering ? e.wanderWeights : e.forageWeights;
+                for (int i = 0; i < EntityWeights.FieldCount; i++)
+                {
+                    mean[i] += w[i];
+                }
+            }
+            if (n == 0)
+            {
+                return (mean, variance, 0);
+            }
+            for (int i = 0; i < EntityWeights.FieldCount; i++)
+            {
+                mean[i] /= n;
+            }
+
+            foreach (var e in world.Entities)
+            {
+                if (e.kind != kind)
+                {
+                    continue;
+                }
+                var w = wandering ? e.wanderWeights : e.forageWeights;
+                for (int i = 0; i < EntityWeights.FieldCount; i++)
+                {
+                    float d = w[i] - mean[i];
+                    variance[i] += d * d;
+                }
+            }
+            for (int i = 0; i < EntityWeights.FieldCount; i++)
+            {
+                variance[i] /= n;
+            }
+            return (mean, variance, n);
+        }
+
         /// <summary>
         /// 同種近傍数の平均 (Demo 8 第4段 K5)。各個体について
         /// 半径 <see cref="FlockNeighborRadius"/> 以内にいる**自分以外の同種**を数え、

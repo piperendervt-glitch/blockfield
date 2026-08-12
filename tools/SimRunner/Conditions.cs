@@ -58,6 +58,19 @@ namespace SimRunner
             "草食獣が恐怖場を読まない。Demo 8 第2段 M3（迂回行動）の対照",
             Tweak(p => { p.herbivoreFearWeight = 0f; return p; }));
 
+        /// <summary>
+        /// 変異を有効にした条件 (Demo 8 第4.5段 K1 の M 判定用)。
+        ///
+        /// **現行の確定値から始めて変異だけを加える。** 変異は平均を変えない
+        /// （ガウスノイズの期待値は0）はずなので、生態指標が第4段の合格範囲から
+        /// 外れたら sigma が大きすぎるという読み方になる（prereg の M 判定）。
+        /// E1/E2 の実験条件はここではなく、掃引で決めてから足す。
+        /// </summary>
+        public static readonly Condition Mutation = new Condition(
+            "mutation",
+            "変異あり（rate=1.0 / sigma=0.1）。第4.5段 K1 の M 判定用",
+            Tweak(p => { p.mutationRate = 1f; p.mutationSigma = 0.1f; return p; }));
+
         /// <summary>SimParams は構造体なので、既定値のコピーを書き換えて返す。</summary>
         static SimParams Tweak(Func<SimParams, SimParams> mutate) => mutate(SimParams.Default);
 
@@ -128,6 +141,7 @@ namespace SimRunner
                 [TrampleSuppressOff.Name] = TrampleSuppressOff,
                 [NutrientOff.Name] = NutrientOff,
                 [FearOff.Name] = FearOff,
+                [Mutation.Name] = Mutation,
             };
     }
 }

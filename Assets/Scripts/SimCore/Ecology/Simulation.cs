@@ -716,6 +716,11 @@ namespace BlockField.SimCore.Ecology
                 int childIndex = world.Entities.Count - 1;
                 var child = world.Entities[childIndex];
                 child.breedCooldown = k_BreedCooldownTicks;
+
+                // 変異 (Demo 8 第4.5段 K1)。**向き(TrySpawn の中)の直後**に置く。
+                // prereg で「RNG 消費順は facing → 変異」に固定した順序である
+                MutateChildWeights(ref child, rng, p);
+
                 world.UpdateEntity(childIndex, child);
 
                 // コロニー場への書き込み (Demo 8 第4段 K1)。出生セルへ自種の場だけを書く。
@@ -734,6 +739,69 @@ namespace BlockField.SimCore.Ecology
                 e.breedCooldown = k_BreedCooldownTicks;
                 world.UpdateEntity(i, e);
             }
+        }
+
+        /// <summary>
+        /// 子の重みに変異を加える (Demo 8 第4.5段 K1)。
+        /// 採餌時と徘徊時の**両方**の重みが対象（prereg K3）。
+        ///
+        /// 【乱数の消費 — 決定論の要】
+        /// 変異が無効（<see cref="SimParams.mutationRate"/> か
+        /// <see cref="SimParams.mutationSigma"/> が 0）のときは**1個も引かない**。
+        /// 引いて捨てる形にすると、変異を入れる前の世界と ContentHash が
+        /// 一致しなくなり、「変異なしなら完全に同じ」という M 判定の前提が壊れる。
+        ///
+        /// 有効なときは **1成分あたり必ず3個**引く（消費数が分岐に依存しない）:
+        ///   1個目 = 変異するかの抽選 / 2〜3個目 = ガウス乱数の種
+        /// 「変異しない成分は引かない」にすると、抽選の結果で消費数が変わり、
+        /// 同じシードでも個体の履歴が違えば乱数列がずれる。
+        /// 引いてから捨てることで、消費数が
+        /// **2（採餌・徘徊）× 9成分 × 3 = 54個/出生**に固定される。
+        ///
+        /// 【なぜ Box-Muller か】極座標法（Marsaglia）は棄却を伴うので
+        /// 消費数が可変になり、上の固定を壊す。Box-Muller は
+        /// 一様乱数2個から必ず1個の正規乱数が出る（2個目の sin 側は捨てる。
+        /// 捨てた値を次回に持ち越すとキャッシュが状態になり、
+        /// ContentHash に含まれない隠れ状態を作ってしまう）。
+        /// </summary>
+        static void MutateChildWeights(ref Entity child, Mulberry32 rng, SimParams p)
+        {
+            if (p.mutationRate <= 0f || p.mutationSigma <= 0f)
+            {
+                return;
+            }
+            MutateWeights(ref child.forageWeights, rng, p);
+            MutateWeights(ref child.wanderWeights, rng, p);
+        }
+
+        static void MutateWeights(ref EntityWeights w, Mulberry32 rng, SimParams p)
+        {
+            for (int i = 0; i < EntityWeights.FieldCount; i++)
+            {
+                // 3個とも**必ず**引く。抽選に落ちても引く（上のコメント参照）
+                float roll = rng.NextFloat01();
+                float u1 = rng.NextFloat01();
+                float u2 = rng.NextFloat01();
+
+                if (roll >= p.mutationRate)
+                {
+                    continue;
+                }
+                w.SetByIndex(i, w[i] + NextGaussian(u1, u2) * p.mutationSigma);
+            }
+        }
+
+        /// <summary>
+        /// 一様乱数2個から標準正規乱数を1個作る（Box-Muller）。
+        ///
+        /// <see cref="Mulberry32.NextFloat01"/> は [0,1) で **0 を返しうる**ので、
+        /// log(0) = -∞ を避けるため 1-u1 を取る（(0,1] になる）。
+        /// これを忘れると稀に NaN が重みへ入り、その個体以降の行動が壊れる。
+        /// </summary>
+        static float NextGaussian(float u1, float u2)
+        {
+            double r = Math.Sqrt(-2.0 * Math.Log(1.0 - u1));
+            return (float)(r * Math.Cos(2.0 * Math.PI * u2));
         }
 
         /// <summary>
