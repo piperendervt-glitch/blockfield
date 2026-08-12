@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using BlockField.SimCore.Ecology;
 using BlockField.SimCore.Terrain;
+using BlockField.SimCore.Voxel;
 using NUnit.Framework;
 
 namespace BlockField.Tests.EditMode
@@ -651,6 +652,10 @@ namespace BlockField.Tests.EditMode
         ///
         /// 他種の重み（盗聴）に漏れると、prereg 判断2「盗聴は重み0で寝かせる」が
         /// 静かに破れる。対照（w_colony=0）が意味を持つのもこの分離が前提。
+        ///
+        /// **入るのは徘徊時の重みだけ**である (Demo 8 第4段 K4)。
+        /// 採餌時にも入れると草食獣が餌を探すのをやめて固まり、獲物場が一点に
+        /// 集中して狼が全滅する（実測。<see cref="SimParams.colonySelfWeight"/> 参照）。
         /// </summary>
         [Test]
         public void Flock_ColonyWeightGoesToTheOwnSpeciesOnly()
@@ -658,44 +663,72 @@ namespace BlockField.Tests.EditMode
             var p = SimParams.Default;
             p.colonySelfWeight = 0.5f;
 
-            var expected = new Dictionary<EntityKind, string>
+            foreach (var kind in new[] { EntityKind.Sheep, EntityKind.Pig, EntityKind.Wolf })
             {
-                [EntityKind.Sheep] = "colonySheep",
-                [EntityKind.Pig] = "colonyPig",
-                [EntityKind.Wolf] = "colonyWolf",
-            };
+                var wander = EntityWeights.WanderingFor(kind, p);
+                Assert.AreEqual(kind == EntityKind.Sheep ? 0.5f : 0f, wander.colonySheep, 1e-6f,
+                    $"{kind}(徘徊): colonySheep の重みが期待と違う");
+                Assert.AreEqual(kind == EntityKind.Pig ? 0.5f : 0f, wander.colonyPig, 1e-6f,
+                    $"{kind}(徘徊): colonyPig の重みが期待と違う");
+                Assert.AreEqual(kind == EntityKind.Wolf ? 0.5f : 0f, wander.colonyWolf, 1e-6f,
+                    $"{kind}(徘徊): colonyWolf の重みが期待と違う");
 
-            foreach (var kind in expected.Keys)
-            {
-                foreach (var w in new[] { EntityWeights.ForagingFor(kind, p), EntityWeights.WanderingFor(kind, p) })
-                {
-                    Assert.AreEqual(kind == EntityKind.Sheep ? 0.5f : 0f, w.colonySheep, 1e-6f,
-                        $"{kind}: colonySheep の重みが期待と違う");
-                    Assert.AreEqual(kind == EntityKind.Pig ? 0.5f : 0f, w.colonyPig, 1e-6f,
-                        $"{kind}: colonyPig の重みが期待と違う");
-                    Assert.AreEqual(kind == EntityKind.Wolf ? 0.5f : 0f, w.colonyWolf, 1e-6f,
-                        $"{kind}: colonyWolf の重みが期待と違う");
-                }
+                // 採餌時には**どの種のコロニー場にも**引かれない
+                var forage = EntityWeights.ForagingFor(kind, p);
+                Assert.AreEqual(0f, forage.colonySheep, 1e-6f, $"{kind}(採餌): 群れ重みが入っている");
+                Assert.AreEqual(0f, forage.colonyPig, 1e-6f, $"{kind}(採餌): 群れ重みが入っている");
+                Assert.AreEqual(0f, forage.colonyWolf, 1e-6f, $"{kind}(採餌): 群れ重みが入っている");
             }
         }
 
         /// <summary>
-        /// **既定の w_colony=0 では挙動が1ビットも変わらないこと。**
+        /// **対照（w_colony=0）が本条件と違う世界になること (Demo 8 第4段 K4)。**
         ///
-        /// K5 は器を入れるだけで行動は変えない段階なので、
-        /// 重みを配線したことで世界が動いていないことを固定する。
-        /// 対照（w_colony=0）が本条件と一致するのもこの性質による。
+        /// K5 の時点では w_colony=0 が既定だったので「対照 ≡ 本条件」が正しい状態で、
+        /// それを固定するテストがここにあった。4c で既定に値が入ったので、
+        /// 要求は裏返って**対照が実際に効いていること**になる。
+        /// ここが一致してしまったら、群れ重みがどこにも配線されていない。
         /// </summary>
         [Test]
-        public void Flock_ZeroColonyWeightLeavesTheWorldUnchanged()
+        public void Flock_ControlWithZeroWeightDivergesFromTheMainCondition()
         {
             var withZero = SimParams.Default;
             withZero.colonySelfWeight = 0f;
 
-            Assert.AreEqual(
+            Assert.AreNotEqual(0f, SimParams.Default.colonySelfWeight,
+                "既定の w_colony が0のまま。4c の群れ行動が入っていない");
+
+            Assert.AreNotEqual(
                 Run(k_Seeds[0], SimParams.Default, 400).ComputeContentHash(),
                 Run(k_Seeds[0], withZero, 400).ComputeContentHash(),
-                "w_colony を明示的に0にしたら世界が変わった（既定が0でない？）");
+                "w_colony を0にしても世界が変わらない（重みが配線されていない）");
+        }
+
+        /// <summary>
+        /// **群れ重みが実際に個体を寄せること (M4 の最小再現)。**
+        ///
+        /// 48シードの統計（判定は SimRunner 側）ではなく、
+        /// 「濃いコロニー場を置くと、満腹の個体がそちらへ向く」という
+        /// 機構そのものを1歩の向きで固定する。
+        /// </summary>
+        [Test]
+        public void Flock_FullAnimalTurnsTowardTheColonyField()
+        {
+            var world = MakeDiorama(k_Seeds[0]);
+            var p = SimParams.Default;
+            var (x, z) = FindFlatRun(world, 3);
+
+            // 徘徊時の重み（自種コロニー場のみ）を持つ個体を想定し、
+            // 東（+X）側だけ場を濃くする
+            var weights = EntityWeights.WanderingFor(EntityKind.Sheep, p);
+            world.ColonySheep.SetAtColumn(x + 2, z, 1f);
+
+            // 現在の向きは西（-X, facing=2）。東が濃ければ東を選ぶはず
+            int facing = Simulation.FindWanderFacing(
+                world, weights, new Int3(x + 1, world.GetSurfaceHeight(x + 1, z), z), 2);
+
+            Assert.AreEqual(0, facing,
+                "コロニー場が濃い方向（+X）へ向き直っていない。群れ重みが効いていない");
         }
 
         // ---- 補助 ----

@@ -227,6 +227,19 @@ namespace BlockField.Tests.EditMode
         {
             var world = World.Create(WorldParams(1u));
             var p = ScenarioParams();
+
+            // この舞台には草が無い（ScenarioParams が成長も初期値も止めている）ので、
+            // 放っておくと空腹が 40ティックで繁殖上限 0.4 に達し、100ティックで餓死する。
+            // 見たいのは「相手が居なくても産めるか」であって空腹の管理ではないので、
+            // 空腹を止めて繁殖の判定だけが残る舞台にする。
+            //
+            // 【4c より前はこれが要らなかった】K3 の実効確率は
+            // breedChance × colony/(colony+k) で、k=12 のときは 0.0154/ティック
+            // ＝ 空腹が効き始める40ティックの窓に 46% の確率で滑り込めていた。
+            // 4c で k を 80 に取り直すと 0.0025/ティックになり、
+            // 同じ窓では 9% しか通らない。**窓が狭いことに依存していた**判定だった
+            p.hungerPerTick = 0f;
+
             var (x, z) = FindFlatRun(world, 3);
             world.TrySpawn(EntityKind.Sheep, x, z, 0);
 
@@ -235,8 +248,10 @@ namespace BlockField.Tests.EditMode
             // 場そのものの立ち上がり方は Demo8Stage4Tests が受け持つ
             world.ColonySheep.SetAtColumn(x, z, 1f);
 
+            // 実効確率 0.2 × 1/81 ≈ 0.0025 で待ち時間の期待値は約400ティック。
+            // 4000ティックあれば取りこぼす確率は 1万分の1 以下
             int bornAt = -1;
-            for (int t = 0; t < 400 && bornAt < 0; t++)
+            for (int t = 0; t < 4000 && bornAt < 0; t++)
             {
                 Simulation.Tick(world, world.Rng, p);
                 if (world.SheepCount >= 2)
@@ -245,7 +260,7 @@ namespace BlockField.Tests.EditMode
                 }
             }
 
-            Assert.GreaterOrEqual(bornAt, 0, "相手が居なくても産めるはずだが、400ティックで子が生まれなかった");
+            Assert.GreaterOrEqual(bornAt, 0, "相手が居なくても産めるはずだが、4000ティックで子が生まれなかった");
             Assert.GreaterOrEqual(world.BirthCount, 1);
 
             // クールダウン: 産んだ個体と子の2体に入る（相手が居ないので3体にはならない）
