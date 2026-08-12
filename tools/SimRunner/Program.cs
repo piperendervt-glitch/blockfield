@@ -78,30 +78,40 @@ var embedded = new List<(string caption, string dataUri)>();
 
 foreach (var condition in conditions)
 {
+    // --control のときは対照も同じシードで描く (Demo 8 第4段 K5/K4)。
+    // 群れができたかどうかは**対照と並べて初めて**目で判断できる。
+    // 本条件 → 対照 の順に出すので、report.html では同じシードの2枚が隣り合う
+    var toRender = opts.Control
+        ? new[] { condition, condition.AsColonyWeightControl() }
+        : new[] { condition };
+
     foreach (uint seed in seeds.Take(opts.Images))
     {
-        // 画像用にもう一度回す。結果を保持し続けるとメモリを食うため
-        // （48シード×5場のワールドを全部持つと数百MBになる）
-        var world = Runner.MakeWorld(seed, opts.Size);
-        for (int t = 0; t < opts.Ticks; t++)
+        foreach (var c in toRender)
         {
-            Simulation.Tick(world, world.Rng, condition.Params);
-        }
-
-        var terrain = Heatmap.RenderTerrain(world, out int tw, out int th);
-        Save($"{condition.Name}_seed{seed}_terrain", $"{condition.Name} / seed {seed} / 地形と生き物",
-            tw, th, terrain);
-
-        foreach (string name in world.Fields.Keys.OrderBy(k => k, StringComparer.Ordinal))
-        {
-            if (name == SuitabilityField.FieldName)
+            // 画像用にもう一度回す。結果を保持し続けるとメモリを食うため
+            // （48シード×5場のワールドを全部持つと数百MBになる）
+            var world = Runner.MakeWorld(seed, opts.Size);
+            for (int t = 0; t < opts.Ticks; t++)
             {
-                continue; // 静的な場なので毎回出す意味が薄い
+                Simulation.Tick(world, world.Rng, c.Params);
             }
-            var field = (ScalarField)world.Fields[name];
-            var rgb = Heatmap.RenderField(world, field, out int fw, out int fh);
-            Save($"{condition.Name}_seed{seed}_{name}", $"{condition.Name} / seed {seed} / {name}",
-                fw, fh, rgb);
+
+            var terrain = Heatmap.RenderTerrain(world, out int tw, out int th);
+            Save($"{c.Name}_seed{seed}_terrain", $"{c.Name} / seed {seed} / 地形と生き物",
+                tw, th, terrain);
+
+            foreach (string name in world.Fields.Keys.OrderBy(k => k, StringComparer.Ordinal))
+            {
+                if (name == SuitabilityField.FieldName)
+                {
+                    continue; // 静的な場なので毎回出す意味が薄い
+                }
+                var field = (ScalarField)world.Fields[name];
+                var rgb = Heatmap.RenderField(world, field, out int fw, out int fh);
+                Save($"{c.Name}_seed{seed}_{name}", $"{c.Name} / seed {seed} / {name}",
+                    fw, fh, rgb);
+            }
         }
     }
 }

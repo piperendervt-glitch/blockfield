@@ -65,6 +65,18 @@ namespace SimRunner
             public Dictionary<string, double> NeighborMeanDelta = new();
             public Dictionary<string, double> PairDistanceMedianDelta = new();
 
+            /// <summary>対照そのものの値（差だけだと「何と比べたか」が読めない）。</summary>
+            public Dictionary<string, double> ControlNeighborMean = new();
+            public Dictionary<string, double> ControlPairDistanceMedian = new();
+
+            /// <summary>
+            /// 差の符号がそろったシード数（対応のある符号検定）。
+            /// 近傍数は「本条件のほうが大きい」、ペア距離は「本条件のほうが小さい」を数える。
+            /// n=48 なら 31 以上で片側 α=0.05 の有意。
+            /// </summary>
+            public Dictionary<string, int> NeighborWins = new();
+            public Dictionary<string, int> PairDistanceWins = new();
+
             /// <summary>差を取れたシード数（両方で指標が定義できたシード）。</summary>
             public Dictionary<string, int> ControlPairedSeeds = new();
 
@@ -230,6 +242,11 @@ namespace SimRunner
                     {
                         a.NeighborMeanDelta[species] = paired.Average(
                             r => r.NeighborMean[species] - r.Control!.NeighborMean[species]);
+                        a.ControlNeighborMean[species] = paired.Average(
+                            r => r.Control!.NeighborMean[species]);
+                        // 群れているなら本条件のほうが近傍数が大きい
+                        a.NeighborWins[species] = paired.Count(
+                            r => r.NeighborMean[species] > r.Control!.NeighborMean[species]);
                     }
 
                     var pairedDist = rs.Where(r =>
@@ -240,6 +257,11 @@ namespace SimRunner
                     {
                         a.PairDistanceMedianDelta[species] = pairedDist.Average(
                             r => r.PairDistanceMedian[species] - r.Control!.PairDistanceMedian[species]);
+                        a.ControlPairDistanceMedian[species] = pairedDist.Average(
+                            r => r.Control!.PairDistanceMedian[species]);
+                        // 群れているなら本条件のほうがペア距離が小さい
+                        a.PairDistanceWins[species] = pairedDist.Count(
+                            r => r.PairDistanceMedian[species] < r.Control!.PairDistanceMedian[species]);
                     }
                 }
 
@@ -520,13 +542,20 @@ namespace SimRunner
             // 群れ指標 (Demo 8 第4段 K5)。4c の M4 はこの表を見る
             bool anyControl = aggregates.Any(a => a.HasControl);
             sb.Append("<h2>群れ指標</h2>\n<table><thead><tr>" +
-                      "<th>条件</th><th>種</th><th>同種近傍数<br>(半径3)</th><th>ペア距離<br>中央値</th>" +
-                      "<th>コロニー場<br>集中度(上位10%)</th><th>標本<br>シード</th>");
+                      "<th>条件</th><th>種</th>");
             if (anyControl)
             {
-                sb.Append("<th>近傍数の差<br>(本−対照)</th><th>ペア距離の差<br>(本−対照)</th>");
+                sb.Append("<th>同種近傍数<br>本条件</th><th>同種近傍数<br>対照</th><th>差</th>" +
+                          "<th>差の符号が<br>そろったシード</th>" +
+                          "<th>ペア距離<br>本条件</th><th>ペア距離<br>対照</th><th>差</th>" +
+                          "<th>差の符号が<br>そろったシード</th>");
             }
-            sb.Append("</tr></thead><tbody>\n");
+            else
+            {
+                sb.Append("<th>同種近傍数<br>(半径3)</th><th>ペア距離<br>中央値</th>");
+            }
+            sb.Append("<th>コロニー場<br>集中度(上位10%)</th><th>標本<br>シード</th>" +
+                      "</tr></thead><tbody>\n");
             foreach (var a in aggregates)
             {
                 foreach (var (_, species) in Runner.FlockSpecies)
@@ -539,29 +568,46 @@ namespace SimRunner
                     a.ColonyConcentration.TryGetValue(species, out double cc);
                     a.FlockSeeds.TryGetValue(species, out int fs);
 
-                    sb.Append($"<tr><td>{Escape(a.Condition)}</td><td>{species}</td>" +
-                              $"<td>{nm:F4}</td><td>{pd:F2}</td><td>{cc:F4}</td>" +
-                              $"<td>{fs}/{a.Seeds}</td>");
+                    sb.Append($"<tr><td>{Escape(a.Condition)}</td><td>{species}</td>");
                     if (anyControl)
                     {
                         if (a.HasControl && a.NeighborMeanDelta.TryGetValue(species, out double dn))
                         {
                             a.PairDistanceMedianDelta.TryGetValue(species, out double dp);
-                            sb.Append($"<td>{dn:+0.0000;-0.0000;0}</td><td>{dp:+0.00;-0.00;0}</td>");
+                            a.ControlNeighborMean.TryGetValue(species, out double cn);
+                            a.ControlPairDistanceMedian.TryGetValue(species, out double cp);
+                            a.ControlPairedSeeds.TryGetValue(species, out int ps);
+                            a.NeighborWins.TryGetValue(species, out int nw);
+                            a.PairDistanceWins.TryGetValue(species, out int pw);
+
+                            sb.Append($"<td>{nm:F4}</td><td>{cn:F4}</td>" +
+                                      $"<td>{dn:+0.0000;-0.0000;0}</td>" +
+                                      $"<td{Sig(nw, ps)}>{nw}/{ps}</td>" +
+                                      $"<td>{pd:F2}</td><td>{cp:F2}</td>" +
+                                      $"<td>{dp:+0.00;-0.00;0}</td>" +
+                                      $"<td{Sig(pw, ps)}>{pw}/{ps}</td>");
                         }
                         else
                         {
-                            sb.Append("<td>—</td><td>—</td>");
+                            sb.Append($"<td>{nm:F4}</td><td>—</td><td>—</td><td>—</td>" +
+                                      $"<td>{pd:F2}</td><td>—</td><td>—</td><td>—</td>");
                         }
                     }
-                    sb.Append("</tr>\n");
+                    else
+                    {
+                        sb.Append($"<td>{nm:F4}</td><td>{pd:F2}</td>");
+                    }
+                    sb.Append($"<td>{cc:F4}</td><td>{fs}/{a.Seeds}</td></tr>\n");
                 }
             }
             sb.Append("</tbody></table>\n");
             sb.Append("<p class=meta>群れていれば<b>近傍数は大きく・ペア距離は小さく</b>なる。" +
                       "一様分布の目安はペア距離 ≈ 0.5214 × 一辺（50セルなら約26.1）。" +
                       "集中度は一様なら 0.1。" +
-                      "差は同一シードで対にして取った平均（地形と初期配置が相殺される）。" +
+                      "対照は<b>同一シード</b>で群れ重み w_colony のみ0にしたもので、" +
+                      "差はシードごとに取ってから平均している（地形と初期配置が相殺される）。" +
+                      "「差の符号がそろったシード」は対応のある符号検定で、" +
+                      "48シードなら<b>31以上で有意</b>（片側 α=0.05）。太字が有意。" +
                       "コロニー場の集中度は出生位置の +X バイアスにも反応するので記録項目であり、" +
                       "群れの判定は近傍数とペア距離で行う。</p>\n");
             if (!anyControl)
@@ -593,6 +639,21 @@ namespace SimRunner
         }
 
         static string Flag(int count) => count > 0 ? " class=bad" : "";
+
+        /// <summary>
+        /// 対応のある符号検定の有意判定 (Demo 8 第4段 K4)。
+        /// 正規近似 z = (wins - 0.5 - n/2) / (√n / 2) で片側 α=0.05（z ≥ 1.645）。
+        /// n=48 なら 31 以上が有意。有意なら太字にする。
+        /// </summary>
+        static string Sig(int wins, int n)
+        {
+            if (n <= 0)
+            {
+                return "";
+            }
+            double z = (wins - 0.5 - n / 2.0) / (Math.Sqrt(n) / 2.0);
+            return z >= 1.645 ? " style=\"font-weight:bold\"" : "";
+        }
 
         /// <summary>
         /// 個体数の折れ線を SVG で描く。外部ライブラリを使わないのは、
