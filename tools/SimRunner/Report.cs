@@ -48,6 +48,29 @@ namespace SimRunner
             public Dictionary<string, double> FieldMean = new();
             public Dictionary<string, double> FieldMax = new();
 
+            // ---- 群れ指標 (Demo 8 第4段 K5)。種名で引く ----
+            public Dictionary<string, double> NeighborMean = new();
+            public Dictionary<string, double> PairDistanceMedian = new();
+            public Dictionary<string, double> ColonyConcentration = new();
+
+            /// <summary>指標が定義できたシード数（種別）。少ないと平均の意味が薄い。</summary>
+            public Dictionary<string, int> FlockSeeds = new();
+
+            /// <summary>
+            /// 対照との**シードごとの差**の平均 (--control のときだけ埋まる)。
+            /// 対応のある比較なので、地形と初期配置の違いが相殺される。
+            /// 近傍数は「本条件 − 対照」（群れていれば正）、
+            /// ペア距離は「本条件 − 対照」（群れていれば負）。
+            /// </summary>
+            public Dictionary<string, double> NeighborMeanDelta = new();
+            public Dictionary<string, double> PairDistanceMedianDelta = new();
+
+            /// <summary>差を取れたシード数（両方で指標が定義できたシード）。</summary>
+            public Dictionary<string, int> ControlPairedSeeds = new();
+
+            /// <summary>対照を並走させたか。</summary>
+            public bool HasControl;
+
             /// <summary>
             /// 狼の全滅を退行とみなす割合の上限。
             ///
@@ -166,6 +189,60 @@ namespace SimRunner
                     a.FieldMean[name] = rs.Average(r => r.FieldMean[name]);
                     a.FieldMax[name] = rs.Max(r => r.FieldMax[name]);
                 }
+
+                // 群れ指標 (Demo 8 第4段 K5)。
+                // 指標が未定義のシード（その種が居なかった）は平均から外す。
+                // 0 で埋めると「絶滅していた」が「群れていなかった」として混ざる
+                a.HasControl = rs.Any(r => r.Control != null);
+                foreach (var (_, species) in Runner.FlockSpecies)
+                {
+                    var withMetric = rs.Where(r => r.NeighborMean.ContainsKey(species)).ToList();
+                    a.FlockSeeds[species] = withMetric.Count;
+                    if (withMetric.Count > 0)
+                    {
+                        a.NeighborMean[species] = withMetric.Average(r => r.NeighborMean[species]);
+                    }
+
+                    var withPair = rs.Where(r => r.PairDistanceMedian.ContainsKey(species)).ToList();
+                    if (withPair.Count > 0)
+                    {
+                        a.PairDistanceMedian[species] = withPair.Average(r => r.PairDistanceMedian[species]);
+                    }
+
+                    var withConc = rs.Where(r => r.ColonyConcentration.ContainsKey(species)).ToList();
+                    if (withConc.Count > 0)
+                    {
+                        a.ColonyConcentration[species] = withConc.Average(r => r.ColonyConcentration[species]);
+                    }
+
+                    if (!a.HasControl)
+                    {
+                        continue;
+                    }
+
+                    // 対応のある差。**両方で定義できたシードだけ**を使う
+                    var paired = rs.Where(r =>
+                        r.Control != null &&
+                        r.NeighborMean.ContainsKey(species) &&
+                        r.Control.NeighborMean.ContainsKey(species)).ToList();
+                    a.ControlPairedSeeds[species] = paired.Count;
+                    if (paired.Count > 0)
+                    {
+                        a.NeighborMeanDelta[species] = paired.Average(
+                            r => r.NeighborMean[species] - r.Control!.NeighborMean[species]);
+                    }
+
+                    var pairedDist = rs.Where(r =>
+                        r.Control != null &&
+                        r.PairDistanceMedian.ContainsKey(species) &&
+                        r.Control.PairDistanceMedian.ContainsKey(species)).ToList();
+                    if (pairedDist.Count > 0)
+                    {
+                        a.PairDistanceMedianDelta[species] = pairedDist.Average(
+                            r => r.PairDistanceMedian[species] - r.Control!.PairDistanceMedian[species]);
+                    }
+                }
+
                 list.Add(a);
             }
             return list;
@@ -240,7 +317,44 @@ namespace SimRunner
                 sb.Append("},\n");
                 sb.Append("      \"fieldMax\": {");
                 sb.Append(string.Join(", ", a.FieldMax.Select(kv => $"\"{kv.Key}\": {N(kv.Value)}")));
-                sb.Append("}\n");
+                sb.Append("},\n");
+
+                // 群れ指標 (Demo 8 第4段 K5)。4c の M4 はここを見る
+                sb.Append("      \"flock\": {\n");
+                sb.Append($"        \"neighborRadius\": {N(EcologyStats.FlockNeighborRadius)},\n");
+                sb.Append("        \"neighborMean\": {");
+                sb.Append(string.Join(", ", a.NeighborMean.Select(kv => $"\"{kv.Key}\": {N(kv.Value)}")));
+                sb.Append("},\n");
+                sb.Append("        \"pairDistanceMedian\": {");
+                sb.Append(string.Join(", ", a.PairDistanceMedian.Select(kv => $"\"{kv.Key}\": {N(kv.Value)}")));
+                sb.Append("},\n");
+                sb.Append("        \"colonyConcentrationTop10\": {");
+                sb.Append(string.Join(", ", a.ColonyConcentration.Select(kv => $"\"{kv.Key}\": {N(kv.Value)}")));
+                sb.Append("},\n");
+                sb.Append("        \"seeds\": {");
+                sb.Append(string.Join(", ", a.FlockSeeds.Select(kv => $"\"{kv.Key}\": {kv.Value}")));
+                sb.Append("},\n");
+                sb.Append($"        \"hasControl\": {(a.HasControl ? "true" : "false")}");
+                if (a.HasControl)
+                {
+                    sb.Append(",\n");
+                    // 対応のある差（本条件 − 対照）。群れていれば
+                    // 近傍数の差は正、ペア距離の差は負になる
+                    sb.Append("        \"neighborMeanDeltaVsControl\": {");
+                    sb.Append(string.Join(", ", a.NeighborMeanDelta.Select(kv => $"\"{kv.Key}\": {N(kv.Value)}")));
+                    sb.Append("},\n");
+                    sb.Append("        \"pairDistanceMedianDeltaVsControl\": {");
+                    sb.Append(string.Join(", ", a.PairDistanceMedianDelta.Select(kv => $"\"{kv.Key}\": {N(kv.Value)}")));
+                    sb.Append("},\n");
+                    sb.Append("        \"pairedSeeds\": {");
+                    sb.Append(string.Join(", ", a.ControlPairedSeeds.Select(kv => $"\"{kv.Key}\": {kv.Value}")));
+                    sb.Append("}\n");
+                }
+                else
+                {
+                    sb.Append('\n');
+                }
+                sb.Append("      }\n");
                 sb.Append(i == aggregates.Count - 1 ? "    }\n" : "    },\n");
             }
             sb.Append("  ],\n");
@@ -254,6 +368,46 @@ namespace SimRunner
                 sb.Append($"    {{\"condition\": \"{r.Condition}\", \"seed\": {r.Seed}, " +
                           $"\"sheepMean\": {N(r.MeanSheepPerTick)}, \"pigMean\": {N(r.MeanPigPerTick)}}}");
                 sb.Append(i == results.Count - 1 ? "\n" : ",\n");
+            }
+            sb.Append("  ],\n");
+
+            // 群れ指標をシードごとに残す (Demo 8 第4段 K5)。
+            // 集計値だけだと 4c の「対照との比で有意に高い」を後から検定できない。
+            // 対照を並走させていれば control 側も同じ行に入るので、
+            // **対応のある検定（シードごとの差の符号）**がそのまま組める
+            sb.Append("  \"flockBySeed\": [\n");
+            {
+                var rows = new List<string>();
+                foreach (var r in results)
+                {
+                    foreach (var (_, species) in Runner.FlockSpecies)
+                    {
+                        if (!r.NeighborMean.ContainsKey(species))
+                        {
+                            continue;   // その種が居なかったシード
+                        }
+                        var row = new StringBuilder();
+                        row.Append($"    {{\"condition\": \"{r.Condition}\", \"seed\": {r.Seed}, " +
+                                   $"\"species\": \"{species}\", " +
+                                   $"\"neighborMean\": {N(r.NeighborMean[species])}, " +
+                                   $"\"pairDistanceMedian\": " +
+                                   $"{N(r.PairDistanceMedian.TryGetValue(species, out double pdm) ? pdm : 0)}, " +
+                                   $"\"colonyConcentrationTop10\": " +
+                                   $"{N(r.ColonyConcentration.TryGetValue(species, out double cc) ? cc : 0)}");
+                        if (r.Control != null && r.Control.NeighborMean.ContainsKey(species))
+                        {
+                            row.Append($", \"controlNeighborMean\": {N(r.Control.NeighborMean[species])}");
+                            if (r.Control.PairDistanceMedian.TryGetValue(species, out double cpd))
+                            {
+                                row.Append($", \"controlPairDistanceMedian\": {N(cpd)}");
+                            }
+                        }
+                        row.Append('}');
+                        rows.Add(row.ToString());
+                    }
+                }
+                sb.Append(string.Join(",\n", rows));
+                sb.Append(rows.Count > 0 ? "\n" : "");
             }
             sb.Append("  ],\n");
 
@@ -362,6 +516,58 @@ namespace SimRunner
                 sb.Append("</tr>\n");
             }
             sb.Append("</tbody></table>\n");
+
+            // 群れ指標 (Demo 8 第4段 K5)。4c の M4 はこの表を見る
+            bool anyControl = aggregates.Any(a => a.HasControl);
+            sb.Append("<h2>群れ指標</h2>\n<table><thead><tr>" +
+                      "<th>条件</th><th>種</th><th>同種近傍数<br>(半径3)</th><th>ペア距離<br>中央値</th>" +
+                      "<th>コロニー場<br>集中度(上位10%)</th><th>標本<br>シード</th>");
+            if (anyControl)
+            {
+                sb.Append("<th>近傍数の差<br>(本−対照)</th><th>ペア距離の差<br>(本−対照)</th>");
+            }
+            sb.Append("</tr></thead><tbody>\n");
+            foreach (var a in aggregates)
+            {
+                foreach (var (_, species) in Runner.FlockSpecies)
+                {
+                    if (!a.NeighborMean.TryGetValue(species, out double nm))
+                    {
+                        continue;
+                    }
+                    a.PairDistanceMedian.TryGetValue(species, out double pd);
+                    a.ColonyConcentration.TryGetValue(species, out double cc);
+                    a.FlockSeeds.TryGetValue(species, out int fs);
+
+                    sb.Append($"<tr><td>{Escape(a.Condition)}</td><td>{species}</td>" +
+                              $"<td>{nm:F4}</td><td>{pd:F2}</td><td>{cc:F4}</td>" +
+                              $"<td>{fs}/{a.Seeds}</td>");
+                    if (anyControl)
+                    {
+                        if (a.HasControl && a.NeighborMeanDelta.TryGetValue(species, out double dn))
+                        {
+                            a.PairDistanceMedianDelta.TryGetValue(species, out double dp);
+                            sb.Append($"<td>{dn:+0.0000;-0.0000;0}</td><td>{dp:+0.00;-0.00;0}</td>");
+                        }
+                        else
+                        {
+                            sb.Append("<td>—</td><td>—</td>");
+                        }
+                    }
+                    sb.Append("</tr>\n");
+                }
+            }
+            sb.Append("</tbody></table>\n");
+            sb.Append("<p class=meta>群れていれば<b>近傍数は大きく・ペア距離は小さく</b>なる。" +
+                      "一様分布の目安はペア距離 ≈ 0.5214 × 一辺（50セルなら約26.1）。" +
+                      "集中度は一様なら 0.1。" +
+                      "差は同一シードで対にして取った平均（地形と初期配置が相殺される）。" +
+                      "コロニー場の集中度は出生位置の +X バイアスにも反応するので記録項目であり、" +
+                      "群れの判定は近傍数とペア距離で行う。</p>\n");
+            if (!anyControl)
+            {
+                sb.Append("<p class=meta>対照を並走させるには <code>--control</code> を付ける。</p>\n");
+            }
 
             if (images.Count > 0)
             {

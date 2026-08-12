@@ -91,6 +91,35 @@ namespace SimRunner
         /// </summary>
         public ulong ContentHashExcludingColony;
 
+        // ---- 群れ指標 (Demo 8 第4段 K5)。種名（sheep/pig/wolf）で引く ----
+        //
+        // 4c の M4「群れの創発」の主指標。近傍数とペア距離は warmup 以降の**時間平均**で、
+        // その種の個体が居ないティックは標本から外してある
+        // （0 を入れると個体数の指標が群れ指標に混ざる）。
+        // 集中度は場の形の記録項目なので最終時点の1点。
+
+        /// <summary>半径3セル内の同種個体数の平均（時間平均）。群れていれば大きい。</summary>
+        public Dictionary<string, double> NeighborMean = new();
+
+        /// <summary>同種ペア距離の中央値（時間平均）。群れていれば小さい。</summary>
+        public Dictionary<string, double> PairDistanceMedian = new();
+
+        /// <summary>コロニー場の上位10%セルが総量に占める割合（最終時点、記録項目）。</summary>
+        public Dictionary<string, double> ColonyConcentration = new();
+
+        /// <summary>群れ指標の標本になったティック数（種別）。0 なら指標は未定義。</summary>
+        public Dictionary<string, long> FlockSamples = new();
+
+        /// <summary>
+        /// 同一シードで並走させた対照の結果 (Demo 8 第4段 K5、--control のときだけ)。
+        ///
+        /// 別の <see cref="BlockField.SimCore.Ecology.World"/>・別の乱数で走るので、
+        /// 本条件の進行には一切影響しない。対にして持つのは、
+        /// **シードごとの差**を取れるようにするため（地形と初期配置が相殺される）。
+        /// 対照の対照は無いので、この中の Control は常に null。
+        /// </summary>
+        public SeedResult? Control;
+
         /// <summary>個体数の時系列（CSV 用。間引いて持つ）。</summary>
         public List<(long tick, int plants, int herbivores, int wolves)> Series = new();
 

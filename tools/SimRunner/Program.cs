@@ -30,6 +30,10 @@ var conditions = opts.Conditions;
 Console.WriteLine($"SimRunner: {conditions.Count} 条件 × {seeds.Length} シード × {opts.Ticks} ティック " +
                   $"({opts.Size}x{opts.Size}) 並列度 {opts.Parallel}");
 Console.WriteLine($"  条件: {string.Join(", ", conditions.Select(c => c.Name))}");
+if (opts.Control)
+{
+    Console.WriteLine("  対照: 同一シードで w_colony=0 を並走（別 World・別乱数）");
+}
 Console.WriteLine($"  出力: {Path.GetFullPath(opts.OutDir)}");
 
 // チェックポイント（長時間実験の途中経過）。場の名前を得るために空のワールドを1つ作る
@@ -54,7 +58,7 @@ var results = Runner.Run(conditions, seeds, opts.Ticks, opts.Size, opts.Parallel
             Console.WriteLine($"  ... {done}/{total} ({percent}%) {sw.Elapsed.TotalSeconds:F0}s");
         }
     },
-    checkpoints, opts.CheckpointInterval);
+    checkpoints, opts.CheckpointInterval, opts.Control);
 sw.Stop();
 checkpoints?.Dispose();
 
@@ -198,6 +202,12 @@ sealed class Options
     public string OutDir = "";
     public string ComparePath = "";
     public int CheckpointInterval;
+
+    /// <summary>
+    /// 同一シードで対照（群れ重み w_colony のみ0）を並走させる (Demo 8 第4段 K5)。
+    /// ランタイムはおよそ2倍になる。
+    /// </summary>
+    public bool Control;
     public List<Condition> Conditions = new();
 
     public static Options? Parse(string[] args)
@@ -222,6 +232,7 @@ sealed class Options
                 case "--checkpoint-interval":
                     if (!int.TryParse(Next(), out o.CheckpointInterval)) return null;
                     break;
+                case "--control": o.Control = true; break;
                 case "--conditions":
                     string? list = Next();
                     if (list == null) return null;
@@ -275,6 +286,8 @@ sealed class Options
   --out DIR        出力先（既定 runs/日時）
   --compare PATH   前回の summary.json と比較し diff_report.html を出す
   --checkpoint-interval N   N ティックごとに checkpoints.csv へ途中経過を追記
+  --control        同一シードで対照（群れ重み w_colony のみ0）を並走させ、
+                   群れ指標のシードごとの差を出す（所要時間はおよそ2倍）
 
 終了コード:
   0 問題なし / 1 M5（生態系の安定条件）不合格 / 2 決定論の破れ（ContentHash 不一致）

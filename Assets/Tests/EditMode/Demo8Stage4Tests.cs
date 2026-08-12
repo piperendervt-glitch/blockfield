@@ -532,7 +532,200 @@ namespace BlockField.Tests.EditMode
             Assert.Less(Remaining(0.03f), 0.001f, "減衰率を上げても痕跡が残っている");
         }
 
+        // ================= K5: 群れ指標と対照の器 =================
+
+        /// <summary>
+        /// 同種近傍数とペア距離が、手で置いた配置の計算どおりになること。
+        ///
+        /// 3頭を一直線に隣り合わせて置く（間隔1セル）。
+        ///   近傍数: どの個体から見ても半径3以内に他の2頭がいる → 平均 2
+        ///   ペア距離: {1, 1, 2} の中央値 → 1
+        /// ティックを回さずに測る（指標は World を読むだけの純関数なので、
+        /// 動かさなければ配置がそのまま入力になる）。
+        /// </summary>
+        [Test]
+        public void Flock_MetricsMatchAHandPlacedArrangement()
+        {
+            var world = MakeDiorama(k_Seeds[0]);
+            var p = SimParams.Default;
+            var (x, z) = FindFlatRun(world, 3);
+
+            for (int i = 0; i < 3; i++)
+            {
+                Assert.GreaterOrEqual(world.TrySpawn(EntityKind.Sheep, x + i, z, 0, p), 0,
+                    $"羊を ({x + i},{z}) に置けない");
+            }
+
+            Assert.IsTrue(EcologyStats.TrySameSpeciesNeighborMean(
+                world, EntityKind.Sheep, out float neighbors));
+            Assert.AreEqual(2f, neighbors, 1e-5f, "一列に並べた3頭の同種近傍数が2でない");
+
+            Assert.IsTrue(EcologyStats.TrySameSpeciesPairDistanceMedian(
+                world, EntityKind.Sheep, out float median));
+            Assert.AreEqual(1f, median, 1e-5f, "距離 {1,1,2} の中央値が1でない");
+        }
+
+        /// <summary>
+        /// **他種は近傍に数えないこと。** 4c で種ごとの群れ度を見るので、
+        /// ここが混ざると指標そのものが意味を失う。
+        /// </summary>
+        [Test]
+        public void Flock_MetricsCountOnlyTheSameSpecies()
+        {
+            var world = MakeDiorama(k_Seeds[0]);
+            var p = SimParams.Default;
+            var (x, z) = FindFlatRun(world, 3);
+
+            Assert.GreaterOrEqual(world.TrySpawn(EntityKind.Sheep, x, z, 0, p), 0);
+            Assert.GreaterOrEqual(world.TrySpawn(EntityKind.Pig, x + 1, z, 0, p), 0);
+            Assert.GreaterOrEqual(world.TrySpawn(EntityKind.Wolf, x + 2, z, 0, p), 0);
+
+            // 隣り合っているが全て別種。同種近傍は0で、ペアは作れない
+            foreach (var kind in new[] { EntityKind.Sheep, EntityKind.Pig, EntityKind.Wolf })
+            {
+                Assert.IsTrue(EcologyStats.TrySameSpeciesNeighborMean(world, kind, out float n));
+                Assert.AreEqual(0f, n, 1e-5f, $"{kind}: 他種を同種として数えている");
+
+                Assert.IsFalse(EcologyStats.TrySameSpeciesPairDistanceMedian(world, kind, out _),
+                    $"{kind}: 1頭しか居ないのにペア距離が定義されている");
+            }
+        }
+
+        /// <summary>
+        /// 個体が居ないときは指標を「未定義」として返すこと。
+        ///
+        /// 0 を返してしまうと、絶滅したシードが「群れていない」として
+        /// 時間平均・シード平均に混ざる。SimRunner 側はこの false を見て
+        /// 標本から外している。
+        /// </summary>
+        [Test]
+        public void Flock_MetricsAreUndefinedWithoutIndividuals()
+        {
+            var world = MakeDiorama(k_Seeds[0]);
+
+            Assert.IsFalse(EcologyStats.TrySameSpeciesNeighborMean(world, EntityKind.Sheep, out _),
+                "個体が0頭でも近傍数が定義されている");
+            Assert.IsFalse(EcologyStats.TrySameSpeciesPairDistanceMedian(world, EntityKind.Sheep, out _),
+                "個体が0頭でもペア距離が定義されている");
+        }
+
+        /// <summary>
+        /// 空間集中度が「上位10%セルの占める割合」になっていること。
+        /// 一様なら 0.1、1セルに集中していれば 1.0。
+        /// </summary>
+        [Test]
+        public void Flock_ConcentrationIsTheTopTenPercentShare()
+        {
+            var world = MakeDiorama(k_Seeds[0]);
+            var field = world.ColonySheep;
+
+            // 総量0のときは0（ゼロ除算を避けている）
+            Assert.AreEqual(0f, EcologyStats.FieldTop10Concentration(field), 1e-6f);
+
+            // 一様: 上位10%のセルが総量の10%を持つ
+            for (int z = 0; z < world.Depth; z++)
+            {
+                for (int x = 0; x < world.Width; x++)
+                {
+                    field.SetAtColumn(x, z, 0.5f);
+                }
+            }
+            Assert.AreEqual(0.1f, EcologyStats.FieldTop10Concentration(field), 1e-4f,
+                "一様な場の集中度が 0.1 でない");
+
+            // 1セルに集中: そのセルが上位10%に入るので割合は 1.0
+            for (int z = 0; z < world.Depth; z++)
+            {
+                for (int x = 0; x < world.Width; x++)
+                {
+                    field.SetAtColumn(x, z, 0f);
+                }
+            }
+            field.SetAtColumn(3, 4, 1f);
+            Assert.AreEqual(1f, EcologyStats.FieldTop10Concentration(field), 1e-4f,
+                "1セルに集中した場の集中度が 1.0 でない");
+        }
+
+        /// <summary>
+        /// w_colony が**自種の重みだけ**に入ること (K5 で器を用意、値は 4c)。
+        ///
+        /// 他種の重み（盗聴）に漏れると、prereg 判断2「盗聴は重み0で寝かせる」が
+        /// 静かに破れる。対照（w_colony=0）が意味を持つのもこの分離が前提。
+        /// </summary>
+        [Test]
+        public void Flock_ColonyWeightGoesToTheOwnSpeciesOnly()
+        {
+            var p = SimParams.Default;
+            p.colonySelfWeight = 0.5f;
+
+            var expected = new Dictionary<EntityKind, string>
+            {
+                [EntityKind.Sheep] = "colonySheep",
+                [EntityKind.Pig] = "colonyPig",
+                [EntityKind.Wolf] = "colonyWolf",
+            };
+
+            foreach (var kind in expected.Keys)
+            {
+                foreach (var w in new[] { EntityWeights.ForagingFor(kind, p), EntityWeights.WanderingFor(kind, p) })
+                {
+                    Assert.AreEqual(kind == EntityKind.Sheep ? 0.5f : 0f, w.colonySheep, 1e-6f,
+                        $"{kind}: colonySheep の重みが期待と違う");
+                    Assert.AreEqual(kind == EntityKind.Pig ? 0.5f : 0f, w.colonyPig, 1e-6f,
+                        $"{kind}: colonyPig の重みが期待と違う");
+                    Assert.AreEqual(kind == EntityKind.Wolf ? 0.5f : 0f, w.colonyWolf, 1e-6f,
+                        $"{kind}: colonyWolf の重みが期待と違う");
+                }
+            }
+        }
+
+        /// <summary>
+        /// **既定の w_colony=0 では挙動が1ビットも変わらないこと。**
+        ///
+        /// K5 は器を入れるだけで行動は変えない段階なので、
+        /// 重みを配線したことで世界が動いていないことを固定する。
+        /// 対照（w_colony=0）が本条件と一致するのもこの性質による。
+        /// </summary>
+        [Test]
+        public void Flock_ZeroColonyWeightLeavesTheWorldUnchanged()
+        {
+            var withZero = SimParams.Default;
+            withZero.colonySelfWeight = 0f;
+
+            Assert.AreEqual(
+                Run(k_Seeds[0], SimParams.Default, 400).ComputeContentHash(),
+                Run(k_Seeds[0], withZero, 400).ComputeContentHash(),
+                "w_colony を明示的に0にしたら世界が変わった（既定が0でない？）");
+        }
+
         // ---- 補助 ----
+
+        /// <summary>
+        /// 同じ高さ・適性1.0のセルが横に <paramref name="length"/> 個続く場所を返す。
+        /// 群れ指標のテストで、距離が計算どおりになる配置を作るために使う。
+        /// </summary>
+        static (int x, int z) FindFlatRun(World world, int length)
+        {
+            for (int z = 1; z < world.Depth - 1; z++)
+            {
+                for (int x = 1; x < world.Width - length; x++)
+                {
+                    int h = world.GetSurfaceHeight(x, z);
+                    bool ok = true;
+                    for (int i = 0; i < length && ok; i++)
+                    {
+                        ok = world.Suitability.GetAtColumn(x + i, z) >= 1f
+                             && world.GetSurfaceHeight(x + i, z) == h;
+                    }
+                    if (ok)
+                    {
+                        return (x, z);
+                    }
+                }
+            }
+            Assert.Fail($"平坦な {length} セルの並びが見つからない");
+            return (0, 0);
+        }
 
         /// <summary>
         /// 成長の計算だけを見るためのパラメータ。

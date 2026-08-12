@@ -107,27 +107,54 @@ namespace BlockField.SimCore.Ecology
         /// あるので、迷ったら安全側に倒れる。
         /// 狼: 獲物場だけを追う。
         /// </summary>
-        public static EntityWeights ForagingFor(EntityKind kind, SimParams p) => kind switch
+        public static EntityWeights ForagingFor(EntityKind kind, SimParams p)
         {
-            EntityKind.Wolf => new EntityWeights { prey = p.wolfPreyWeight },
-            EntityKind.Sheep or EntityKind.Pig => new EntityWeights
+            var w = kind switch
             {
-                vegetation = p.herbivoreVegetationWeight,
-                fear = -p.herbivoreFearWeight,
-            },
-            _ => default, // 植物は行動しない
-        };
+                EntityKind.Wolf => new EntityWeights { prey = p.wolfPreyWeight },
+                EntityKind.Sheep or EntityKind.Pig => new EntityWeights
+                {
+                    vegetation = p.herbivoreVegetationWeight,
+                    fear = -p.herbivoreFearWeight,
+                },
+                _ => default, // 植物は行動しない
+            };
+            w.SetColonySelf(kind, p.colonySelfWeight);
+            return w;
+        }
 
         /// <summary>
         /// 「満腹で徘徊しているとき」の初期重み。
         /// 餌は探さないが**危険だけは避ける**（Demo 8 第2段 I3）。
         /// 狼は避ける相手がいないので全て0＝純粋なランダム徘徊。
         /// </summary>
-        public static EntityWeights WanderingFor(EntityKind kind, SimParams p) => kind switch
+        public static EntityWeights WanderingFor(EntityKind kind, SimParams p)
         {
-            EntityKind.Sheep or EntityKind.Pig => new EntityWeights { fear = -p.herbivoreFearWeight },
-            _ => default,
-        };
+            var w = kind switch
+            {
+                EntityKind.Sheep or EntityKind.Pig => new EntityWeights { fear = -p.herbivoreFearWeight },
+                _ => default,
+            };
+            w.SetColonySelf(kind, p.colonySelfWeight);
+            return w;
+        }
+
+        /// <summary>
+        /// **自種**のコロニー場への重みを入れる (Demo 8 第4段 K5 で器を用意、値は 4c)。
+        /// 他種の重み（盗聴）は触らない — 進化が発見するかという問いとして
+        /// 0 のまま寝かせてある（prereg 判断2）。
+        /// 既定の <see cref="SimParams.colonySelfWeight"/> は 0 なので、
+        /// 現時点ではこの呼び出しは重みを変えない。
+        /// </summary>
+        public void SetColonySelf(EntityKind kind, float weight)
+        {
+            switch (kind)
+            {
+                case EntityKind.Sheep: colonySheep = weight; break;
+                case EntityKind.Pig: colonyPig = weight; break;
+                case EntityKind.Wolf: colonyWolf = weight; break;
+            }
+        }
 
         public bool Equals(EntityWeights other) =>
             colonyPig.Equals(other.colonyPig) && colonySheep.Equals(other.colonySheep)

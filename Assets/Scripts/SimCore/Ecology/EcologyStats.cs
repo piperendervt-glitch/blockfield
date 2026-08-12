@@ -12,6 +12,168 @@ namespace BlockField.SimCore.Ecology
     /// </summary>
     public static class EcologyStats
     {
+        // ===== 群れ指標 (Demo 8 第4段 K5) =====
+        //
+        // 4c の M4「群れの創発」を測るための量。**個体の分布そのもの**を見る指標と、
+        // 場の形を見る記録項目からなる。
+        //
+        // 【なぜ場ではなく個体の分布を主指標にするか】コロニー場の形は
+        // 出生位置の +X バイアス（4a の調査で判明）に影響されるので、
+        // 「場が集中した」ことは「群れができた」ことを意味しない。
+        // 近傍数とペア距離はバイアスに不変な量なので主指標に据え、
+        // 場の集中度は記録に留める（prereg のリスク欄）。
+        //
+        // 【なぜ種別に分けるか】4c で種ごとに群れ度が違う可能性がある。
+        // 特に狼は数が少なく（平均5頭前後）、羊・豚とは統計の安定性が違う。
+
+        /// <summary>群れ指標の近傍半径（セル）。水平距離で測る。</summary>
+        public const float FlockNeighborRadius = 3f;
+
+        /// <summary>
+        /// 同種近傍数の平均 (Demo 8 第4段 K5)。各個体について
+        /// 半径 <see cref="FlockNeighborRadius"/> 以内にいる**自分以外の同種**を数え、
+        /// 個体で平均する。群れていれば大きくなる。
+        ///
+        /// 距離は水平面 (x,z) のユークリッド距離で測る。高さを入れないのは、
+        /// 地形の起伏で「隣にいるのに遠い」と判定されるのを避けるため
+        /// （群れているかどうかは俯瞰で見た近さの話である）。
+        ///
+        /// 個体が0頭のティックでは定義できないので false を返す。
+        /// 呼び出し側はそのティックを時間平均の標本から外すこと
+        /// （0 を入れると「絶滅したシードほど群れていない」という
+        /// 個体数の指標が群れ指標に混ざる）。
+        /// </summary>
+        public static bool TrySameSpeciesNeighborMean(World world, EntityKind kind, out float mean)
+        {
+            mean = 0f;
+            float r2 = FlockNeighborRadius * FlockNeighborRadius;
+
+            int count = 0;
+            long neighbors = 0;
+            var entities = world.Entities;
+
+            for (int i = 0; i < entities.Count; i++)
+            {
+                if (entities[i].kind != kind)
+                {
+                    continue;
+                }
+                count++;
+                for (int j = 0; j < entities.Count; j++)
+                {
+                    if (i == j || entities[j].kind != kind)
+                    {
+                        continue;
+                    }
+                    float dx = entities[i].cell.x - entities[j].cell.x;
+                    float dz = entities[i].cell.z - entities[j].cell.z;
+                    if (dx * dx + dz * dz <= r2)
+                    {
+                        neighbors++;
+                    }
+                }
+            }
+
+            if (count == 0)
+            {
+                return false;
+            }
+            mean = (float)((double)neighbors / count);
+            return true;
+        }
+
+        /// <summary>
+        /// 同種ペア距離の中央値 (Demo 8 第4段 K5)。全ての同種ペアの水平距離を並べた中央値。
+        /// 群れていれば小さくなる。
+        ///
+        /// 【なぜ平均でなく中央値か】1頭だけ遠くにはぐれた個体が平均を大きく動かす。
+        /// 中央値なら「大多数がどれくらい近いか」を表す。
+        ///
+        /// 個体数 A は20前後なのでペアは O(A²) ≈ 200 程度。毎ティック計算してよい。
+        /// 2頭未満のティックではペアが存在しないので false を返す。
+        /// </summary>
+        public static bool TrySameSpeciesPairDistanceMedian(World world, EntityKind kind, out float median)
+        {
+            median = 0f;
+            var entities = world.Entities;
+
+            var indices = new System.Collections.Generic.List<int>();
+            for (int i = 0; i < entities.Count; i++)
+            {
+                if (entities[i].kind == kind)
+                {
+                    indices.Add(i);
+                }
+            }
+            if (indices.Count < 2)
+            {
+                return false;
+            }
+
+            var distances = new System.Collections.Generic.List<float>();
+            for (int a = 0; a < indices.Count; a++)
+            {
+                for (int b = a + 1; b < indices.Count; b++)
+                {
+                    float dx = entities[indices[a]].cell.x - entities[indices[b]].cell.x;
+                    float dz = entities[indices[a]].cell.z - entities[indices[b]].cell.z;
+                    distances.Add((float)System.Math.Sqrt(dx * dx + dz * dz));
+                }
+            }
+
+            distances.Sort();
+            int n = distances.Count;
+            median = (n & 1) == 1
+                ? distances[n / 2]
+                : 0.5f * (distances[n / 2 - 1] + distances[n / 2]);
+            return true;
+        }
+
+        /// <summary>
+        /// 場の空間集中度 (Demo 8 第4段 K5、記録項目)。
+        /// **値の大きい上位10%のセルが、場の総量に占める割合。**
+        ///
+        /// 一様なら 0.1、1箇所に集中していれば 1.0 に近づく。
+        /// 「集落ができた」ことの傍証になるが、出生位置の +X バイアスにも
+        /// 反応するので主指標にはしない（このクラス冒頭の注記を参照）。
+        ///
+        /// 総量が0の場では 0 を返す。
+        /// </summary>
+        public static float FieldTop10Concentration(ScalarField field)
+        {
+            int n = field.Length;
+            if (n == 0)
+            {
+                return 0f;
+            }
+
+            var values = new float[n];
+            double total = 0;
+            for (int i = 0; i < n; i++)
+            {
+                values[i] = field.GetByIndex(i);
+                total += values[i];
+            }
+            if (total <= 0)
+            {
+                return 0f;
+            }
+
+            System.Array.Sort(values);   // 昇順。上位は末尾から取る
+            int top = n / 10;
+            if (top < 1)
+            {
+                top = 1;
+            }
+
+            double topSum = 0;
+            for (int i = n - top; i < n; i++)
+            {
+                topSum += values[i];
+            }
+            return (float)(topSum / total);
+        }
+
         /// <summary>
         /// 箱庭 (50x50, seed=12345, 適性2,225セル) をヘッドレス3,000ティック走らせた実測値。
         /// Demo 3 まで「観察できる生態系」として成立していた水準であり、

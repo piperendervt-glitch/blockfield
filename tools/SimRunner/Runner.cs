@@ -47,7 +47,8 @@ namespace SimRunner
         public static List<SeedResult> Run(
             IReadOnlyList<Condition> conditions, uint[] seeds, int ticks, int size,
             int maxParallel, Action<int, int>? progress = null,
-            CheckpointWriter? checkpoints = null, int checkpointInterval = 0)
+            CheckpointWriter? checkpoints = null, int checkpointInterval = 0,
+            bool withControl = false)
         {
             var jobs = new List<(Condition c, uint seed)>();
             foreach (var c in conditions)
@@ -66,7 +67,7 @@ namespace SimRunner
                 i =>
                 {
                     var (c, seed) = jobs[i];
-                    results[i] = RunOne(c, seed, ticks, size, checkpoints, checkpointInterval);
+                    results[i] = RunOne(c, seed, ticks, size, checkpoints, checkpointInterval, withControl);
                     int n = System.Threading.Interlocked.Increment(ref done);
                     progress?.Invoke(n, jobs.Count);
                 });
@@ -81,7 +82,31 @@ namespace SimRunner
             return list;
         }
 
+        /// <summary>種の一覧と、群れ指標のキーになる名前 (Demo 8 第4段 K5)。</summary>
+        public static readonly (EntityKind kind, string name)[] FlockSpecies =
+        {
+            (EntityKind.Sheep, "sheep"),
+            (EntityKind.Pig, "pig"),
+            (EntityKind.Wolf, "wolf"),
+        };
+
         public static SeedResult RunOne(
+            Condition condition, uint seed, int ticks, int size,
+            CheckpointWriter? checkpoints = null, int checkpointInterval = 0,
+            bool withControl = false)
+        {
+            var main = RunWorld(condition, seed, ticks, size, checkpoints, checkpointInterval);
+            if (withControl)
+            {
+                // 対照は別 World・別 Rng。本条件のループは既に走り終えているので、
+                // 対照の追加が本条件の乱数列に触れる経路そのものが無い。
+                // チェックポイントは本条件のみ（対照まで書くと行が二重になる）
+                main.Control = RunWorld(condition.AsColonyWeightControl(), seed, ticks, size);
+            }
+            return main;
+        }
+
+        static SeedResult RunWorld(
             Condition condition, uint seed, int ticks, int size,
             CheckpointWriter? checkpoints = null, int checkpointInterval = 0)
         {
@@ -109,6 +134,13 @@ namespace SimRunner
             double plantSum = 0;
             long herbivoreSum = 0, wolfSum = 0, entitySum = 0, samples = 0;
             long sheepSum = 0, pigSum = 0;
+
+            // 群れ指標の積算 (Demo 8 第4段 K5)。種ごとに「その種が居たティック」だけ数える
+            var neighborSum = new double[FlockSpecies.Length];
+            var pairSum = new double[FlockSpecies.Length];
+            var neighborSamples = new long[FlockSpecies.Length];
+            var pairSamples = new long[FlockSpecies.Length];
+
             var simWatch = System.Diagnostics.Stopwatch.StartNew();
 
             for (int t = 0; t < ticks; t++)
@@ -131,6 +163,27 @@ namespace SimRunner
                     wolfSum += world.WolfCount;
                     entitySum += world.Entities.Count;
                     samples++;
+
+                    // 群れ指標は O(A²) の走査なので、**計測時間から外す**。
+                    // SimMilliseconds は Demo 8.5 M1 の基準値であり、
+                    // 診断のための集計で汚すと実装間の比較ができなくなる
+                    simWatch.Stop();
+                    for (int s = 0; s < FlockSpecies.Length; s++)
+                    {
+                        if (EcologyStats.TrySameSpeciesNeighborMean(
+                                world, FlockSpecies[s].kind, out float nm))
+                        {
+                            neighborSum[s] += nm;
+                            neighborSamples[s]++;
+                        }
+                        if (EcologyStats.TrySameSpeciesPairDistanceMedian(
+                                world, FlockSpecies[s].kind, out float pd))
+                        {
+                            pairSum[s] += pd;
+                            pairSamples[s]++;
+                        }
+                    }
+                    simWatch.Start();
                 }
 
                 // 長時間実験で系列が肥大しないよう、1ランあたり最大2,000点に抑える。
@@ -166,6 +219,24 @@ namespace SimRunner
                 r.MeanEntitiesPerTick = (double)entitySum / samples;
                 r.MeanSheepPerTick = (double)sheepSum / samples;
                 r.MeanPigPerTick = (double)pigSum / samples;
+            }
+
+            // 群れ指標の時間平均 (Demo 8 第4段 K5)。
+            // 標本が0のとき（その種が warmup 以降ずっと居なかった）は
+            // キーを入れない。0 を入れると「居なかった」と「群れていなかった」が
+            // 混ざり、集計の平均が下に引っ張られる
+            for (int s = 0; s < FlockSpecies.Length; s++)
+            {
+                string name = FlockSpecies[s].name;
+                r.FlockSamples[name] = neighborSamples[s];
+                if (neighborSamples[s] > 0)
+                {
+                    r.NeighborMean[name] = neighborSum[s] / neighborSamples[s];
+                }
+                if (pairSamples[s] > 0)
+                {
+                    r.PairDistanceMedian[name] = pairSum[s] / pairSamples[s];
+                }
             }
 
             if (minVegetation == float.MaxValue) minVegetation = world.VegetationTotal;
@@ -205,6 +276,14 @@ namespace SimRunner
             var (high, low) = EcologyStats.TrampleQuartileThresholds(world);
             r.TrampleQuartileHigh = high;
             r.TrampleQuartileLow = low;
+
+            // コロニー場の空間集中度 (Demo 8 第4段 K5、記録項目)。
+            // 時間平均ではなく最終時点の1点でよい（場の形の記録であり、
+            // τ≈400 で均されるので毎ティック測る意味が薄い）
+            foreach (var (kind, name) in FlockSpecies)
+            {
+                r.ColonyConcentration[name] = EcologyStats.FieldTop10Concentration(world.Colony(kind));
+            }
 
             // 個体あたりの餓死・捕食。分母は延べ生存動物ティック数
             // （PopulationLog が毎ティック記録している）

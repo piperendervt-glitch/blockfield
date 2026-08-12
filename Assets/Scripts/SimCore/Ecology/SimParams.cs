@@ -487,6 +487,23 @@ namespace BlockField.SimCore.Ecology
         /// </summary>
         public float colonyBreedK;
 
+        /// <summary>
+        /// 移動の重み: **自種のコロニー場**へどれだけ引かれるか (w_colony)。
+        /// 群れ行動の本体は 4c (K4) で、そこで掃引して値を決める。
+        ///
+        /// 【K5 で先に器だけ入れた理由】ランダム対照（w_colony=0 で群れ重みだけを
+        /// 切った個体）を走らせるには、切るための摘みが要る。
+        /// **既定は 0 なので現時点の挙動は 1ビットも変わらない**
+        /// （<see cref="EntityWeights.Score"/> で 0×値 = 0 は IEEE754 で厳密）。
+        /// したがって現時点では「本条件 ≡ 対照」であり、両者のハッシュが
+        /// 一致することが対照の配線が正しいことの確認になる（4c で分岐する）。
+        ///
+        /// 他種のコロニー場への重み（盗聴）は 0 のまま寝かせる（prereg 判断2）。
+        /// 採餌時と徘徊時のどちらに掛けるか、値をいくつにするかは 4c の判断で、
+        /// 現在は両方に同じ値を入れてある。
+        /// </summary>
+        public float colonySelfWeight;
+
         // --- Demo 8 第4段 K2: 結合行列 ---
 
         /// <summary>
@@ -596,6 +613,9 @@ namespace BlockField.SimCore.Ecology
             colonyDiffuse = 0.02f,
             colonyDiffusePasses = 1,
             colonyDecay = 0.0025f,
+            // 群れ行動の重み。4c (K4) で掃引する。0 なので現時点の挙動は不変
+            colonySelfWeight = 0f,
+
             // K3 の半飽和定数。48シード掃引で決めた（フィールドのコメント参照）。
             // 場の値（最大 1.0）よりはるかに大きいので、実効的には
             // 確率 ≈ breedChance × colony / k の線形変調として働く
