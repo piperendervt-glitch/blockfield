@@ -6,7 +6,16 @@
 #   停止:   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\longrun100.ps1 -Stop
 #
 # -Detach は自分自身を独立プロセスとして起動し直して即座に戻る。
-# 端末を閉じても SSH を切っても走り続ける（親の子ではなく独立したプロセスになる）。
+#
+# 【なぜ Start-Process ではなく WMI で起こすか — 2026-08-12 の事故】
+# 以前は Start-Process で本体を起こしていたが、それは**ただの子プロセス**であり、
+# 起動した端末のプロセスツリー（Windows Terminal では同一 Job Object）に属したままだった。
+# タブを閉じるとツリーごと TerminateProcess され、
+# **例外もイベントログも残さずに静かに死ぬ**。
+# 実際 540シード×10万ティックの本番が起動2分33秒で消え、run.err は空、
+# WER も .NET Runtime イベントも無し、という状態になった。
+# Win32_Process.Create で起こすと親が WmiPrvSE になり、
+# 端末のツリーからも Job Object からも外れる。端末を閉じても生き残る。
 #
 # 【観察目的】この実験で見たいこと。結果を読むときはこの順で見る。
 #
@@ -103,22 +112,45 @@ if ($Status) {
         exit 1
     }
     Write-Host $text
-    $simPid = (Read-Utf8 $pidFile)
-    if ($simPid) {
-        $alive = @(Get-Process -Id ([int]$simPid.Trim()) -ErrorAction SilentlyContinue).Count -gt 0
-        Write-Host ("プロセス: " + $(if ($alive) { "実行中 (PID $($simPid.Trim()))" } else { "終了済み" }))
+
+    # 本体とラッパーを別々に見る。「本体は生きているのにラッパーだけ死んだ」
+    # （＝進捗が更新されないだけで実験は無事）と
+    # 「両方死んだ」（＝実験が止まった）を区別するため
+    function Test-Pid([string]$path, [string]$label) {
+        $raw = Read-Utf8 $path
+        if (-not $raw) { return }
+        $alive = @(Get-Process -Id ([int]$raw.Trim()) -ErrorAction SilentlyContinue).Count -gt 0
+        Write-Host ("${label}: " + $(if ($alive) { "実行中 (PID $($raw.Trim()))" } else { "終了済み" }))
+    }
+    Test-Pid $pidFile "本体 (SimRunner)"
+    Test-Pid (Join-Path $outPath "wrapper.pid") "ラッパー (進捗更新)"
+
+    # 進捗が止まっていないかは、progress.txt ではなく
+    # **本体が書いている csv の更新時刻**で見るのが確実
+    $cp = Join-Path $outPath "checkpoints.csv"
+    if (Test-Path -LiteralPath $cp) {
+        $age = (Get-Date) - (Get-Item -LiteralPath $cp).LastWriteTime
+        Write-Host ("checkpoints.csv 最終更新: $([int]$age.TotalMinutes) 分前")
     }
     exit 0
 }
 
 # ---- -Stop: 走っているものを止める ----
 if ($Stop) {
-    $simPid = (Read-Utf8 $pidFile)
-    if ($simPid) {
-        $p = Get-Process -Id ([int]$simPid.Trim()) -ErrorAction SilentlyContinue
-        if ($p) { $p | Stop-Process -Force; Write-Host "停止しました (PID $($simPid.Trim()))"; exit 0 }
+    # ラッパー → 本体 の順に落とす。逆順だとラッパーが
+    # 「本体が終わった」と判断して完了扱いの最終行を書いてしまう
+    $stopped = @()
+    foreach ($f in @((Join-Path $outPath "wrapper.pid"), $pidFile)) {
+        $raw = Read-Utf8 $f
+        if (-not $raw) { continue }
+        $p = Get-Process -Id ([int]$raw.Trim()) -ErrorAction SilentlyContinue
+        if ($p) { $p | Stop-Process -Force; $stopped += $raw.Trim() }
     }
-    Write-Host "実行中のプロセスが見つかりません"
+    if ($stopped.Count -gt 0) {
+        Write-Host "停止しました (PID $($stopped -join ', '))"
+    } else {
+        Write-Host "実行中のプロセスが見つかりません"
+    }
     exit 0
 }
 
@@ -127,6 +159,10 @@ if ($Detach) {
     # 出力先はここで作る。子プロセスの起動より前に用意しておくことで、
     # 呼び出し側が直後に progress.txt を読んでも競合しない
     New-Item -ItemType Directory -Force -Path $outPath | Out-Null
+    # 前回の PID を消しておく。残っていると -Status が
+    # 使い回された別プロセスの PID を「実行中」と誤報する
+    Remove-Item -LiteralPath $pidFile, (Join-Path $outPath "wrapper.pid") `
+        -Force -ErrorAction SilentlyContinue
     Write-Utf8 $progressFile @(
         "状態: 起動要求",
         "要求時刻: $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))",
@@ -135,16 +171,47 @@ if ($Detach) {
     )
 
     $self = $MyInvocation.MyCommand.Path
-    $childArgs = @(
-        "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $self,
-        "-Seeds", $Seeds, "-Ticks", $Ticks, "-Size", $Size,
-        "-CheckpointInterval", $CheckpointInterval, "-Images", $Images,
-        "-OutDir", $outPath
-    )
-    $child = Start-Process -FilePath "powershell.exe" -ArgumentList $childArgs `
-        -WorkingDirectory $projectRoot -WindowStyle Hidden -PassThru
+    # WMI に渡すのは配列ではなく1本のコマンドライン文字列なので、
+    # 空白を含むパスは自分で引用する
+    $childCmd = ('powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden ' +
+        '-File "{0}" -Seeds {1} -Ticks {2} -Size {3} ' +
+        '-CheckpointInterval {4} -Images {5} -OutDir "{6}"') -f `
+        $self, $Seeds, $Ticks, $Size, $CheckpointInterval, $Images, $outPath
 
-    Write-Host "起動しました (ラッパー PID $($child.Id))"
+    # 端末のプロセスツリー / Job Object の外へ出す（冒頭のコメント参照）。
+    # 失敗したら従来どおり Start-Process へ落とすが、その場合は
+    # 端末を閉じると死ぬので警告を出す
+    $childPid = $null
+    try {
+        $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create `
+            -Arguments @{ CommandLine = $childCmd; CurrentDirectory = $projectRoot }
+        if ($r.ReturnValue -eq 0) {
+            $childPid = [int]$r.ProcessId
+        } else {
+            Write-Warning "Win32_Process.Create が失敗しました (ReturnValue=$($r.ReturnValue))"
+        }
+    } catch {
+        Write-Warning "Win32_Process.Create を呼べません: $($_.Exception.Message)"
+    }
+
+    if ($null -eq $childPid) {
+        $childArgs = @(
+            "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $self,
+            "-Seeds", $Seeds, "-Ticks", $Ticks, "-Size", $Size,
+            "-CheckpointInterval", $CheckpointInterval, "-Images", $Images,
+            "-OutDir", $outPath
+        )
+        $child = Start-Process -FilePath "powershell.exe" -ArgumentList $childArgs `
+            -WorkingDirectory $projectRoot -WindowStyle Hidden -PassThru
+        $childPid = $child.Id
+        Write-Warning "Start-Process で代替起動しました。**この端末を閉じると実行も死にます**"
+    }
+
+    # ラッパー自身の PID も残す。-Status で「本体は生きているがラッパーが死んだ」を
+    # 区別できるようにするため（2026-08-12 の事故ではこれが分からなかった）
+    Write-Utf8 (Join-Path $outPath "wrapper.pid") @("$childPid")
+
+    Write-Host "起動しました (ラッパー PID $childPid)"
     Write-Host "進捗: $progressFile"
     Write-Host "確認: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\longrun100.ps1 -Status"
     exit 0
@@ -247,8 +314,17 @@ while (-not $proc.HasExited) {
     }
 }
 
-$proc.WaitForExit()
-$code = $proc.ExitCode
+# 【最終状態は何があっても書く】ここで例外が出ると $ErrorActionPreference = "Stop" で
+# ラッパーが最終行を書かずに死に、progress.txt が「実行中」のまま取り残される。
+# それは 2026-08-12 の事故（外部からのツリー kill）と**見分けがつかない**ので、
+# 後始末は握りつぶしてでも必ず1行残す
+$code = -1
+try {
+    $proc.WaitForExit()
+    $code = $proc.ExitCode
+} catch {
+    $code = -1
+}
 $elapsed = (Get-Date) - $start
 
 $errText = Read-Shared $errFile
@@ -272,6 +348,14 @@ if ($errText -and $errText.Trim().Length -gt 0) {
     $final += ""
     $final += "**標準エラーに出力があった**（run.err を確認すること）:"
     $final += ($errText.Trim() -split "`n" | Select-Object -First 5)
+} elseif ($code -notin @(0, 1, 2)) {
+    # 終了コードが想定外なのに標準エラーが空 ＝ 本体は例外を投げていない。
+    # .NET の未処理例外なら必ず run.err に出るので、この形は
+    # **外部からの TerminateProcess** を強く示唆する（2026-08-12 の事故）
+    $final += ""
+    $final += "**標準エラーは空なのに異常終了している** — 外部から強制終了された可能性が高い。"
+    $final += "端末を閉じた / タスクマネージャで殺した / 電源断 などを疑うこと。"
+    $final += "checkpoints.csv はそこまでの分が残っているので、途中経過は読める。"
 }
-Write-Utf8 $progressFile $final
+try { Write-Utf8 $progressFile $final } catch { }
 exit $code

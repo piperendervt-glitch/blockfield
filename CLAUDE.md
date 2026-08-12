@@ -47,6 +47,24 @@
 - ログのタグを増やしたら capture_session.ps1 の捕捉対象を確認する
   （現在は Unity ログ全体を拾う設定なので通常は不要）
 
+## 長時間バッチ運用
+- **Start-Process で起こしたプロセスは「独立」ではない。** 起動した端末の
+  プロセスツリー（Windows Terminal では同一 Job Object）に属したままなので、
+  タブを閉じるとツリーごと TerminateProcess され、
+  **例外もイベントログも残さず静かに死ぬ**
+  （2026-08-12、540シード×10万ティックの本番が起動2分33秒で消失）。
+  端末から切り離すには Win32_Process.Create で起こす
+  （親が WmiPrvSE になりツリー外に出る）。longrun100.ps1 -Detach は対応済み
+- **静かな死の切り分けはこの順で行う。** .NET の未処理例外なら必ず
+  run.err に出る → run.err が空なら例外ではない → WER / Application Error /
+  .NET Runtime イベントが無ければクラッシュでもない → 残るは外部からの強制終了。
+  OOM を疑う前にこの4点を確認すること（実測: 100x100 の14並列でも
+  ピーク 120MB。世界の大きさもシード数もメモリの問題にはならない）
+- 進捗ファイルが「実行中」で止まっていても、それだけでは
+  「本体が死んだ」と断定できない。ラッパーだけが死んだ可能性がある。
+  -Status は本体とラッパーを別々に報告し、
+  checkpoints.csv の更新時刻も出す。そちらで判断する
+
 ## ビルド
 - scripts/build_quest.ps1 → scripts/deploy.ps1
 - ProjectSettings/ の差分は必ずコミット（XR preloadedAssets消失対策）
