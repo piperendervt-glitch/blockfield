@@ -361,65 +361,143 @@ namespace BlockField.Tests.EditMode
                 "痕跡が1セルも立たない種がある（4b の閾値判定が自己閉塞する）");
         }
 
+        // 【削除したテスト: Colony_EverythingExceptTheColonyFieldsIsUnchanged (4a)】
+        //
+        // 「コロニー場を除いたハッシュが、場を足す前と完全一致する」を
+        // Unity で測った基準値6件で固定していた（判定 M0b）。4a では
+        // 誰もこの場を読まなかったので成り立つ主張だったが、
+        // **K3 で場が繁殖確率を決めるようになった時点で前提ごと無くなった**。
+        // 場は世界に影響を与えるのが仕事になったので、
+        // 「足しても何も変わらない」はもはや望ましい性質ですらない。
+        //
+        // 生き残る中身（書き込みが乱数を消費しないこと）は
+        // Breed_ModulationDoesNotConsumeExtraRandomness が引き継いでいる。
+        // 4a 時点の 192/192 一致はチェックリストに記録済み。
+
+        // ================= K3: 繁殖判定の場化 =================
+
         /// <summary>
-        /// **コロニー場を足したことで、それ以外は1ビットも変わっていないこと（判定 M0b）。**
+        /// **繁殖に相手個体が要らなくなったこと（M1 の実体）。**
         ///
-        /// 【なぜ基準ハッシュを焼き込むか】場を1枚足せば全体のハッシュは必ず変わるので、
-        /// 全体を見ても「足した分だけ変わったのか、書き込みが RNG を消費して
-        /// 世界そのものがずれたのか」を区別できない。
-        /// コロニー場（と個体が持つその重み）を**除いた**ハッシュが、
-        /// 追加前に測った値と完全一致すれば、
-        ///   - 出生時の書き込みが RNG を消費していない
-        ///   - 既存の場にも個体の状態にも手が入っていない
-        /// の両方を一度に固定できる。
-        ///
-        /// 基準値は K1 を入れる直前のコミット (da8a72c, K2 完了時点) を
-        /// **この EditMode テストと同じ Unity 上で**走らせて測ったもの。
-        /// SimRunner (.NET) では同じ照合を 4条件 × 48シードで行い、192/192 一致を確認した。
-        /// **ここが落ちたら、繁殖まわりの変更が乱数列を動かしたということ。**
-        ///
-        /// 【基準値を Unity で測る必要がある — 実行環境で結果が違う】
-        /// 同じシード・同じティック数でも、Unity (Mono) と SimRunner (.NET 9) は
-        /// **違う状態に到達する**。ティック0（地形生成の直後）のハッシュは両者一致し、
-        /// ティック1で既に分かれるので、原因はシムの浮動小数演算にある
-        /// （4a の変更とは無関係の既存の性質。seed 12345 / 400ティックで
-        /// Unity 0x3E9557ABA03A1034 に対し .NET は 0xB44395FBF20B4363）。
-        /// 決定論 f(シード) は**同一の実行環境の中でのみ**成り立つ、と読むこと。
-        /// したがって .NET で測った値をここに焼き込んではいけない。
+        /// 移行前は隣接4近傍に条件を満たす同種個体がいることが必須だった。
+        /// 1頭だけを置いて子が生まれるなら、その要求が消えたと言える。
         /// </summary>
         [Test]
-        public void Colony_EverythingExceptTheColonyFieldsIsUnchanged()
+        public void Breed_LoneAnimalBreedsWhenItsColonyFieldIsStrong()
         {
-            var baseline = new Dictionary<(int ticks, uint seed), ulong>
+            foreach (var kind in new[] { EntityKind.Sheep, EntityKind.Pig, EntityKind.Wolf })
             {
-                [(400, 12345u)] = 0x3E9557ABA03A1034UL,
-                [(400, 777u)] = 0x5F4AC732D2B213ACUL,
-                [(400, 20260809u)] = 0x0668AAE4E50AE98EUL,
-                [(800, 12345u)] = 0x1E1283F0112A22B2UL,
-                [(800, 777u)] = 0x6DE0C269E9672017UL,
-                [(800, 20260809u)] = 0x44E46DDE35B56DF2UL,
-            };
+                var world = MakeDiorama(k_Seeds[0]);
+                var p = SimParams.Default;
+                p.animalSpawnChance = 0f;    // 相手になりうる個体を湧かせない
+                p.hungerPerTick = 0f;
+                p.wolfHungerPerTick = 0f;
+                p.moveChance = 0f;
 
-            float colonyTotal = 0f;
-            foreach (var kv in baseline)
-            {
-                var world = Run(kv.Key.seed, SimParams.Default, kv.Key.ticks);
+                var (x, z) = FindFlatCell(world);
+                Assert.GreaterOrEqual(world.TrySpawn(kind, x, z, 0, p), 0, $"{kind} を置けない");
+                world.Colony(kind).SetAtColumn(x, z, 1f);
 
-                Assert.AreEqual(kv.Value,
-                    world.ComputeContentHash(ColonyField.AllNames),
-                    $"seed {kv.Key.seed} / {kv.Key.ticks}ティック: " +
-                    "コロニー場を除いた状態が追加前と違う（書き込みが RNG を消費している？）");
-
-                foreach (var kind in new[] { EntityKind.Sheep, EntityKind.Pig, EntityKind.Wolf })
+                int ticks = 0;
+                for (; ticks < 2000 && world.BirthCount == 0; ticks++)
                 {
-                    colonyTotal += EcologyStats.ColonyStats(world, kind).max;
+                    Simulation.Tick(world, world.Rng, p);
                 }
+
+                Assert.Greater(world.BirthCount, 0,
+                    $"{kind}: 相手が居ないと繁殖できないままになっている（K3 が効いていない）");
+            }
+        }
+
+        /// <summary>
+        /// **実効確率がミカエリス・メンテン型の変調になっていること。**
+        ///
+        /// 実効確率 = breedChance × colony / (colony + colonyBreedK) を、
+        /// 出生までにかかったティック数から逆算して確かめる。
+        /// 場の値を 2 段階に振って、**濃い場のほうが速く産む**ことを見る。
+        ///
+        /// 【なぜ確率そのものを直接見ないか】確率は内部量で外から読めない。
+        /// 待ち時間の期待値 1/p は観測できるので、そちらで押さえる。
+        /// 個体を独立に多数回試行して平均を取る（1回では分散が大きすぎる）。
+        /// </summary>
+        [Test]
+        public void Breed_ChanceIsModulatedByTheColonyField()
+        {
+            // 場の値 → 出生までの平均ティック数
+            double MeanTicksToBirth(float colony, int trials)
+            {
+                double total = 0;
+                for (int trial = 0; trial < trials; trial++)
+                {
+                    var world = MakeDiorama(1000u + (uint)trial * 7919u);
+                    var p = SimParams.Default;
+                    p.animalSpawnChance = 0f;
+                    p.hungerPerTick = 0f;
+                    p.wolfHungerPerTick = 0f;
+                    p.moveChance = 0f;
+                    p.colonyPresenceDeposit = 0f;  // 場を固定したいので滞在の書き込みを止める
+                    p.colonyDiffuse = 0f;
+                    p.colonyDecay = 0f;
+
+                    var (x, z) = FindFlatCell(world);
+                    Assert.GreaterOrEqual(world.TrySpawn(EntityKind.Sheep, x, z, 0, p), 0);
+                    world.ColonySheep.SetAtColumn(x, z, colony);
+
+                    int t = 0;
+                    for (; t < 20000 && world.BirthCount == 0; t++)
+                    {
+                        Simulation.Tick(world, world.Rng, p);
+                    }
+                    total += t;
+                }
+                return total / trials;
             }
 
-            // 「除けば一致する」だけでは、場が丸ごと空でも通ってしまう。
-            // 実際に何かが書かれていることも同時に要求する
-            Assert.Greater(colonyTotal, 0f,
-                "コロニー場が全シードで空。除外ハッシュの一致が無意味になっている");
+            const int trials = 12;
+            double strong = MeanTicksToBirth(1.0f, trials);
+            double weak = MeanTicksToBirth(0.25f, trials);
+
+            // 実効確率の比は (1/(1+12)) : (0.25/(0.25+12)) = 0.0769 : 0.0204 ＝ 3.77倍。
+            // 待ち時間はその逆比になるので、薄い場のほうが明確に遅いはず。
+            // クールダウン等の定数項が乗るので比そのものは緩めに見る
+            Assert.Less(strong, weak,
+                $"場が濃いほうが遅い（濃 {strong:F0}t / 薄 {weak:F0}t）。変調の向きが逆になっている");
+            Assert.Greater(weak / strong, 1.5,
+                $"場の濃さで待ち時間が変わっていない（濃 {strong:F0}t / 薄 {weak:F0}t）。" +
+                "変調が効いていないか、飽和して差が出ていない");
+        }
+
+        /// <summary>
+        /// **変調が乱数を追加消費していないこと。**
+        ///
+        /// 変調は「既存の breedChance 判定の乱数1個と比べる相手を変える」だけの
+        /// 実装でなければならない。乱数をもう1つ引くと消費列が変わり、
+        /// 4c 以降の掃引で「場の効果」と「乱数列のずれ」が混ざる。
+        ///
+        /// k を変えれば繁殖の成否は変わるが、**繁殖が一度も起きない条件**では
+        /// 消費列が同じになるはず、という形で確かめる。
+        /// </summary>
+        [Test]
+        public void Breed_ModulationDoesNotConsumeExtraRandomness()
+        {
+            ulong Run(float k)
+            {
+                var world = MakeDiorama(k_Seeds[0]);
+                var p = SimParams.Default;
+                p.colonyPresenceDeposit = 0f;  // 場を空のままにする → 実効確率は常に 0
+                p.colonyBreedDeposit = 0f;
+
+                for (int t = 0; t < 400; t++)
+                {
+                    Simulation.Tick(world, world.Rng, p);
+                }
+                Assert.AreEqual(0, world.BirthCount, "場が空なのに繁殖が起きている");
+                return world.ComputeContentHash();
+            }
+
+            Assert.AreEqual(Run(12f), Run(400f),
+                "場が空で繁殖が起きない条件なのに k で世界が変わった。" +
+                "変調が乱数を追加消費している疑いがある");
         }
 
         /// <summary>

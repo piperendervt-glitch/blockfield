@@ -575,29 +575,46 @@ namespace BlockField.SimCore.Ecology
         }
 
         /// <summary>
-        /// 繁殖 (E4)。隣接する同種の動物ペアが子を1つ産む。
+        /// 繁殖 (E4 → Demo 8 第4段 K3 で場化)。自種の生活圏に居る個体が子を1つ産む。
         ///
-        /// 【判定と RNG 消費の順 — Demo 8 第4段 4a で実装に合わせて書き直した】
-        /// 個体ごとに id 昇順で、
+        /// 【K3 で何が変わったか】移行前は「隣接4近傍に条件を満たす同種個体がいるか」を
+        /// 走査していた（<c>FindBreedPartner</c>）。それを
+        /// **自セルの自種コロニー場による繁殖確率の変調**に置き換えた。
+        ///   実効確率 = breedChance × colony / (colony + <see cref="SimParams.colonyBreedK"/>)
+        /// 個体は相手の位置を知らず、自分の足元の濃さだけを見る。
+        /// 獲物場で狼の視界走査を消したのと同じ形の置換である。
+        ///
+        /// 可否のゲート（colony ≥ 閾値）ではなく確率の変調にしたのは、
+        /// **ゲート方式が実測で破綻したため**である（詳細は
+        /// <see cref="SimParams.colonyBreedK"/>）。場は時間積分なので、
+        /// 旧判定が要求していた「同時性」を 0/1 の判定には落とせない。
+        ///
+        /// 生態的な意味は変わっている: 有性生殖（相手が要る）から
+        /// **場を介した繁殖**（生活圏の濃さが確率を決める）になった。
+        /// 相手個体が居なくなったので、繁殖コストは産んだ個体にだけ課される。
+        ///
+        /// 【判定と RNG 消費の順】個体ごとに id 昇順で、
         ///   1. クールダウン &gt; 0 なら 1 減らして終わり（RNG 非消費）
         ///   2. 自分の hunger が <see cref="SimParams.breedHungerMax"/>（既定 0.4）以上なら不成立
-        ///   3. <see cref="FindBreedPartner"/> で相手を探す（RNG 非消費）
-        ///   4. 確率 <see cref="SimParams.breedChance"/>（既定 0.2）の抽選 ← **最初の RNG 消費**
+        ///   3. 自セルの自種コロニー場を読んで実効確率を作る（**場読み**、RNG 非消費）
+        ///   4. その実効確率で抽選 ← **最初の RNG 消費**（変調しても消費は1個のまま）
         ///   5. <see cref="SimParams.animalCap"/> の判定
         ///   6. 隣接空きセルを固定順で探し、見つかるまで <see cref="World.TrySpawn"/>
         ///      （子の向きに 1 回ずつ RNG を消費する。**試行ごとに消費する**ので、
         ///       塞がっている方向があるとその分だけ余分に消費される）
         /// この順序は乱数列そのものなので、判定を1つ入れ替えるだけで世界が別物になる。
+        /// K3 は 3〜4 を入れ替えたので、**移行の前後で ContentHash は比較できない**
+        /// （移行前は相手のいる個体しか抽選しなかったが、いまは資格のある個体が
+        /// 全員抽選するので消費数そのものが変わる。prereg で確定済み）。
         ///
-        /// 成立すると親双方に hunger +0.3 と 20 ティックのクールダウン、
+        /// 成立すると産んだ個体に hunger +0.3 と 20 ティックのクールダウン、
         /// 子にも 20 ティックのクールダウン（即時繁殖の防止）が入る。
         ///
-        /// ペアは**低い id 側だけが処理する**（<see cref="FindBreedPartner"/> が
-        /// 相手の id &gt; 自分の id を要求するため。二重判定の防止）。
-        /// その副作用として、相手（＝高い id 側）はこのティックのループでこの後に
-        /// 訪問され、入ったばかりのクールダウンが 1 減る — つまり**親Bのクールダウンは
-        /// 親Aより 1 ティック短い**。既存挙動の保存を優先し、本段では修正しない
-        /// （Demo 8 第4段 prereg に記録）。
+        /// 【消えた非対称】移行前はペアの低い id 側だけが処理し、相手（高い id 側）は
+        /// 同じティックのループでこの後に訪問されて入ったばかりのクールダウンが 1 減る、
+        /// という 1 ティックのずれがあった。相手という概念が無くなったので
+        /// **この非対称も消えた**（prereg に「本段では修正しない」と書いた既存挙動だが、
+        /// 修正したのではなく前提ごと無くなった）。
         ///
         /// ループは繁殖前の個体数までしか回さないので、このティックで生まれた子は
         /// 走査対象にならない（新生児は次ティックから行動する）。
@@ -625,13 +642,21 @@ namespace BlockField.SimCore.Ecology
                     continue;
                 }
 
-                int partnerIndex = FindBreedPartner(world, e, p.breedHungerMax);
-                if (partnerIndex < 0)
-                {
-                    continue;
-                }
+                // 場読み (Demo 8 第4段 K3)。相手個体の探索はここで消えた。
+                // 個体が見るのは自分の足元の自種コロニー場の濃さだけである。
+                //
+                // 可否のゲートではなく**確率の変調**にしてある。ゲート方式は
+                // 実測で破綻した（単独個体が自分の痕跡で繁殖する／閾値を上げると
+                // 双安定になる。SimParams.colonyBreedK のコメント参照）。
+                // 場は時間積分なので、旧判定が要求していた「同時性」を
+                // 0/1 の判定には落とせない。
+                //
+                // 乱数は**追加で消費しない**。既存の breedChance 判定の1個を
+                // そのまま使い、比べる相手の確率を変調するだけである
+                float colony = world.Colony(e.kind).GetAtColumn(e.cell.x, e.cell.z);
+                float breedChance = p.breedChance * colony / (colony + p.colonyBreedK);
 
-                if (rng.NextFloat01() >= p.breedChance)
+                if (rng.NextFloat01() >= breedChance)
                 {
                     continue;
                 }
@@ -682,15 +707,15 @@ namespace BlockField.SimCore.Ecology
                 // 4a では誰も読まない（読むのは 4b の繁殖判定と 4c の群れ行動）
                 DepositColony(world, p, child.kind, child.cell);
 
-                // 親双方に繁殖コスト＋クールダウン
+                // 繁殖コスト＋クールダウン。**産んだ個体にだけ**課す (Demo 8 第4段 K3)。
+                // 場化で相手個体が居なくなったので、旧実装が親Bへ課していた分は
+                // 課す対象そのものを失った。近傍の同種を1体選んで課す案もあったが、
+                // それは消したはずの個体探索を復活させることになり本末転倒である。
+                // 結果として1回の出生あたりの繁殖コストは 0.6 → 0.3 に半減する。
+                // これは生態への実質的な変更なので M2（餓死率・個体数）で監視する
                 e.hunger += k_BreedCost;
                 e.breedCooldown = k_BreedCooldownTicks;
                 world.UpdateEntity(i, e);
-
-                var partner = world.Entities[partnerIndex];
-                partner.hunger += k_BreedCost;
-                partner.breedCooldown = k_BreedCooldownTicks;
-                world.UpdateEntity(partnerIndex, partner);
             }
         }
 
@@ -718,7 +743,7 @@ namespace BlockField.SimCore.Ecology
         /// 存在の痕跡 (Demo 8 第4段 4a 追補)。生きている動物が、そのティックの
         /// 最終位置の自種コロニー場へ <see cref="SimParams.colonyPresenceDeposit"/> を書く。
         ///
-        /// 【なぜ二層にしたか】4b で消す <see cref="FindBreedPartner"/> が見ているのは
+        /// 【なぜ二層にしたか】4b で消した <c>FindBreedPartner</c> が見ていたのは
         /// 「隣に相手が**存在するか**」である。繁殖イベントだけを覚える場は
         /// 置換元と意味がずれており、その症状が「場が0から立ち上がらない」
         /// 自己閉塞だった（4a 実測: 48シード中 羊28 / 狼33 で痕跡ゼロ）。
@@ -758,41 +783,6 @@ namespace BlockField.SimCore.Ecology
                 }
                 world.Colony(e.kind).Deposit(e.cell, p.colonyPresenceDeposit);
             }
-        }
-
-        /// <summary>
-        /// 繁殖相手: 隣接（4近傍、高低差1以下）の同種で、双方の条件（hunger&lt;0.3、クールダウン0）を
-        /// 満たす個体。ペアの二重処理を防ぐため相手の id が自分より大きい場合のみ成立。
-        /// </summary>
-        static int FindBreedPartner(World world, Entity e, float breedHungerMax)
-        {
-            foreach (var dir in FacingDirections)
-            {
-                int nx = e.cell.x + dir.x;
-                int nz = e.cell.z + dir.z;
-                if (!world.InBounds(nx, nz))
-                {
-                    continue;
-                }
-                var cell = new Int3(nx, world.GetSurfaceHeight(nx, nz), nz);
-                if (Math.Abs(cell.y - e.cell.y) > 1)
-                {
-                    continue;
-                }
-                if (!world.TryGetEntityIndexAt(cell, out int index))
-                {
-                    continue;
-                }
-                var partner = world.Entities[index];
-                if (partner.kind == e.kind
-                    && partner.id > e.id
-                    && partner.hunger < breedHungerMax
-                    && partner.breedCooldown == 0)
-                {
-                    return index;
-                }
-            }
-            return -1;
         }
 
         /// <summary>

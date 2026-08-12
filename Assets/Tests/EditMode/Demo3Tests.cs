@@ -210,30 +210,45 @@ namespace BlockField.Tests.EditMode
             Assert.AreEqual(0, world.StarvationCount, "餓死が起きている（捕食ではない可能性）");
         }
 
+        /// <summary>
+        /// 繁殖が起きて、産んだ個体と子にクールダウンが入ること。
+        ///
+        /// 【Demo 8 第4段 K3 で書き換えた】移行前は「隣接した給餌済みペアが産む」
+        /// 仕様だったので、相手を隣に置くことが前提条件で、
+        /// クールダウンは**親2＋子の3体**に入った。
+        /// 場化後は繁殖に相手が要らず、自セルの自種コロニー場が確率を変調する。
+        /// したがって
+        ///   - 個体は1頭でも産む（この判定を「1頭だけ置く」に変えたのはそのため）
+        ///   - クールダウンが入るのは**産んだ個体と子の2体**
+        /// になる。prereg で予告済みの仕様変更である。
+        /// </summary>
         [Test]
-        public void Breeding_AdjacentFedPair_ProducesChild_AndSetsCooldown()
+        public void Breeding_LoneFedAnimalInItsColony_ProducesChild_AndSetsCooldown()
         {
-            // シード1で出生がティック11に決定論的に発生することをハーネスで確認済み
             var world = World.Create(WorldParams(1u));
             var p = ScenarioParams();
             var (x, z) = FindFlatRun(world, 3);
             world.TrySpawn(EntityKind.Sheep, x, z, 0);
-            world.TrySpawn(EntityKind.Sheep, x + 1, z, 0);
+
+            // コロニー場が薄いうちは実効確率がごく小さいので、
+            // 「場が濃い場所に居る」状況を作ってから測る。
+            // 場そのものの立ち上がり方は Demo8Stage4Tests が受け持つ
+            world.ColonySheep.SetAtColumn(x, z, 1f);
 
             int bornAt = -1;
-            for (int t = 0; t < 100 && bornAt < 0; t++)
+            for (int t = 0; t < 400 && bornAt < 0; t++)
             {
                 Simulation.Tick(world, world.Rng, p);
-                if (world.SheepCount >= 3)
+                if (world.SheepCount >= 2)
                 {
                     bornAt = t;
                 }
             }
 
-            Assert.GreaterOrEqual(bornAt, 0, "100ティック以内に子が生まれなかった");
+            Assert.GreaterOrEqual(bornAt, 0, "相手が居なくても産めるはずだが、400ティックで子が生まれなかった");
             Assert.GreaterOrEqual(world.BirthCount, 1);
 
-            // クールダウン: 出生直後、関与個体（親2＋子）にクールダウンが設定されている
+            // クールダウン: 産んだ個体と子の2体に入る（相手が居ないので3体にはならない）
             int withCooldown = 0;
             foreach (var e in world.Entities)
             {
@@ -242,7 +257,8 @@ namespace BlockField.Tests.EditMode
                     withCooldown++;
                 }
             }
-            Assert.GreaterOrEqual(withCooldown, 3, "繁殖後のクールダウンが設定されていない");
+            Assert.AreEqual(2, withCooldown,
+                "繁殖後のクールダウンは「産んだ個体＋子」の2体に入るはず");
         }
 
         [Test]
