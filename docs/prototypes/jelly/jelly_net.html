@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>AURELIA NET — 2D nerve net (Pallasdies-lite)</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%;overflow:hidden;background:#050d18;
+    font-family:ui-monospace,'SF Mono',Menlo,monospace;
+    -webkit-user-select:none;user-select:none;touch-action:none}
+  #cv{position:fixed;inset:0}
+  .hud{position:fixed;top:env(safe-area-inset-top,0);left:0;right:0;padding:12px 14px;
+    pointer-events:none;color:#8fb3c7}
+  .hud h1{font-size:12px;letter-spacing:.18em;color:#5ee8d8}
+  .hud .sub{font-size:10px;margin-top:3px;color:#4f7186;line-height:1.5}
+  .bar{position:fixed;left:0;right:0;bottom:calc(env(safe-area-inset-bottom,0)+12px);
+    display:flex;justify-content:center;gap:10px}
+  .bar button{pointer-events:auto;border:1px solid rgba(94,232,216,.28);
+    background:rgba(10,28,44,.72);color:#8fb3c7;font:inherit;font-size:12px;
+    padding:8px 13px;border-radius:999px}
+  .bar button.on{background:rgba(94,232,216,.18);color:#cdeee8}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div class="hud">
+  <h1>AURELIA&nbsp;NET</h1>
+  <div class="sub">2D motor nerve net (MNN, cyan) + diffuse net (DNN, magenta)<br>
+  strong single-spike synapses · conduction delays · von Mises neurites<br>
+  タップ=その場所を刺激(MNN+DNN共活性化 → 旋回)</div>
+</div>
+<div class="bar">
+  <button id="bPause">⏸</button>
+  <button id="bPace" class="on">rhopalium</button>
+  <button id="bDnn" class="on">DNN</button>
+  <button id="bReset">↺ rewire</button>
+</div>
+<script>
+"use strict";
+const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
+let W=0,H=0;
+function resize(){
+  const d=Math.min(devicePixelRatio||1,2);
+  W=innerWidth; H=innerHeight;
+  cv.width=W*d; cv.height=H*d;
+  cv.style.width=W+'px'; cv.style.height=H+'px';
+  ctx.setTransform(d,0,0,d,0,0);
+}
+addEventListener('resize',resize); resize();
+
+/* ================= nerve nets ================= */
+const R=Math.min(W,H)*0.30;          // bell radius (screen px, body frame)
+const SEG=24;                        // margin muscle sectors
+const MAXD=6;                        // max conduction delay (ticks)
+
+function vonMises(mu,kappa){          // crude sampler: wrapped, fine for structure
+  let best=0,bw=-1;
+  for(let k=0;k<8;k++){
+    const a=Math.random()*6.2832;
+    const w=Math.exp(kappa*Math.cos(a-mu))*Math.random();
+    if(w>bw){bw=w;best=a;}
+  }
+  return best;
+}
+
+function buildNet(n, rMin, rMax, connR, kappa, wSyn, refr, delayScale){
+  const px=[],py=[],ori=[];
+  for(let i=0;i<n;i++){
+    const rr=Math.sqrt(rMin*rMin+Math.random()*(rMax*rMax-rMin*rMin));
+    const a=Math.random()*6.2832;
+    px.push(rr*Math.cos(a)); py.push(rr*Math.sin(a));
+    ori.push(vonMises(a,kappa));      // neurites biased along the radial direction
+  }
+  const adj=[];                       // [ [j, delay], ... ] per neuron
+  for(let i=0;i<n;i++){
+    const list=[];
+    for(let j=0;j<n;j++){
+      if(i===j)continue;
+      const dx=px[j]-px[i], dy=py[j]-py[i];
+      const d=Math.hypot(dx,dy);
+      if(d>connR)continue;
+      const ang=Math.atan2(dy,dx);
+      const align=Math.exp(1.2*Math.cos(2*(ang-ori[i])));   // neurite-direction gating
+      if(Math.random()<0.55*align/Math.exp(1.2)){
+        list.push([j, 1+Math.min(MAXD-1, Math.floor(d/delayScale))]);
+      }
+    }
+    adj.push(list);
+  }
+  return {n,px,py,ori,adj,wSyn,refr,
+    V:new Float32Array(n), Rf:new Int16Array(n),
+    inbox:Array.from({length:MAXD},()=>new Float32Array(n)),
+    fired:[], flash:new Float32Array(n)};
+}
+
+function stepNet(net,t){
+  const slot=t%MAXD;
+  net.fired.length=0;
+  for(let i=0;i<net.n;i++){
+    if(net.Rf[i]>0){ net.Rf[i]--; net.inbox[slot][i]=0; continue; }
+    const v=net.V[i]*0.7 + net.inbox[slot][i];
+    net.inbox[slot][i]=0;
+    if(v>=1.0){
+      net.V[i]=0; net.Rf[i]=net.refr; net.fired.push(i); net.flash[i]=1;
+      for(const [j,dl] of net.adj[i])
+        net.inbox[(t+dl)%MAXD][j]+=net.wSyn;
+    }else net.V[i]=v;
+  }
+  for(let i=0;i<net.n;i++) net.flash[i]*=0.82;
+}
+function stim(net,x,y,rad){
+  const t=world.t;
+  for(let i=0;i<net.n;i++){
+    const d=Math.hypot(net.px[i]-x, net.py[i]-y);
+    if(d<rad && net.Rf[i]===0) net.inbox[(t+1)%MAXD][i]+=1.5;
+  }
+}
+
+/* ================= jelly body ================= */
+const world={t:0, paused:false, paceOn:true, dnnOn:true};
+let mnn, dnn, jelly;
+function birth(){
+  mnn=buildNet(190, R*0.15, R*0.98, R*0.30, 1.2, 1.25, 34, R*0.11);
+  dnn=buildNet(80,  R*0.30, R*0.98, R*0.42, 0.4, 1.25, 60, R*0.07);  // slower, sparser, longer refractory
+  jelly={x:W/2,y:H*0.45,vx:0,vy:0,th:0,om:0,
+    contract:new Float32Array(SEG), dnnAct:new Float32Array(SEG),
+    rhopal:0};                        // pacemaker margin angle index (MNN site)
+}
+birth();
+
+function sector(a){ let s=Math.round(a/(6.2832/SEG)); return ((s%SEG)+SEG)%SEG; }
+
+function step(){
+  const t=world.t;
+  // rhopalium: spontaneous MNN activation at one margin site
+  if(world.paceOn && t%210===0){
+    const a=jelly.rhopal*6.2832/SEG;
+    stim(mnn, Math.cos(a)*R*0.93, Math.sin(a)*R*0.93, R*0.12);
+  }
+  stepNet(mnn,t); stepNet(dnn,t);
+  // margin readout: MNN fires near the rim contract that sector
+  for(const i of mnn.fired){
+    const rr=Math.hypot(mnn.px[i],mnn.py[i]);
+    if(rr>R*0.72){
+      const s=sector(Math.atan2(mnn.py[i],mnn.px[i]));
+      jelly.contract[s]=Math.min(1, jelly.contract[s]+0.55);
+    }
+  }
+  // DNN activity biases margin contraction strength (turning, per the paper)
+  for(const i of dnn.fired){
+    const s=sector(Math.atan2(dnn.py[i],dnn.px[i]));
+    jelly.dnnAct[s]=Math.min(1.6, jelly.dnnAct[s]+0.5);
+  }
+  // muscle -> thrust & torque on the rigid body
+  for(let s=0;s<SEG;s++){
+    const c=jelly.contract[s];
+    if(c>0.02){
+      const gain=1+1.6*jelly.dnnAct[s];
+      const a=jelly.th + s*6.2832/SEG;
+      const f=0.030*R*0.06*c*gain;
+      jelly.vx-=Math.cos(a)*f; jelly.vy-=Math.sin(a)*f;
+      const lx=Math.cos(a)*R*0.06, ly=Math.sin(a)*R*0.06;   // scaled lever
+      jelly.om+=(lx*(-Math.sin(a)*f)-ly*(-Math.cos(a)*f))*0.02;
+    }
+    jelly.contract[s]*=0.86;
+    jelly.dnnAct[s]*=0.97;
+  }
+  jelly.vx*=0.965; jelly.vy*=0.965; jelly.om*=0.94;
+  jelly.x+=jelly.vx; jelly.y+=jelly.vy; jelly.th+=jelly.om;
+  if(jelly.x<0)jelly.x+=W; if(jelly.x>=W)jelly.x-=W;
+  if(jelly.y<0)jelly.y+=H; if(jelly.y>=H)jelly.y-=H;
+  world.t++;
+}
+
+/* ================= interaction ================= */
+cv.addEventListener('pointerdown',e=>{
+  // map tap into body frame
+  let dx=e.clientX-jelly.x, dy=e.clientY-jelly.y;
+  if(dx>W/2)dx-=W; if(dx<-W/2)dx+=W;
+  if(dy>H/2)dy-=H; if(dy<-H/2)dy+=H;
+  const c=Math.cos(-jelly.th), s=Math.sin(-jelly.th);
+  const bx=dx*c-dy*s, by=dx*s+dy*c;
+  if(Math.hypot(bx,by)<R*1.25){
+    stim(mnn,bx,by,R*0.20);
+    if(world.dnnOn) stim(dnn,bx,by,R*0.28);   // MNN+DNN co-activation -> turn
+  }
+});
+document.getElementById('bPause').onclick=e=>{world.paused=!world.paused;
+  e.target.textContent=world.paused?'▶':'⏸';};
+document.getElementById('bPace').onclick=e=>{world.paceOn=!world.paceOn;
+  e.target.classList.toggle('on');};
+document.getElementById('bDnn').onclick=e=>{world.dnnOn=!world.dnnOn;
+  e.target.classList.toggle('on');};
+document.getElementById('bReset').onclick=()=>birth();
+
+/* ================= render ================= */
+function toWorld(bx,by){
+  const c=Math.cos(jelly.th), s=Math.sin(jelly.th);
+  return [jelly.x+bx*c-by*s, jelly.y+bx*s+by*c];
+}
+function frame(){
+  if(!world.paused) step();
+  const bg=ctx.createLinearGradient(0,0,0,H);
+  bg.addColorStop(0,'#071527'); bg.addColorStop(1,'#03101d');
+  ctx.fillStyle=bg; ctx.fillRect(0,0,W,H);
+  // bell outline: radius per sector modulated by contraction
+  ctx.beginPath();
+  for(let s=0;s<=SEG;s++){
+    const k=s%SEG;
+    const rr=R*(1-0.30*jelly.contract[k]);
+    const [x,y]=toWorld(rr*Math.cos(k*6.2832/SEG), rr*Math.sin(k*6.2832/SEG));
+    s?ctx.lineTo(x,y):ctx.moveTo(x,y);
+  }
+  ctx.closePath();
+  ctx.strokeStyle='rgba(150,220,235,0.75)'; ctx.lineWidth=2; ctx.stroke();
+  ctx.fillStyle='rgba(40,90,120,0.10)'; ctx.fill();
+  // DNN neurons (magenta), MNN neurons (cyan); brightness = recent firing
+  for(const [net,hue] of [[dnn,'255,110,200'],[mnn,'110,230,235']]){
+    for(let i=0;i<net.n;i++){
+      const [x,y]=toWorld(net.px[i],net.py[i]);
+      const fl=net.flash[i];
+      ctx.fillStyle=`rgba(${hue},${0.16+0.84*fl})`;
+      ctx.beginPath(); ctx.arc(x,y,fl>0.25?2.6:1.4,0,7); ctx.fill();
+    }
+  }
+  // rhopalium marker
+  {
+    const a=jelly.rhopal*6.2832/SEG;
+    const [x,y]=toWorld(Math.cos(a)*R*0.93, Math.sin(a)*R*0.93);
+    ctx.strokeStyle='rgba(255,215,120,0.9)'; ctx.lineWidth=1.4;
+    ctx.beginPath(); ctx.arc(x,y,5,0,7); ctx.stroke();
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

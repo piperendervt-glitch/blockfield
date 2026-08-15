@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>AURELIA SIDE — bell cross-section + fluid</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%;overflow:hidden;background:#04101d;
+    font-family:ui-monospace,'SF Mono',Menlo,monospace;
+    -webkit-user-select:none;user-select:none;touch-action:none}
+  #cv{position:fixed;inset:0}
+  .hud{position:fixed;top:env(safe-area-inset-top,0);left:0;right:0;padding:12px 14px;
+    pointer-events:none;color:#8fb3c7}
+  .hud h1{font-size:12px;letter-spacing:.18em;color:#5ee8d8}
+  .hud .sub{font-size:10px;margin-top:3px;color:#4f7186;line-height:1.5}
+  .bar{position:fixed;left:0;right:0;bottom:calc(env(safe-area-inset-bottom,0)+12px);
+    display:flex;justify-content:center;gap:10px}
+  .bar button{pointer-events:auto;border:1px solid rgba(94,232,216,.28);
+    background:rgba(10,28,44,.72);color:#8fb3c7;font:inherit;font-size:12px;
+    padding:8px 13px;border-radius:999px}
+  .bar button.on{background:rgba(94,232,216,.18);color:#cdeee8}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div class="hud">
+  <h1>AURELIA&nbsp;SIDE</h1>
+  <div class="sub">bell cross-section · real incompressible fluid (Stam) + immersed-boundary lite<br>
+  墨=渦輪の可視化。タップ: 左/右=その側だけ収縮(旋回) · 中央下=墨を撒く</div>
+</div>
+<div class="bar">
+  <button id="bPause">⏸</button>
+  <button id="bPace" class="on">pacemaker</button>
+  <button id="bInk" class="on">ink</button>
+  <button id="bReset">↺</button>
+</div>
+<script>
+"use strict";
+const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
+let W=0,H=0;
+function sz(){
+  const d=Math.min(devicePixelRatio||1,2);
+  W=innerWidth; H=innerHeight;
+  cv.width=W*d; cv.height=H*d;
+  cv.style.width=W+'px'; cv.style.height=H+'px';
+  ctx.setTransform(d,0,0,d,0,0);
+}
+addEventListener('resize',sz); sz();
+
+/* ---------- fluid grid (Stam stable fluids, collocated) ---------- */
+const CS=6;
+const GW=Math.floor(W/CS), GH=Math.floor(H/CS), NC=GW*GH;
+let u=new Float32Array(NC), v=new Float32Array(NC),
+    u2=new Float32Array(NC), v2=new Float32Array(NC),
+    p=new Float32Array(NC), dv=new Float32Array(NC),
+    dye=new Float32Array(NC), dye2=new Float32Array(NC);
+const ix=(x,y)=>y*GW+x;
+function sampleF(f,x,y){                    // bilinear, grid coords
+  x=Math.max(0.5,Math.min(GW-1.5,x)); y=Math.max(0.5,Math.min(GH-1.5,y));
+  const x0=x|0,y0=y|0,fx=x-x0,fy=y-y0;
+  return f[ix(x0,y0)]*(1-fx)*(1-fy)+f[ix(x0+1,y0)]*fx*(1-fy)
+       + f[ix(x0,y0+1)]*(1-fx)*fy+f[ix(x0+1,y0+1)]*fx*fy;
+}
+function addF(f,x,y,val){                    // bilinear spread
+  x=Math.max(0.5,Math.min(GW-1.5,x)); y=Math.max(0.5,Math.min(GH-1.5,y));
+  const x0=x|0,y0=y|0,fx=x-x0,fy=y-y0;
+  f[ix(x0,y0)]+=val*(1-fx)*(1-fy); f[ix(x0+1,y0)]+=val*fx*(1-fy);
+  f[ix(x0,y0+1)]+=val*(1-fx)*fy;   f[ix(x0+1,y0+1)]+=val*fx*fy;
+}
+function advect(dst,src,uu,vv,fade){
+  for(let y=1;y<GH-1;y++)for(let x=1;x<GW-1;x++){
+    const i=ix(x,y);
+    dst[i]=sampleF(src, x-uu[i], y-vv[i])*fade;
+  }
+}
+function project(){
+  for(let y=1;y<GH-1;y++)for(let x=1;x<GW-1;x++){
+    const i=ix(x,y);
+    dv[i]=0.5*(u[ix(x+1,y)]-u[ix(x-1,y)]+v[ix(x,y+1)]-v[ix(x,y-1)]);
+    p[i]=0;
+  }
+  for(let k=0;k<22;k++)
+    for(let y=1;y<GH-1;y++)for(let x=1;x<GW-1;x++){
+      const i=ix(x,y);
+      p[i]=(p[ix(x-1,y)]+p[ix(x+1,y)]+p[ix(x,y-1)]+p[ix(x,y+1)]-dv[i])*0.25;
+    }
+  for(let y=1;y<GH-1;y++)for(let x=1;x<GW-1;x++){
+    const i=ix(x,y);
+    u[i]-=0.5*(p[ix(x+1,y)]-p[ix(x-1,y)]);
+    v[i]-=0.5*(p[ix(x,y+1)]-p[ix(x,y-1)]);
+  }
+}
+function walls(){
+  for(let x=0;x<GW;x++){u[ix(x,0)]=v[ix(x,0)]=0;u[ix(x,GH-1)]=v[ix(x,GH-1)]=0;}
+  for(let y=0;y<GH;y++){u[ix(0,y)]=v[ix(0,y)]=0;u[ix(GW-1,y)]=v[ix(GW-1,y)]=0;}
+}
+
+/* ---------- bell (cross-section arc) + nerve chain ---------- */
+const M=27, Rb=Math.min(W*0.30,150), Hb=Rb*0.74;
+const world={t:0,paused:false,pace:true,ink:true};
+let bell;
+function birth(){
+  bell={bx:W/2, by:H*0.62, vx:0, vy:0, tilt:0, om:0,
+    a:new Float32Array(M),                 // muscle activation
+    R:new Int16Array(M),                   // nerve refractory
+    fireAt:new Int32Array(M).fill(-1),     // scheduled firing tick
+    px:new Float32Array(M), py:new Float32Array(M),  // previous world pos (for boundary velocity)
+    A0:0, initA:false, init:false};
+  u.fill(0);v.fill(0);dye.fill(0);
+}
+birth();
+function restShape(i){                     // body frame: dome opening downward
+  const s=i/(M-1), phi=Math.PI*s;
+  return [-Math.cos(phi)*Rb, -Math.sin(phi)*Hb];
+}
+function fireNerve(i,t){
+  if(bell.R[i]>0)return;
+  bell.R[i]=46; bell.a[i]=1;
+  for(const j of [i-1,i+1])
+    if(j>=0&&j<M&&bell.R[j]===0&&bell.fireAt[j]<t) bell.fireAt[j]=t+2;   // conduction: 2 ticks/segment
+}
+function step(){
+  const t=world.t;
+  if(world.pace && t%230===10){ fireNerve(0,t); fireNerve(M-1,t); }  // bilateral -> straight pulse
+  for(let i=0;i<M;i++){
+    if(bell.fireAt[i]===t) fireNerve(i,t);
+    if(bell.R[i]>0)bell.R[i]--;
+    bell.a[i]*=0.90;
+  }
+  // target boundary (world frame)
+  const c=Math.cos(bell.tilt), s=Math.sin(bell.tilt);
+  let Fx=0,Fy=0,Tq=0;
+  for(let i=0;i<M;i++){
+    const [rx0,ry0]=restShape(i);
+    const rx=rx0*(1-0.38*bell.a[i]);       // circular muscle: pull toward axis
+    const ry=ry0;
+    const wx=bell.bx+rx*c-ry*s, wy=bell.by+rx*s+ry*c;
+    const gx=wx/CS, gy=wy/CS;
+    // boundary velocity (target motion + body drift)
+    const bvx=bell.init?(wx-bell.px[i]):0, bvy=bell.init?(wy-bell.py[i]):0;
+    bell.px[i]=wx; bell.py[i]=wy;
+    // direct forcing: push fluid toward boundary velocity
+    const fu=0.55*((bvx/CS)-sampleF(u,gx,gy));
+    const fv=0.55*((bvy/CS)-sampleF(v,gx,gy));
+    addF(u,gx,gy,fu); addF(v,gx,gy,fv);
+    Fx-=fu; Fy-=fv;                        // reaction on the body
+    Tq+=(rx*c-ry*s)*(-fv)-(rx*s+ry*c)*(-fu);
+    if(world.ink && bell.a[i]>0.5) addF(dye,gx,gy+1.2,0.5);   // ink shed at contracting margin
+  }
+  bell.init=true;
+  // enclosed-volume jet (Daniel 1983): contraction ejects water through the aperture
+  let A=0;
+  for(let i=0;i<M;i++){
+    const j2=(i+1)%M;
+    A+=bell.px[i]*bell.py[j2]-bell.px[j2]*bell.py[i];
+  }
+  A=Math.abs(A)*0.5;
+  const dA=bell.initA?(bell.A0-A):0;
+  bell.A0=A; bell.initA=true;
+  if(dA>0.5){
+    const ap=Math.max(30,Math.hypot(bell.px[M-1]-bell.px[0],bell.py[M-1]-bell.py[0]));
+    const jv=dA/ap;                                     // jet speed (px/tick)
+    const dux=Math.sin(bell.tilt), duy=-Math.cos(bell.tilt);   // apex = swim direction
+    const J=Math.min(1.0, 0.0035*dA*jv);
+    bell.vx+=dux*J; bell.vy+=duy*J;
+    const mx=(bell.px[0]+bell.px[M-1])/2, my=(bell.py[0]+bell.py[M-1])/2;
+    for(let k=-1;k<=1;k++){                             // matching momentum into the water
+      addF(u,(mx+k*ap*0.25)/CS,my/CS,-dux*(jv/CS)*2.0);
+      addF(v,(mx+k*ap*0.25)/CS,my/CS,-duy*(jv/CS)*2.0);
+    }
+  }
+  bell.vx+=Fx*0.9*CS/M; bell.vy+=Fy*0.9*CS/M + 0.0025;  // reaction + slight negative buoyancy
+  bell.om+=Tq*0.0018/M;
+  bell.vx*=0.985; bell.vy*=0.985; bell.om*=0.95;
+  bell.bx+=bell.vx; bell.by+=bell.vy; bell.tilt+=bell.om;
+  bell.bx=Math.max(Rb*0.7,Math.min(W-Rb*0.7,bell.bx));
+  bell.by=Math.max(Hb*1.2,Math.min(H-Hb*0.6,bell.by));
+  // fluid step
+  advect(u2,u,u,v,0.999); advect(v2,v,u,v,0.999);
+  [u,u2]=[u2,u]; [v,v2]=[v2,v];
+  project(); walls();
+  advect(dye2,dye,u,v,0.992); [dye,dye2]=[dye2,dye];
+  world.t++;
+}
+
+/* ---------- interaction ---------- */
+cv.addEventListener('pointerdown',e=>{
+  const x=e.clientX,y=e.clientY;
+  if(y>bell.by+Hb*0.3 && Math.abs(x-bell.bx)<Rb){ addF(dye,x/CS,y/CS,6); return; }
+  if(x<bell.bx) fireNerve(0,world.t);       // left margin only -> asymmetric wave -> turn
+  else fireNerve(M-1,world.t);
+});
+document.getElementById('bPause').onclick=e=>{world.paused=!world.paused;
+  e.target.textContent=world.paused?'▶':'⏸';};
+document.getElementById('bPace').onclick=e=>{world.pace=!world.pace;e.target.classList.toggle('on');};
+document.getElementById('bInk').onclick=e=>{world.ink=!world.ink;e.target.classList.toggle('on');};
+document.getElementById('bReset').onclick=()=>birth();
+
+/* ---------- render ---------- */
+function frame(){
+  if(!world.paused) step();
+  ctx.fillStyle='#04101d'; ctx.fillRect(0,0,W,H);
+  // ink field
+  for(let y=1;y<GH-1;y++)for(let x=1;x<GW-1;x++){
+    const d=dye[ix(x,y)];
+    if(d<0.02)continue;
+    ctx.fillStyle=`rgba(120,190,235,${Math.min(0.55,d*0.5)})`;
+    ctx.fillRect(x*CS,y*CS,CS,CS);
+  }
+  // bell curve + nerve glow
+  const c=Math.cos(bell.tilt), s=Math.sin(bell.tilt);
+  ctx.beginPath();
+  const pts=[];
+  for(let i=0;i<M;i++){
+    const [rx0,ry0]=restShape(i);
+    const rx=rx0*(1-0.38*bell.a[i]), ry=ry0;
+    const wx=bell.bx+rx*c-ry*s, wy=bell.by+rx*s+ry*c;
+    pts.push([wx,wy]);
+    i?ctx.lineTo(wx,wy):ctx.moveTo(wx,wy);
+  }
+  ctx.strokeStyle='rgba(170,225,240,0.9)'; ctx.lineWidth=3.2; ctx.stroke();
+  ctx.lineTo(pts[0][0],pts[0][1]);
+  ctx.fillStyle='rgba(60,110,150,0.14)'; ctx.fill();
+  for(let i=0;i<M;i++){
+    if(bell.a[i]>0.08){
+      ctx.fillStyle=`rgba(255,180,90,${bell.a[i]})`;
+      ctx.beginPath(); ctx.arc(pts[i][0],pts[i][1],2.6+2*bell.a[i],0,7); ctx.fill();
+    }
+  }
+  ctx.strokeStyle='rgba(255,215,120,0.9)'; ctx.lineWidth=1.3;
+  for(const i of [0,M-1]){
+    ctx.beginPath(); ctx.arc(pts[i][0],pts[i][1],5,0,7); ctx.stroke();
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

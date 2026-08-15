@@ -889,13 +889,18 @@ deposit/diffuse/evaporate)は、既存部品の時間尺度違いの組み合わ
 PC 停止中に iPhone / チャット内で開発・観察した実装群。
 C# 本実装の「動く仕様書」として docs/prototypes/ に配置する。
 
-**配置状況(2026-08-15)**:
-- `docs/prototypes/flow/`(flow_colony.py / experiment.py / exp2.py)と
-  `docs/prototypes/homeostat/`(homeostat.html)は**配置済み**。
-  flow の M-F1〜F4 は取り込み環境で再実行し、下記の判定値が
-  すべて一致することを確認した(詳細は `docs/prototypes/README.md`)
-- `docs/prototypes/jelly/`(HTML 4部作と Python 3本)は**未受領**。
-  下表の記述は内容と結論の記録であり、ファイル配置は別途行う
+**配置状況(2026-08-15)**: **3群すべて配置済み・再現確認済み**。
+詳細は `docs/prototypes/README.md`。
+
+- `docs/prototypes/flow/`: M-F1〜F4 を再実行し、判定値がすべて一致
+- `docs/prototypes/homeostat/`: ブラウザで描画を確認
+- `docs/prototypes/jelly/`: Python 6本(HTML 4部作・図版5点つき)。
+  prereg `docs/prereg/jelly_1_metrics.md` §7.2 の**8項目すべてが一致**。
+  なお同 §7.3 に「実装前に解消する不整合」として挙がっている4件のうち、
+  3件は実在を確認したが、**#3(二重ペースメーカー図と J3a の矛盾)は
+  記載側の誤り**だった — 図の `1e-15` は y 軸のスケール倍率であって
+  移動距離ではなく、x 軸は 0→500 の実単位。図もスクリプトも
+  「横ずれゼロの直線遊泳」で一致しており、M-J3a の判定保留は不要になる
 
 ### HTML 4部作(jelly 系)
 
