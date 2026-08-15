@@ -31,6 +31,48 @@ namespace BlockField.SimCore.Ecology
         /// <summary>場の数。<see cref="World.Fields"/> の数と一致すること（テストで検証）。</summary>
         public const int FieldCount = 9;
 
+        /// <summary>全成分を選ぶマスク。<see cref="SimParams.mutationFieldMask"/> の既定値。</summary>
+        public const int AllFieldsMask = (1 << FieldCount) - 1;
+
+        /// <summary>
+        /// 「その個体**自身の**種のコロニー場」を指す仮想ビット
+        /// (Demo 8 第4.5段 K3、E1 用に導入)。
+        ///
+        /// 【なぜ実体の添字では書けないか】自種コロニー重みが載る成分は種で違う
+        /// （羊なら colony-sheep、豚なら colony-pig）。添字の固定マスクでは
+        /// 「各個体が自分の分だけ」を表せず、`colony-sheep` を選ぶと
+        /// 豚にとっては**他種への重み＝盗聴**を開放してしまう。盗聴の重みは
+        /// 「進化が発見するか」という別の問いとして 0 のまま寝かせてある
+        /// （prereg 判断2）ので、混ぜてはいけない。
+        ///
+        /// 実体ビット(0〜8)と併用できる。例: 自種コロニー＋植生 =
+        /// <c>SelfColonyBit | (1 &lt;&lt; 8)</c>。
+        /// </summary>
+        public const int SelfColonyBit = 1 << FieldCount;
+
+        /// <summary>自種のコロニー場に対応する成分の添字（名前昇順）。</summary>
+        public static int SelfColonyIndex(EntityKind kind) => kind switch
+        {
+            EntityKind.Pig => 0,
+            EntityKind.Sheep => 1,
+            EntityKind.Wolf => 2,
+            _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+        };
+
+        /// <summary>
+        /// 変異マスクを、その個体の種に対する**実体の添字マスク**へ解決する。
+        /// <see cref="SelfColonyBit"/> が立っていれば自種コロニーの添字を足す。
+        /// </summary>
+        public static int ResolveMutationMask(int mask, EntityKind kind)
+        {
+            int resolved = mask & AllFieldsMask;
+            if ((mask & SelfColonyBit) != 0)
+            {
+                resolved |= 1 << SelfColonyIndex(kind);
+            }
+            return resolved;
+        }
+
         // --- 場の名前昇順 ---
 
         // コロニー場の3枚 (Demo 8 第4段 K1)。**器だけ作って初期値0で寝かせている。**

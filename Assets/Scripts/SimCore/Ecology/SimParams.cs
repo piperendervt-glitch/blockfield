@@ -461,6 +461,26 @@ namespace BlockField.SimCore.Ecology
         /// </summary>
         public float mutationSigma;
 
+        /// <summary>
+        /// 変異させる重み成分の選択 (Demo 8 第4.5段 K3)。名前昇順の添字に対する
+        /// ビットマスクで、**既定は <see cref="EntityWeights.AllFieldsMask"/>（全9成分）**。
+        ///
+        /// 【何のためにあるか】「1成分だけ開放して淘汰を見る」は繰り返し使う操作である。
+        /// E1 は自種コロニー重みの1次元だけを開放する（prereg K3）。他の成分まで
+        /// 同時に動かすと、観察された移動がどの形質の淘汰によるものか分けられない。
+        ///
+        /// 種に依存する「自種のコロニー場」は <see cref="EntityWeights.SelfColonyBit"/>
+        /// で指定する（添字の固定マスクでは表せない。理由はそちらのコメント）。
+        ///
+        /// 【乱数の消費は変わらない】マスクで外した成分でも**3個引いて捨てる**。
+        /// 消費数は 54個/出生 に固定されたままで、マスクの内容にも個体の履歴にも
+        /// 依存しない。こうしておくと、マスクを変えた実験どうしが同じ乱数列の上に
+        /// 乗るので、重みが分岐するまでの世界の進行が一致する（比較可能性）。
+        /// マスクは個体ごとに変わる値ではないので、引かない実装でも決定論自体は
+        /// 保てるが、その比較可能性を捨てることになる。
+        /// </summary>
+        public int mutationFieldMask;
+
         // --- Demo 8 第4段 K3: 繁殖判定の場化 ---
 
         /// <summary>
@@ -678,6 +698,7 @@ namespace BlockField.SimCore.Ecology
             // 変異 (Demo 8 第4.5段 K1)。既定は無効＝第4段と完全に同一の挙動
             mutationRate = 0f,
             mutationSigma = 0f,
+            mutationFieldMask = EntityWeights.AllFieldsMask,
 
             // K3 の半飽和定数。**4c で 12 → 80 に取り直した**（フィールドのコメント参照）。
             // 場の値（最大 1.0）よりはるかに大きいので、実効的には

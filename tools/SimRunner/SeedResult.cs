@@ -123,12 +123,23 @@ namespace SimRunner
         /// <summary>個体数の時系列（CSV 用。間引いて持つ）。</summary>
         public List<(long tick, int plants, int herbivores, int wolves)> Series = new();
 
+        /// <summary>
+        /// 条件が狼を**意図的に**排除しているか（<c>wolfCap = 0</c>）。
+        ///
+        /// E1（第4.5段）は狼を初期条件から外して走る。そのとき狼は必ず
+        /// 「全滅」と記録されるが、それは設計どおりであって退行ではない。
+        /// これを区別しないと M5 が常に不合格になり、**終了コード1が
+        /// 意味を持たなくなる**（本物の退行＝ギルドや植物の全滅を隠す）。
+        /// </summary>
+        public bool WolvesExcluded;
+
         public bool GuildExtinct => MinHerbivores == 0;
         public bool WolvesExtinct => MinWolves == 0;
         /// <summary>草が消え去ったか。Demo 8.5 で「植物が0本」から「草の総量が0」に変わった。</summary>
         public bool PlantsExtinct => MinVegetation <= 0f;
 
         /// <summary>安定条件（ギルド・狼・植物のいずれか）に違反したシードか。</summary>
-        public bool StabilityViolated => GuildExtinct || WolvesExtinct || PlantsExtinct;
+        public bool StabilityViolated =>
+            GuildExtinct || (WolvesExtinct && !WolvesExcluded) || PlantsExtinct;
     }
 }

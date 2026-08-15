@@ -121,6 +121,8 @@ namespace SimRunner
                 SuitableCells = world.SuitableCellCount,
                 MinHerbivores = int.MaxValue,
                 MinWolves = int.MaxValue,
+                // 狼枠が閉じている条件では「狼の全滅」は設計どおりであって退行ではない
+                WolvesExcluded = p.wolfCap <= 0,
             };
 
             // Demo 8.5: 植物は Entity でなくなったので「最小本数」ではなく

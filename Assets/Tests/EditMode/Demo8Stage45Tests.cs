@@ -180,6 +180,204 @@ namespace BlockField.Tests.EditMode
                 "抽選に落ちた成分で乱数を引いていない（消費数が分岐に依存している）疑いがある");
         }
 
+        // ================= K3: 変異成分の選択（マスク） =================
+
+        /// <summary>
+        /// **既定のマスクは全成分**で、マスクを導入する前と挙動が変わらないこと。
+        /// 追記3 の M 判定（sigma=0.1 が生態指標を壊さない）は全成分変異での
+        /// 結果なので、既定が変わるとその判定が無効になる。
+        /// </summary>
+        [Test]
+        public void MutationMask_DefaultsToEveryField()
+        {
+            Assert.AreEqual(EntityWeights.AllFieldsMask, SimParams.Default.mutationFieldMask);
+            Assert.AreEqual((1 << EntityWeights.FieldCount) - 1, EntityWeights.AllFieldsMask);
+
+            // 全ビットのマスクを明示しても、既定のまま走らせた世界と一致する
+            var explicitMask = WithMutation(1f, 0.2f);
+            explicitMask.mutationFieldMask = EntityWeights.AllFieldsMask;
+            Assert.AreEqual(
+                Run(k_Seeds[0], WithMutation(1f, 0.2f), 800).ComputeContentHash(),
+                Run(k_Seeds[0], explicitMask, 800).ComputeContentHash());
+        }
+
+        /// <summary>
+        /// **マスクで外した成分は1ミリも動かないこと。**
+        ///
+        /// E1 の中心要求（prereg K3「1次元のみ開放」）。他の成分まで動くと、
+        /// 観察された重みの移動がどの形質の淘汰によるものか分けられなくなる。
+        /// </summary>
+        [Test]
+        public void MutationMask_LeavesUnselectedComponentsExactlyAtTheInitialValue()
+        {
+            var p = WithMutation(1f, 0.2f);
+            p.mutationFieldMask = 1 << 8;   // vegetation だけ開放（名前昇順の最後）
+            var world = Run(k_Seeds[0], p, 1500);
+
+            Assert.Greater(world.BirthCount, 0, "繁殖が起きていない（変異を観察できない）");
+
+            bool vegetationMoved = false;
+            foreach (var kind in new[] { EntityKind.Sheep, EntityKind.Pig, EntityKind.Wolf })
+            {
+                foreach (bool wandering in new[] { false, true })
+                {
+                    var (_, variance, count) = EcologyStats.SpeciesWeightStats(world, kind, wandering);
+                    if (count == 0)
+                    {
+                        continue;
+                    }
+                    for (int i = 0; i < EntityWeights.FieldCount; i++)
+                    {
+                        if (i == 8)
+                        {
+                            if (variance[i] > 0f) vegetationMoved = true;
+                            continue;
+                        }
+                        Assert.AreEqual(0f, variance[i], 1e-9f,
+                            $"{kind}({(wandering ? "徘徊" : "採餌")}): " +
+                            $"マスクで外した重み {EntityWeights.FieldNames[i]} に分散が出た");
+                    }
+                }
+            }
+            Assert.IsTrue(vegetationMoved, "開放した vegetation にすら分散が出ていない");
+        }
+
+        /// <summary>
+        /// **マスクを変えても乱数の消費数が変わらないこと。**
+        ///
+        /// マスクで外した成分でも3個引いて捨てる設計（SimParams.mutationFieldMask）。
+        /// これが守られていれば、マスクの違う実験どうしが同じ乱数列に乗り、
+        /// 重みが分岐するまでの世界の進行が一致する。
+        /// 消費数を直接数えられないので、既存テストと同じく
+        /// 「最初の出生が起きるティック」の一致で見る。
+        /// </summary>
+        [Test]
+        public void MutationMask_DoesNotChangeRngConsumption()
+        {
+            int FirstBirthTick(int mask)
+            {
+                var world = MakeDiorama(k_Seeds[0]);
+                var p = WithMutation(1f, 0.2f);
+                p.mutationFieldMask = mask;
+                for (int t = 0; t < 2000; t++)
+                {
+                    Simulation.Tick(world, world.Rng, p);
+                    if (world.BirthCount > 0)
+                    {
+                        return t;
+                    }
+                }
+                return -1;
+            }
+
+            int all = FirstBirthTick(EntityWeights.AllFieldsMask);
+            int one = FirstBirthTick(EntityWeights.SelfColonyBit);
+            int none = FirstBirthTick(0);
+
+            Assert.GreaterOrEqual(all, 0, "2000ティックで繁殖が起きなかった");
+            Assert.AreEqual(all, one, "マスクを絞ったら最初の出生時刻が動いた（消費数が変わっている）");
+            Assert.AreEqual(all, none, "マスク0でも消費数は同じでなければならない");
+        }
+
+        /// <summary>
+        /// **自種コロニービットが種ごとに正しい成分へ解決されること。**
+        ///
+        /// 添字の固定マスクでは「各個体が自分の分だけ」を表せない。
+        /// 羊に colony-sheep、豚に colony-pig が対応し、
+        /// 他種のコロニー重み（盗聴）には触れないことを固定する。
+        /// </summary>
+        [Test]
+        public void MutationMask_SelfColonyBitResolvesPerSpecies()
+        {
+            Assert.AreEqual(0, EntityWeights.SelfColonyIndex(EntityKind.Pig));
+            Assert.AreEqual(1, EntityWeights.SelfColonyIndex(EntityKind.Sheep));
+            Assert.AreEqual(2, EntityWeights.SelfColonyIndex(EntityKind.Wolf));
+
+            // 名前昇順の並びと一致していること（並びが変わったらここで落ちる）
+            Assert.AreEqual(ColonyField.NameFor(EntityKind.Pig), EntityWeights.FieldNames[0]);
+            Assert.AreEqual(ColonyField.NameFor(EntityKind.Sheep), EntityWeights.FieldNames[1]);
+            Assert.AreEqual(ColonyField.NameFor(EntityKind.Wolf), EntityWeights.FieldNames[2]);
+
+            foreach (var kind in new[] { EntityKind.Sheep, EntityKind.Pig, EntityKind.Wolf })
+            {
+                int resolved = EntityWeights.ResolveMutationMask(EntityWeights.SelfColonyBit, kind);
+                Assert.AreEqual(1 << EntityWeights.SelfColonyIndex(kind), resolved,
+                    $"{kind}: 自種コロニー以外のビットが立っている");
+            }
+
+            // 実体ビットと併用できる
+            int combined = EntityWeights.ResolveMutationMask(
+                EntityWeights.SelfColonyBit | (1 << 8), EntityKind.Sheep);
+            Assert.AreEqual((1 << 1) | (1 << 8), combined);
+        }
+
+        /// <summary>
+        /// **自種コロニーだけを開放すると、動くのは自種の成分だけであること。**
+        /// マスクの解決が実際の変異処理まで届いていることの確認。
+        /// </summary>
+        [Test]
+        public void MutationMask_SelfColonyOnlyMovesTheOwnSpeciesComponent()
+        {
+            var p = WithMutation(1f, 0.2f);
+            p.mutationFieldMask = EntityWeights.SelfColonyBit;
+            var world = Run(k_Seeds[0], p, 1500);
+
+            Assert.Greater(world.BirthCount, 0, "繁殖が起きていない（変異を観察できない）");
+
+            bool anySelfMoved = false;
+            foreach (var kind in new[] { EntityKind.Sheep, EntityKind.Pig, EntityKind.Wolf })
+            {
+                int self = EntityWeights.SelfColonyIndex(kind);
+                foreach (bool wandering in new[] { false, true })
+                {
+                    var (_, variance, count) = EcologyStats.SpeciesWeightStats(world, kind, wandering);
+                    if (count == 0)
+                    {
+                        continue;
+                    }
+                    for (int i = 0; i < EntityWeights.FieldCount; i++)
+                    {
+                        if (i == self)
+                        {
+                            if (variance[i] > 0f) anySelfMoved = true;
+                            continue;
+                        }
+                        Assert.AreEqual(0f, variance[i], 1e-9f,
+                            $"{kind}({(wandering ? "徘徊" : "採餌")}): " +
+                            $"自種以外の重み {EntityWeights.FieldNames[i]} が動いた（盗聴の重みは温存する）");
+                    }
+                }
+            }
+            Assert.IsTrue(anySelfMoved, "自種コロニー重みに分散が出ていない");
+        }
+
+        /// <summary>
+        /// **wolfCap = 0 なら狼が一度も生まれないこと。**
+        ///
+        /// E1 の「狼を初期条件から外す」の実装。走行中ずっと存在しないことが
+        /// 要求であり、途中で湧くと条件が走行中に変質する。
+        /// 繁殖には既存個体が要るので、野生スポーンさえ止まれば発生経路は無い。
+        /// </summary>
+        [Test]
+        public void WolfCapZero_KeepsWolvesOutForTheWholeRun()
+        {
+            var p = WithMutation(1f, 0.1f);
+            p.wolfCap = 0;
+
+            foreach (uint seed in k_Seeds)
+            {
+                var world = MakeDiorama(seed);
+                for (int t = 0; t < 3000; t++)
+                {
+                    Simulation.Tick(world, world.Rng, p);
+                    Assert.AreEqual(0, world.WolfCount,
+                        $"seed {seed}: wolfCap=0 なのに tick {t} で狼が存在する");
+                }
+                Assert.Greater(world.SheepCount + world.PigCount, 0,
+                    $"seed {seed}: 草食獣まで消えている（狼を外した影響の確認以前の問題）");
+            }
+        }
+
         // ================= K2: 観察 =================
 
         /// <summary>

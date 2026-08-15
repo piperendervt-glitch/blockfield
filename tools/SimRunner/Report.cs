@@ -113,9 +113,18 @@ namespace SimRunner
             /// 狼だけは <see cref="WolfExtinctionTolerance"/> の許容を設け、
             /// シード数が足りないときは評価しない。
             /// </summary>
+            /// <summary>
+            /// 条件が狼を意図的に排除しているか（E1 の <c>wolfCap = 0</c>）。
+            /// このとき狼の全滅は設計どおりなので、M5 の判定から外す。
+            /// 外さないと M5 が常に不合格になり、終了コード1が
+            /// **本物の退行を隠す**（ギルド・植物の全滅と区別できなくなる）。
+            /// 全滅の件数そのものは summary.json とレポートに正直に残す。
+            /// </summary>
+            public bool WolvesExcluded;
+
             public bool M5Pass =>
                 GuildExtinct == 0 && PlantsExtinct == 0 &&
-                (Seeds < MinSeedsForWolfRate ||
+                (WolvesExcluded || Seeds < MinSeedsForWolfRate ||
                  (double)WolvesExtinct / Seeds <= WolfExtinctionTolerance);
 
             /// <summary>不合格の内訳（レポートとログに理由を出すため）。</summary>
@@ -126,7 +135,7 @@ namespace SimRunner
                     var reasons = new List<string>();
                     if (GuildExtinct > 0) reasons.Add($"草食ギルド全滅 {GuildExtinct}/{Seeds}");
                     if (PlantsExtinct > 0) reasons.Add($"植物全滅 {PlantsExtinct}/{Seeds}");
-                    if (Seeds >= MinSeedsForWolfRate &&
+                    if (!WolvesExcluded && Seeds >= MinSeedsForWolfRate &&
                         (double)WolvesExtinct / Seeds > WolfExtinctionTolerance)
                     {
                         reasons.Add($"狼全滅 {WolvesExtinct}/{Seeds} が許容 " +
@@ -135,6 +144,10 @@ namespace SimRunner
                     if (reasons.Count > 0)
                     {
                         return string.Join(" / ", reasons);
+                    }
+                    if (WolvesExcluded)
+                    {
+                        return "合格（狼を条件から外しているため狼の項目は評価外）";
                     }
                     return Seeds < MinSeedsForWolfRate
                         ? $"合格（シード{Seeds}件のため狼の全滅率は未評価）"
@@ -172,6 +185,9 @@ namespace SimRunner
                 a.GuildExtinct = rs.Count(r => r.GuildExtinct);
                 a.WolvesExtinct = rs.Count(r => r.WolvesExtinct);
                 a.PlantsExtinct = rs.Count(r => r.PlantsExtinct);
+                // 条件単位の属性なので全シードで同じ。All にしておけば、
+                // 万一混ざったときは「評価する」側（安全側）に倒れる
+                a.WolvesExcluded = rs.All(r => r.WolvesExcluded);
 
                 a.MeanPlants = rs.Average(r => (double)r.Plants);
                 a.MeanHerbivores = rs.Average(r => (double)(r.Sheep + r.Pigs));
@@ -314,6 +330,9 @@ namespace SimRunner
                 sb.Append($"      \"fearAvoidanceRatio\": {N(a.AvoidanceRatio)},\n");
                 sb.Append($"      \"guildExtinct\": {a.GuildExtinct},\n");
                 sb.Append($"      \"wolvesExtinct\": {a.WolvesExtinct},\n");
+                // 「狼が全滅した」件数は正直に残したうえで、それが設計どおりか
+                // どうかを別のフィールドで示す。件数だけを見て退行と誤読させない
+                sb.Append($"      \"wolvesExcluded\": {(a.WolvesExcluded ? "true" : "false")},\n");
                 sb.Append($"      \"plantsExtinct\": {a.PlantsExtinct},\n");
                 sb.Append($"      \"meanPlants\": {N(a.MeanPlants)},\n");
                 sb.Append($"      \"meanHerbivores\": {N(a.MeanHerbivores)},\n");

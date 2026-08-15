@@ -71,6 +71,33 @@ namespace SimRunner
             "変異あり（rate=1.0 / sigma=0.1）。第4.5段 K1 の M 判定用",
             Tweak(p => { p.mutationRate = 1f; p.mutationSigma = 0.1f; return p; }));
 
+        /// <summary>
+        /// 実験E1: 回廊の探索 (Demo 8 第4.5段、prereg 追記4 で確定)。
+        ///
+        /// 「進化は群れの回廊(w≈2.4)を自力で発見できるか」。
+        /// 群れの回廊の**外**(w=0)から始め、自種コロニー重みだけを変異に開放する。
+        ///
+        /// - `colonySelfWeight = 0`: 回廊の外が出発点（prereg E1「初期値」）
+        /// - `mutationFieldMask = SelfColonyBit`: 1次元だけ開放（prereg K3）。
+        ///   他種コロニー重み（盗聴）は本段では動かさない
+        /// - `wolfCap = 0`: 狼を初期条件から外す。**走行中ずっと狼が存在しない**
+        ///   （繁殖には既存個体が要るので、湧かなければ一度も生まれない）。
+        ///   根拠と、これが測定対象に与える制約は prereg 追記4 を参照
+        /// - 変異幅は追記3 の M 判定を通った rate=1.0 / sigma=0.1
+        /// </summary>
+        public static readonly Condition E1Corridor = new Condition(
+            "e1-corridor",
+            "E1: w_colony=0 から自種コロニー重みのみ変異、狼なし。第4.5段の中心実験",
+            Tweak(p =>
+            {
+                p.colonySelfWeight = 0f;
+                p.mutationRate = 1f;
+                p.mutationSigma = 0.1f;
+                p.mutationFieldMask = EntityWeights.SelfColonyBit;
+                p.wolfCap = 0;
+                return p;
+            }));
+
         /// <summary>SimParams は構造体なので、既定値のコピーを書き換えて返す。</summary>
         static SimParams Tweak(Func<SimParams, SimParams> mutate) => mutate(SimParams.Default);
 
@@ -142,6 +169,7 @@ namespace SimRunner
                 [NutrientOff.Name] = NutrientOff,
                 [FearOff.Name] = FearOff,
                 [Mutation.Name] = Mutation,
+                [E1Corridor.Name] = E1Corridor,
             };
     }
 }

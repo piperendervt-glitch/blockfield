@@ -770,20 +770,23 @@ namespace BlockField.SimCore.Ecology
             {
                 return;
             }
-            MutateWeights(ref child.forageWeights, rng, p);
-            MutateWeights(ref child.wanderWeights, rng, p);
+            // マスクは種で解決してから両モードへ渡す（自種コロニーの添字が種で違う）
+            int mask = EntityWeights.ResolveMutationMask(p.mutationFieldMask, child.kind);
+            MutateWeights(ref child.forageWeights, rng, p, mask);
+            MutateWeights(ref child.wanderWeights, rng, p, mask);
         }
 
-        static void MutateWeights(ref EntityWeights w, Mulberry32 rng, SimParams p)
+        static void MutateWeights(ref EntityWeights w, Mulberry32 rng, SimParams p, int mask)
         {
             for (int i = 0; i < EntityWeights.FieldCount; i++)
             {
-                // 3個とも**必ず**引く。抽選に落ちても引く（上のコメント参照）
+                // 3個とも**必ず**引く。抽選に落ちても、マスクで外れていても引く
+                // （上のコメント / SimParams.mutationFieldMask 参照）
                 float roll = rng.NextFloat01();
                 float u1 = rng.NextFloat01();
                 float u2 = rng.NextFloat01();
 
-                if (roll >= p.mutationRate)
+                if (roll >= p.mutationRate || (mask & (1 << i)) == 0)
                 {
                     continue;
                 }
