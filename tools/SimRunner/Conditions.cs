@@ -98,6 +98,34 @@ namespace SimRunner
                 return p;
             }));
 
+        /// <summary>
+        /// E1 の交絡を切り分けるための診断条件 (第4.5段、prereg 追記5)。
+        ///
+        /// E1 は longrun100 に対して**2点**変えていた: 狼を外したことと、
+        /// 群れ重みを 0 にしたこと。E1 では出生が死亡補充の 2.0% しかなく
+        /// （longrun100 は 95.2%）、遺伝がほとんど働かなかったが、
+        /// その原因がどちらなのかを既存の2走行だけでは分けられない。
+        ///
+        /// 本条件は **e1-corridor から colonySelfWeight だけを既定値(2.4)へ戻す**。
+        /// これで 2×2 の3セルが揃い、主効果を分離できる:
+        ///   longrun100  : 狼あり / w=2.4
+        ///   e1-corridor : 狼なし / w=0
+        ///   本条件      : 狼なし / w=2.4
+        /// 本条件 対 longrun100 が狼の効果、本条件 対 e1-corridor が w の効果。
+        /// </summary>
+        public static readonly Condition E1DiagFlock = new Condition(
+            "e1-diag-flock",
+            "E1 の切り分け: 狼なし・群れ重みは既定(2.4)。出生率崩壊の原因を分離する",
+            Tweak(p =>
+            {
+                p.mutationRate = 1f;
+                p.mutationSigma = 0.1f;
+                p.mutationFieldMask = EntityWeights.SelfColonyBit;
+                p.wolfCap = 0;
+                // colonySelfWeight は既定の 2.4 のまま（ここが e1-corridor との唯一の差）
+                return p;
+            }));
+
         /// <summary>SimParams は構造体なので、既定値のコピーを書き換えて返す。</summary>
         static SimParams Tweak(Func<SimParams, SimParams> mutate) => mutate(SimParams.Default);
 
@@ -170,6 +198,7 @@ namespace SimRunner
                 [FearOff.Name] = FearOff,
                 [Mutation.Name] = Mutation,
                 [E1Corridor.Name] = E1Corridor,
+                [E1DiagFlock.Name] = E1DiagFlock,
             };
     }
 }
