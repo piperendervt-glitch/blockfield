@@ -223,6 +223,251 @@ namespace BlockField.Tests.EditMode
             }
         }
 
+        // ================= M-J2c: 48シードの定量判定 =================
+
+        /// <summary>
+        /// プロトタイプ `j2c_waveamp.py` と同一の乱数列（LCG）。
+        /// シードから 刺激セル / g / drag を作る。照合対象なので式を変えない。
+        /// </summary>
+        static IEnumerable<double> RngStream(uint seed)
+        {
+            uint s = seed;
+            while (true)
+            {
+                unchecked { s = s * 1664525u + 1013904223u; }
+                yield return s / 4294967296.0;
+            }
+        }
+
+        /// <summary>
+        /// **48シードで、刺激角と逃避角が 1:1 単調・オフセット 180° であること。**
+        ///
+        /// パラメータ揺らぎ（g ∈ [0.75, 0.92]、drag ∈ [0.05, 0.2]）込み。
+        /// 実行条件: steps=120 / R₀=14。判定閾値は最大誤差 &lt; 5°。
+        /// 実測は **最大 0.000°**（プロトタイプと一致）。
+        /// </summary>
+        [Test]
+        public void MJ2c_StimulusAndEscapeMapOneToOneAcrossFortyEightSeeds()
+        {
+            double maxErr = 0;
+            for (uint seed = 1000; seed < 1048; seed++)
+            {
+                var r = RngStream(seed).GetEnumerator();
+                r.MoveNext(); int cell = (int)(r.Current * 16);
+                r.MoveNext(); double g = 0.75 + r.Current * 0.17;
+                r.MoveNext(); double drag = 0.05 + r.Current * 0.15;
+
+                var (heading, _) = Swim(new[] { (cell, 0) }, g: g, drag: drag, steps: 120);
+                double expected = (CellAngle(cell) + 180.0) % 360.0;
+                double err = AngleError(heading, expected);
+                maxErr = Math.Max(maxErr, err);
+
+                Assert.Less(err, 5.0,
+                    $"seed={seed} cell={cell} g={g:F4} drag={drag:F4}: " +
+                    $"逃避 {heading:F1}°（期待 {expected:F1}°）");
+            }
+            Assert.Less(maxErr, 1e-9,
+                $"最大誤差 {maxErr:E3}° — パラメータ揺らぎに対して厳密に頑健なはず");
+        }
+
+        // ================= M-J2d: 重ね合わせ =================
+
+        /// <summary>
+        /// 【比較専用】幾何距離モデル（旧版）の推力。**SimCore には無い。**
+        ///
+        /// 波振幅モデルが正しいことを示すための対照であって、本体で使う実装ではない。
+        /// SimCore に置くと、後から誰かが「こちらもある」と思って使ってしまう。
+        /// 刺激セルからのホップ数を毎回計算して g^hops を掛ける
+        /// ——距離を計算するコードが要る時点で、創発の主張と両立しない（prereg 修正4）。
+        /// </summary>
+        static (double heading, double dist) SwimGeometric(
+            (int cell, int tick)[] stims, double g = 0.85, double drag = Drag,
+            int steps = 200, int r0 = 14)
+        {
+            var p = ExcitableParams.Default;
+            p.RefractoryTicks = r0;
+            p.Attenuation = g;
+
+            var field = new ExcitableField(ExcitableGraphs.Ring(N));
+            int origin = stims.OrderBy(s => s.tick).First().cell;
+
+            double vx = 0, vy = 0, x = 0, y = 0;
+            for (int t = 0; t < steps; t++)
+            {
+                foreach (var (cell, tick) in stims)
+                {
+                    if (tick == t && field.Refractory(cell) == 0) field.Stimulate(cell, p);
+                }
+                field.Step(p);
+                foreach (int i in field.LastFired)
+                {
+                    int hops = Math.Min(((i - origin) % N + N) % N, ((origin - i) % N + N) % N);
+                    double amp = Math.Pow(g, hops);
+                    double a = 2.0 * Math.PI * i / N;
+                    vx -= amp * Math.Cos(a);
+                    vy -= amp * Math.Sin(a);
+                }
+                vx *= (1.0 - drag); vy *= (1.0 - drag); x += vx; y += vy;
+            }
+            double deg = Math.Atan2(y, x) * 180.0 / Math.PI;
+            if (deg < 0) deg += 360.0;
+            return (deg, Math.Sqrt(x * x + y * y));
+        }
+
+        /// <summary>
+        /// **2点同時刺激の逃避方向がベクトル平均に一致すること。**（M-J2d の本体）
+        ///
+        /// 0° と 90° を同時に刺激すると、逃避は 225.0°（＝2つの逃避 180°・270° の
+        /// ベクトル平均）。実行条件: steps=200 / R₀=14 / g=0.85。
+        /// </summary>
+        [Test]
+        public void MJ2d_TwoSimultaneousStimuliEscapeAlongTheVectorAverage()
+        {
+            var (heading, _) = Swim(new[] { (0, 0), (4, 0) });
+            Assert.Less(AngleError(heading, 225.0), 1e-9,
+                $"逃避 {heading:F1}°（ベクトル平均の予測 225.0°）");
+        }
+
+        /// <summary>
+        /// **幾何距離モデルとの弁別が steps の差で説明できないこと。**
+        ///
+        /// prereg の記載（旧 158.5° / 新 225.0°）は steps が違った（120 対 200）ため、
+        /// そのままでは弁別に使えなかった（追記4）。**steps を揃えて**測ると、
+        /// 120 / 200 / 400 のいずれでも 225.0° 対 158.5° で変わらない。
+        /// 差はモデルの差であって実行条件の差ではない。
+        /// </summary>
+        [Test]
+        public void MJ2d_ModelDiscriminationIsNotAnArtifactOfStepCount()
+        {
+            foreach (int steps in new[] { 120, 200, 400 })
+            {
+                var wave = Swim(new[] { (0, 0), (4, 0) }, steps: steps);
+                var geo = SwimGeometric(new[] { (0, 0), (4, 0) }, steps: steps);
+
+                Assert.Less(AngleError(wave.heading, 225.0), 1e-9,
+                    $"steps={steps}: 波振幅モデルは 225.0° のはず（実際 {wave.heading:F1}°）");
+                Assert.Less(AngleError(geo.heading, 158.5), 0.05,
+                    $"steps={steps}: 幾何距離モデルは 158.5° のはず（実際 {geo.heading:F1}°）");
+            }
+        }
+
+        /// <summary>
+        /// **幾何距離モデルが破れる理由: 減衰の基準に1つの刺激を選んでしまうこと。**
+        ///
+        /// 0° と 90° の同時刺激は 45° 軸について対称なので、正味の力は
+        /// その軸上（45° か 225°）にしか出ようがない。波振幅モデルは基準点を
+        /// 持たないので対称性が保たれ、225.0° になる。
+        /// 幾何距離モデルは「最初の刺激」を減衰の原点に選ぶため**対称性を人工的に壊す**。
+        /// 刺激の順番を入れ替えると答えが変わることがそれを示す。
+        /// </summary>
+        [Test]
+        public void MJ2d_GeometricModelBreaksTheSymmetryItShouldPreserve()
+        {
+            var wave1 = Swim(new[] { (0, 0), (4, 0) });
+            var wave2 = Swim(new[] { (4, 0), (0, 0) });
+            Assert.Less(AngleError(wave1.heading, wave2.heading), 1e-9,
+                "波振幅モデルは刺激の並び順に依存しないはず");
+
+            var geo1 = SwimGeometric(new[] { (0, 0), (4, 0) });
+            var geo2 = SwimGeometric(new[] { (4, 0), (0, 0) });
+            Assert.Greater(AngleError(geo1.heading, geo2.heading), 1.0,
+                "幾何距離モデルは並び順で答えが変わるはず（原点の選び方が結果を決めている）");
+        }
+
+        /// <summary>
+        /// **ベクトル平均は密な刺激では成り立たない。**（M-J2d の適用範囲の限定）
+        ///
+        /// 0°・90°・180° の3点同時刺激では、ベクトル平均の予測は 270° だが
+        /// 実測は **90°（正反対）**である。しかも移動距離は 0.775 で、
+        /// 単一刺激 11.921 の 6.5% しかない。**ほぼ相殺していて、
+        /// 残差の符号が予測と逆を向いている**状態である。
+        ///
+        /// 原因は重ね合わせが線形でないこと。**各セルは不応期のあいだ1度しか
+        /// 発火できない**ので、重なった波は足し算にならない
+        /// （2点でも 4.845 で、線形なら 16.859 のはず）。
+        ///
+        /// M-J2d は「2点・90°離れ」で成立する。**一般の重ね合わせ則ではない。**
+        /// </summary>
+        [Test]
+        public void MJ2d_VectorAveragingDoesNotSurviveDenseStimulation()
+        {
+            var three = Swim(new[] { (0, 0), (4, 0), (8, 0) });
+
+            // 予測は「各刺激の逃避（刺激角+180°）の単位ベクトルの和」= 270°
+            Assert.Less(AngleError(three.heading, 90.0), 1e-9,
+                $"3点同時刺激の逃避は 90° のはず（実際 {three.heading:F1}°）");
+            Assert.Greater(AngleError(three.heading, 270.0), 179.0,
+                "ベクトル平均の予測 270° とは正反対になるはず（これが限定の中身）");
+
+            // 大きさも線形でない
+            double one = Swim(new[] { (0, 0) }).dist;
+            double two = Swim(new[] { (0, 0), (4, 0) }).dist;
+            Assert.AreEqual(11.921, one, 0.001);
+            Assert.AreEqual(4.845, two, 0.001, "線形なら 16.859 のはず");
+            Assert.AreEqual(0.775, three.dist, 0.001, "線形なら 11.921 のはず");
+        }
+
+        /// <summary>
+        /// **R₀ は時間差刺激では効く。**（追記4-3 の限定の実測）
+        ///
+        /// 単一刺激では R₀ を変えても結果が変わらなかったが、それは
+        /// 「対消滅で終わるので回復が一度も使われない」ためだった。
+        /// 時間差刺激では、2つ目の刺激が入るかどうかを R₀ が左右する。
+        ///
+        /// ただし **prereg が例に挙げた t=6 では効かない**。t=6 の時点で
+        /// セル4 は R₀=4 でも R=2、R₀=14 でも R=12 で、**どちらでも刺激が入らない**。
+        /// 効くのは t=8〜18 の窓である。
+        /// </summary>
+        [Test]
+        public void MJ2d_RefractoryPeriodMattersForDelayedStimuliButNotAtTickSix()
+        {
+            // prereg の例（t=6）: どちらの R₀ でも2つ目が入らないので同じ結果
+            var a6 = Swim(new[] { (0, 0), (4, 6) }, r0: 4);
+            var b6 = Swim(new[] { (0, 0), (4, 6) }, r0: 14);
+            Assert.AreEqual(a6.heading, b6.heading, 1e-12, "t=6 では R₀ で変わらないはず");
+            Assert.Less(AngleError(a6.heading, 180.0), 1e-9,
+                "2つ目が入らないので、単一刺激と同じ 180° になるはず");
+
+            // t=10: R₀=4 なら入り、R₀=14 なら入らない
+            //
+            // 【許容が同時刺激より緩い理由】2つの刺激が別の時刻に入ると、
+            // 各刺激の寄与が別々の減衰段で積み上がるため、x 成分と y 成分が
+            // 浮動小数として厳密には等しくならない（実測の残差は 5e-9 度）。
+            // 同時刺激なら対称性がビット単位で保たれるので 1e-9 で通る。
+            const double k_DelayedTolerance = 1e-6;   // 100万分の1度
+            var a10 = Swim(new[] { (0, 0), (4, 10) }, r0: 4);
+            var b10 = Swim(new[] { (0, 0), (4, 10) }, r0: 14);
+            Assert.Less(AngleError(a10.heading, 225.0), k_DelayedTolerance,
+                "R₀=4 なら2つ目が入って 225°");
+            Assert.Less(AngleError(b10.heading, 180.0), k_DelayedTolerance,
+                "R₀=14 なら入らず 180° のまま");
+
+            // t=19: どちらでも入るので一致する
+            var a19 = Swim(new[] { (0, 0), (4, 19) }, r0: 4);
+            var b19 = Swim(new[] { (0, 0), (4, 19) }, r0: 14);
+            Assert.AreEqual(a19.heading, b19.heading, 1e-12, "t=19 では両方入るので一致");
+            Assert.Less(AngleError(a19.heading, 225.0), k_DelayedTolerance);
+        }
+
+        /// <summary>
+        /// 刺激が「入る最初のティック」だけ結果が違うこと。
+        ///
+        /// 刺激セル自身の不応期が抜けても、**その両隣がまだ抜けていない**と
+        /// 片側にしか波が出ず、非対称な逃避になる（186.8°）。
+        /// 1ティック後に両隣が揃うと対称になり 225.0° に落ち着く。
+        /// 「回復したか」は1セルの話ではなく近傍の話である、という記録。
+        /// </summary>
+        [Test]
+        public void MJ2d_TheFirstTickAfterRecoveryGivesAnAsymmetricEscape()
+        {
+            // R₀=4: セル4 は t=8 で回復するが、隣のセル5 は t=9 まで不応期
+            Assert.Less(AngleError(Swim(new[] { (0, 0), (4, 8) }, r0: 4).heading, 186.8), 0.05,
+                "t=8 は片側にしか波が出ないので中途半端な向きになる");
+            // 時間差刺激なので許容は 1e-6（同上の理由）
+            Assert.Less(AngleError(Swim(new[] { (0, 0), (4, 9) }, r0: 4).heading, 225.0), 1e-6,
+                "t=9 では両隣が揃うので対称な 225° になる");
+        }
+
         // ================= M-J2b の grep 検証 =================
 
         /// <summary>
