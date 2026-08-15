@@ -889,9 +889,13 @@ deposit/diffuse/evaporate)は、既存部品の時間尺度違いの組み合わ
 PC 停止中に iPhone / チャット内で開発・観察した実装群。
 C# 本実装の「動く仕様書」として docs/prototypes/ に配置する。
 
-**配置状況(2026-08-15)**: プロトタイプ本体のファイルはまだ
-リポジトリに取り込まれていない(未受領)。本節の記述は
-その内容と結論の記録であり、ファイル配置は別途行う。
+**配置状況(2026-08-15)**:
+- `docs/prototypes/flow/`(flow_colony.py / experiment.py / exp2.py)と
+  `docs/prototypes/homeostat/`(homeostat.html)は**配置済み**。
+  flow の M-F1〜F4 は取り込み環境で再実行し、下記の判定値が
+  すべて一致することを確認した(詳細は `docs/prototypes/README.md`)
+- `docs/prototypes/jelly/`(HTML 4部作と Python 3本)は**未受領**。
+  下表の記述は内容と結論の記録であり、ファイル配置は別途行う
 
 ### HTML 4部作(jelly 系)
 
