@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>HOMEOSTAT — 部屋の空気が水槽の生理に届くまで</title>
+<style>
+  :root{
+    --bg:#060b13; --panel:#0b1420; --line:#16283c;
+    --ink:#c8dae8; --dim:#5e7a92; --cy:#5fe3d8; --mg:#d872b0;
+    --amber:#e0a54a; --blue:#6aa6ff; --warn:#ff7a6b;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{
+    margin:0;background:var(--bg);color:var(--ink);
+    font:13px/1.5 ui-monospace,"SF Mono",Menlo,monospace;
+    padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+  }
+  .wrap{max-width:680px;margin:0 auto;padding:14px 12px 30px}
+  h1{font-size:15px;letter-spacing:.22em;margin:0 0 2px;color:var(--cy);font-weight:600}
+  .sub{color:var(--dim);font-size:11px;margin:0 0 14px}
+  .tabs{display:flex;gap:8px;margin-bottom:12px}
+  .tab{flex:1;padding:9px 6px;border:1px solid var(--line);background:transparent;
+    color:var(--dim);font:inherit;font-size:11.5px;border-radius:7px;cursor:pointer}
+  .tab[aria-selected="true"]{border-color:var(--cy);color:var(--cy);background:#0d1c26}
+  .gauge{display:flex;align-items:baseline;gap:10px;padding:10px 12px;
+    background:var(--panel);border:1px solid var(--line);border-radius:8px;margin-bottom:10px}
+  .gauge b{font-size:26px;font-weight:600;letter-spacing:.02em;color:var(--amber)}
+  .gauge .u{font-size:11px;color:var(--dim)}
+  .gauge .clock{margin-left:auto;font-size:11px;color:var(--dim);text-align:right}
+  canvas{display:block;width:100%;border:1px solid var(--line);border-radius:8px;background:#04080e}
+  .colcap{display:flex;justify-content:space-between;font-size:10px;color:var(--dim);margin:5px 2px 12px}
+  .ctl{display:flex;flex-wrap:wrap;gap:7px;margin:12px 0}
+  button.b{padding:9px 12px;border:1px solid var(--line);background:#0a1622;color:var(--ink);
+    font:inherit;font-size:11.5px;border-radius:7px;cursor:pointer}
+  button.b:active{background:#12283a}
+  button.b.on{border-color:var(--warn);color:var(--warn)}
+  button.b.ev{border-color:var(--amber);color:var(--amber)}
+  .legend{display:flex;flex-wrap:wrap;gap:12px;font-size:10.5px;color:var(--dim);margin:8px 2px}
+  .legend i{width:9px;height:9px;display:inline-block;border-radius:2px;margin-right:5px;vertical-align:-1px}
+  .note{background:var(--panel);border:1px solid var(--line);border-left:2px solid var(--cy);
+    border-radius:6px;padding:11px 12px;font-size:11.5px;color:#9fb6c8;margin-top:14px}
+  .note b{color:var(--cy);font-weight:600}
+  .note.warn{border-left-color:var(--warn)}
+  .note.warn b{color:var(--warn)}
+  h2{font-size:11px;letter-spacing:.18em;color:var(--dim);margin:18px 0 7px;font-weight:500}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>H O M E O S T A T</h1>
+  <p class="sub">部屋の空気 → 水槽の場 → 受容器の発火 → 体内場。<br>センサーが動かすのは世界だけ。生物がどう応答するかは力学が決める。</p>
+
+  <div class="tabs" role="tablist">
+    <button class="tab" id="tabCO2" role="tab" aria-selected="true">SCD41 · 締め切った部屋</button>
+    <button class="tab" id="tabP" role="tab" aria-selected="false">BMP280 · 台風接近</button>
+  </div>
+
+  <div class="gauge">
+    <b id="gval">450</b><span class="u" id="gunit">ppm CO₂</span>
+    <span class="clock" id="gclock">day 0 · 00:00</span>
+  </div>
+
+  <canvas id="col" height="300"></canvas>
+  <div class="colcap"><span>水面</span><span id="capmid">pH（暖色＝酸性）</span><span>底</span></div>
+
+  <h2>体内場のログ</h2>
+  <canvas id="trace" height="300"></canvas>
+  <div class="legend" id="leg"></div>
+
+  <div class="ctl">
+    <button class="b" id="play">⏸ 一時停止</button>
+    <button class="b ev" id="event">窓を開ける</button>
+    <button class="b" id="ablate">結合を切る</button>
+    <button class="b" id="reset">↺ 最初から</button>
+  </div>
+
+  <div class="note" id="story"></div>
+  <div class="note" id="caveat"><b>この模型の限界。</b>pH から旋回率への結合係数（0.012）は手で置いた値です。用量反応を測ると深度は単調に増えますが、生存は 0.024 を超えると落ちます — つまり最適値が存在し、本来これは遺伝子にすべき量です。気圧シナリオの予測型／反応型も進化させたものではなく固定戦略で、単一シードのため示唆どまりです。48シードでの検証は C# 実装側の仕事になります。</div>
+  <div class="note warn" id="ablnote" style="display:none">
+    <b>結合を切っています。</b>場 → 閾値 θ の経路が無効です。センサーは変化し、場も変化しますが、
+    生理は何も応答しません。復帰も再分布もオーバーシュートも消えるはずです（M-H3 アブレーション）。
+  </div>
+
+</div>
+<script>
+"use strict";
+// ---- deterministic PRNG (mulberry32) --------------------------------------
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);
+  t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+
+// ---- world constants (DESIGNED — world laws, not organism strategy) --------
+const NZ=44;            // depth cells
+const D_ACID=0.055;     // slow: the deep layer becomes a reservoir
+const D_O2=0.12;        // faster: oxygen mixes more readily
+const K_GAS=0.10;       // air-water gas exchange at surface
+const BETA=1.9;         // field -> excitability threshold coupling
+const P0=26;            // base pacemaker period (ticks)
+const N_ORG=64;
+const MIN_PER_DAY=1440, TICK_MIN=2;   // 1 tick = 2 sim-minutes
+
+let mode='co2', running=true, ablate=false, t=0, rng=mulberry32(12345);
+let field=new Float32Array(NZ), o2=new Float32Array(NZ), orgs=[], hist=[];
+let sensor=450, windowOpen=false, windowT=-1, stormPhase=0;
+
+function reset(){
+  t=0; rng=mulberry32(12345); hist=[]; windowOpen=false; windowT=-1; stormPhase=0;
+  sensor = mode==='co2' ? 450 : 1013;
+  for(let i=0;i<NZ;i++){ field[i]=0.02; o2[i]=1.0 - 0.12*(i/NZ); }
+  orgs=[];
+  for(let i=0;i<N_ORG;i++){
+    orgs.push({
+      z: rng()*0.9+0.05,           // depth 0..1
+      x: rng(),                    // lateral (display only)
+      ph: rng(),                   // pacemaker phase
+      e: 0.55+rng()*0.1,           // energy
+      intake: 0.02,                // recent intake (drives kinesis magnitude)
+      flash: 0,
+      // in the pressure scenario, half the population reads the barometer
+      pred: (mode==='p') ? (i%2===0) : false
+    });
+  }
+}
+
+// ---- sensor traces (the real world) ---------------------------------------
+function stepSensor(){
+  const minute = t*TICK_MIN;
+  if(mode==='co2'){
+    // sealed room in winter: occupant respiration accumulates
+    if(windowOpen){ sensor += (505-sensor)*0.055; }
+    else { sensor += (1700-sensor)*0.0016 + (rng()-0.5)*3; }
+    if(windowOpen && minute-windowT>90) windowOpen=false;
+  } else {
+    // typhoon: 24h fall to 982 hPa, 12h recovery
+    const h = minute/60;
+    let target;
+    if(h<24) target = 1013 - 31*(h/24);
+    else if(h<28) target = 982;
+    else target = 982 + 31*Math.min(1,(h-28)/14);
+    sensor += (target-sensor)*0.06 + (rng()-0.5)*0.12;
+  }
+}
+
+// ---- field dynamics (Henry's law at the surface, then diffusion) ----------
+function stepField(){
+  if(mode==='co2'){
+    // dissolved CO2 -> carbonic acid. equilibrium set by partial pressure only.
+    const aeq = Math.max(0, Math.min(1, (sensor-400)/1300));
+    field[0] += K_GAS*(aeq-field[0]);
+    diffuse(field,D_ACID);
+  } else {
+    // Henry: saturation oxygen is proportional to partial pressure
+    const csat = sensor/1013;
+    o2[0] += K_GAS*(csat-o2[0]);
+    diffuse(o2,D_O2);
+    // background + organism respiration consumes oxygen locally
+    for(let i=0;i<NZ;i++) o2[i] -= 0.0003;
+    for(const o of orgs){
+      const i=Math.min(NZ-1,Math.max(0,Math.floor(o.z*NZ)));
+      o2[i] -= 0.0002*metabolicRate(o);
+      if(o2[i]<0) o2[i]=0;
+    }
+  }
+}
+function diffuse(f,D){
+  const n=new Float32Array(NZ);
+  for(let i=0;i<NZ;i++){
+    const a=f[Math.max(0,i-1)], b=f[Math.min(NZ-1,i+1)];
+    n[i]=f[i]+D*(a+b-2*f[i]);
+  }
+  f.set(n);
+}
+
+// ---- receptor -> internal field -> excitability ---------------------------
+// theta is the firing threshold. Higher theta = slower pacemaker = lower metabolism.
+// NOTE: nothing here computes a direction. No "swim up", no "escape", no setpoint.
+function thetaOf(o){
+  if(ablate) return 1;
+  const i=Math.min(NZ-1,Math.max(0,Math.floor(o.z*NZ)));
+  // metabolic demand lowers the threshold (hunger raises drive). DESIGNED coupling.
+  const hunger = Math.max(0, Math.min(1, (0.60-o.e)/0.60));
+  const drive = 1 - 0.18*hunger;
+  if(mode==='co2'){
+    return Math.max(0.45, (1 + BETA*field[i])*drive);   // acidosis raises threshold
+  } else {
+    let th = 1 + 1.4*Math.max(0, 0.92-o2[i]);    // reactive: responds to hypoxia
+    th *= drive;
+    if(o.pred){
+      const dP = hist.length>6 ? (sensor-hist[hist.length-6].s) : 0;
+      th += Math.max(0, -dP)*0.16;               // predictive: responds to falling pressure
+    }
+    return th;
+  }
+}
+function metabolicRate(o){ return 1/thetaOf(o); }
+
+// ---- organisms -------------------------------------------------------------
+function stepOrgs(){
+  for(const o of orgs){
+    const i=Math.min(NZ-1,Math.max(0,Math.floor(o.z*NZ)));
+    const th=thetaOf(o);
+    o.ph += 1/(P0*th);
+    o.flash*=0.86;
+    if(o.ph>=1){
+      o.ph-=1; o.flash=1;
+      // pulsing IS feeding IS propulsion (one action, as in the jelly model)
+      const light = 1.0-0.55*(i/NZ);            // food is richer near the surface
+      const gain = light*(mode==='p' ? Math.min(1,o2[i]+0.15) : 1)*0.078;
+      o.intake += (gain-o.intake)*0.30;
+      o.e += gain;
+      // thrust: magnitude only. sign is a coin flip — no gradient is read.
+      const step = 0.014*(1/th);
+      o.z += (rng()<0.5?-1:1)*step;
+    }
+    // klinokinesis: poor recent intake -> larger random displacement
+    // klinokinesis: two independent drives on the TURN RATE only.
+    // (1) poor recent intake, (2) local acidity read straight from the receptor.
+    // Neither term chooses a direction; only the magnitude of random turning.
+    const sigma = 0.0016 + 0.0090*(1-Math.min(1,o.intake/0.045))
+                + (ablate?0:0.012*field[i]);
+    o.z += (rng()-0.5)*2*sigma;
+    if(o.z<0.012){o.z=0.012} if(o.z>0.988){o.z=0.988}
+    o.e -= 0.0026*metabolicRate(o);             // cost scales with metabolism
+    o.e = Math.max(0, Math.min(1.2, o.e));
+  }
+}
+
+// ---- record ---------------------------------------------------------------
+function record(){
+  const f = mode==='co2'?field:o2;
+  const surf=f[1], deep=f[NZ-3];
+  let th=0,e=0,ep=0,er=0,np=0,nr=0,mz=0;
+  for(const o of orgs){ th+=thetaOf(o); e+=o.e; mz+=o.z;
+    if(o.pred){ep+=o.e;np++}else{er+=o.e;nr++} }
+  hist.push({s:sensor,surf,deep,th:th/orgs.length,e:e/orgs.length,mz:mz/orgs.length,
+             ep:np?ep/np:0, er:nr?er/nr:0});
+  if(hist.length>560) hist.shift();
+}
+
+// ---- rendering -------------------------------------------------------------
+const col=document.getElementById('col'), cx=col.getContext('2d');
+const tr=document.getElementById('trace'), tx=tr.getContext('2d');
+function fit(c){
+  const r=c.getBoundingClientRect();
+  const d=window.devicePixelRatio||1;
+  // read the logical height ONCE and remember it: assigning c.height rewrites
+  // the attribute, so re-reading it afterwards returns device pixels.
+  const h=parseInt(c.dataset.h||c.getAttribute('height'),10);
+  c.dataset.h=h;
+  c.width=Math.round(r.width*d);
+  c.height=Math.round(h*d);
+  c.style.height=h+'px';
+  c.getContext('2d').setTransform(d,0,0,d,0,0);
+  return {w:r.width,h};
+}
+let CS=fit(col), TS=fit(tr);
+window.addEventListener('resize',()=>{CS=fit(col);TS=fit(tr)});
+
+function drawColumn(){
+  const {w,h}=CS; cx.clearRect(0,0,w,h);
+  const f = mode==='co2'?field:o2;
+  for(let i=0;i<NZ;i++){
+    const y=i/NZ*h, hh=h/NZ+1;
+    let col1;
+    if(mode==='co2'){
+      const a=Math.min(1,f[i]);                       // 0 = alkaline, 1 = acidic
+      col1=`rgb(${Math.round(18+206*a)},${Math.round(48+112*a)},${Math.round(84-24*a)})`;
+    }else{
+      const v=Math.max(0,Math.min(1,(f[i]-0.55)/0.5)); // 0 = hypoxic, 1 = saturated
+      col1=`rgb(${Math.round(74-40*v)},${Math.round(30+126*v)},${Math.round(52+203*v)})`;
+    }
+    cx.fillStyle=col1; cx.fillRect(0,y,w,hh);
+  }
+  // surface line
+  cx.strokeStyle='rgba(200,240,255,.5)';cx.lineWidth=1;
+  cx.beginPath();cx.moveTo(0,1);cx.lineTo(w,1);cx.stroke();
+  // organisms
+  for(const o of orgs){
+    const y=o.z*h, x=8+o.x*(w-16);
+    const alive=o.e>0.02;
+    if(o.flash>0.05){
+      cx.beginPath();cx.arc(x,y,3+7*o.flash,0,6.2832);
+      cx.strokeStyle=`rgba(150,240,230,${0.55*o.flash})`;cx.lineWidth=1;cx.stroke();
+    }
+    cx.beginPath();cx.arc(x,y,2.6,0,6.2832);
+    if(mode==='p'&&o.pred) cx.fillStyle=alive?'#d872b0':'#5a2c46';
+    else cx.fillStyle=alive?'#7ef0e2':'#2b4a48';
+    cx.fill();
+  }
+}
+
+function drawTrace(){
+  const {w,h}=TS; tx.clearRect(0,0,w,h);
+  if(hist.length<2) return;
+  const lanes = LANES[mode], L=lanes.length, lh=h/L, n=hist.length;
+  tx.font='10px ui-monospace,Menlo,monospace';
+  for(let k=0;k<L;k++){
+    const ln=lanes[k], y0=k*lh, y1=y0+lh;
+    // lane frame
+    tx.strokeStyle='#0e1c2b';tx.lineWidth=1;
+    tx.beginPath();tx.moveTo(0,y1);tx.lineTo(w,y1);tx.stroke();
+    // auto-scale to this lane's own data
+    let lo=Infinity,hi=-Infinity;
+    for(const s of ln.series) for(let i=0;i<n;i++){
+      const v=s.get(hist[i]); if(v<lo)lo=v; if(v>hi)hi=v; }
+    if(!isFinite(lo)){lo=0;hi=1}
+    if(hi-lo<ln.min) {const c=(hi+lo)/2; lo=c-ln.min/2; hi=c+ln.min/2;}
+    const pad=(hi-lo)*0.16; lo-=pad; hi+=pad;
+    const top=y0+15, bot=y1-6;
+    for(const s of ln.series){
+      tx.beginPath();tx.setLineDash(s.dash||[]);tx.strokeStyle=s.color;tx.lineWidth=1.4;
+      for(let i=0;i<n;i++){
+        const v=(s.get(hist[i])-lo)/(hi-lo);
+        const y=bot-Math.max(0,Math.min(1,v))*(bot-top);
+        i?tx.lineTo(i/(n-1)*w,y):tx.moveTo(0,y);
+      }
+      tx.stroke();tx.setLineDash([]);
+    }
+    // label + live readout
+    tx.fillStyle=ln.series[0].color; tx.textAlign='left';
+    tx.fillText(ln.label, 6, y0+11);
+    tx.textAlign='right';
+    const cur=hist[n-1];
+    tx.fillText(ln.series.map(s=>ln.fmt(s.get(cur))).join('  /  '), w-6, y0+11);
+    // axis extremes
+    tx.fillStyle='#3f5b73';tx.textAlign='left';
+    tx.fillText(ln.fmt(hi), 6, top+3);
+    tx.fillText(ln.fmt(lo), 6, bot);
+  }
+}
+
+const LANES={
+  co2:[
+    {label:'酸性度  表層 / 深層', min:0.05, fmt:v=>v.toFixed(2), series:[
+      {get:d=>d.surf,color:'#e0a54a'},{get:d=>d.deep,color:'#e0a54a',dash:[3,3]}]},
+    {label:'閾値 θ（高い＝代謝が低い）', min:0.10, fmt:v=>v.toFixed(2), series:[
+      {get:d=>d.th,color:'#ff7a6b'}]},
+    {label:'群れの平均深度（0＝水面 / 大きいほど酸から離れた）', min:0.06, fmt:v=>v.toFixed(2), series:[
+      {get:d=>d.mz,color:'#5fe3d8'}]},
+    {label:'平均エネルギー', min:0.06, fmt:v=>v.toFixed(2), series:[
+      {get:d=>d.e,color:'#9d8cff'}]}
+  ],
+  p:[
+    {label:'溶存 O₂  表層 / 深層', min:0.04, fmt:v=>v.toFixed(2), series:[
+      {get:d=>d.surf,color:'#6aa6ff'},{get:d=>d.deep,color:'#6aa6ff',dash:[3,3]}]},
+    {label:'気圧', min:2, fmt:v=>v.toFixed(0), series:[
+      {get:d=>d.s,color:'#e0a54a'}]},
+    {label:'エネルギー  予測型 / 反応型', min:0.05, fmt:v=>v.toFixed(2), series:[
+      {get:d=>d.ep,color:'#d872b0'},{get:d=>d.er,color:'#7ef0e2'}]},
+    {label:'閾値 θ の平均', min:0.08, fmt:v=>v.toFixed(2), series:[
+      {get:d=>d.th,color:'#ff7a6b'}]}
+  ]
+};
+function drawLegend(){
+  document.getElementById('leg').textContent =
+    '各段は独立に自動スケールしています。左端の2つの数字がその段の上下端です。';
+}
+
+// ---- narration -------------------------------------------------------------
+function story(){
+  const el=document.getElementById('story'); const h=(t*TICK_MIN/60);
+  const f=mode==='co2'?field:o2;
+  if(mode==='co2'){
+    let s;
+    if(ablate) s='<b>対照条件です。</b>場は同じように酸性化しますが、受容器から先が切れているため生理は静止しています。閾値 θ は 1.00 のまま動きません。';
+    else if(sensor<620) s='<b>換気されています。</b>表層の酸性度は低く、拍動は基準周期です。';
+    else if(f[1]<0.35) s='<b>CO₂ が溶け込み始めました。</b>水面から酸性化が進みます。深層はまだ無事で、鉛直勾配が立っているのが見えるはずです。';
+    else if(f[NZ-3]<0.25) s='<b>閾値 θ が上がっています。</b>拍動が鈍り、拍動＝摂餌なので摂餌も同時に落ちます。表層と深層の差（実線と破線）が最大になる時期です。';
+    else s='<b>深層まで酸が回りました。</b>いま「窓を開ける」を押すと、表層だけが数分で戻り、深層は長く酸を抱えたままになります。';
+    if(windowOpen) s='<b>換気中。</b>表層の実線は急落しますが、破線（深層）はほとんど動きません。<b>入るのは速く、抜けるのは遅い</b> — 場が痕跡を保持しています。';
+    el.innerHTML=s;
+  }else{
+    let s;
+    if(ablate) s='<b>対照条件です。</b>O₂ は下がりますが、両型とも代謝を変えません。エネルギー曲線が重なるはずです。';
+    else if(h<8) s='<b>気圧が下がり始めました。</b>ヘンリー則により飽和溶存酸素の上限が下がります。まだ実害はありません。';
+    else if(h<20) s='<b>予測型（マゼンタ）が先に代謝を落としています。</b>低酸素はまだ来ていません。気圧の下降だけが未来を予告しています。';
+    else if(h<30) s='<b>低酸素の底です。</b>反応型（シアン）はここで初めて応答します。2本のエネルギー曲線の差が、先回りの利得です。';
+    else s='<b>回復期。</b>先回りのコストと、遅れて払う代償のどちらが高くついたかが読めます。';
+    el.innerHTML=s;
+  }
+  document.getElementById('ablnote').style.display=ablate?'block':'none';
+}
+
+// ---- loop ------------------------------------------------------------------
+function frame(){
+  if(running){
+    for(let k=0;k<3;k++){ stepSensor(); stepField(); stepOrgs(); t++; if(t%2===0) record(); }
+  }
+  const mins=t*TICK_MIN, dd=Math.floor(mins/MIN_PER_DAY), hh=Math.floor(mins%MIN_PER_DAY/60), mm=Math.floor(mins%60);
+  document.getElementById('gval').textContent = mode==='co2'?Math.round(sensor):sensor.toFixed(1);
+  document.getElementById('gclock').textContent=`day ${dd} · ${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
+  drawColumn(); drawTrace(); story();
+  requestAnimationFrame(frame);
+}
+
+// ---- controls --------------------------------------------------------------
+function setMode(m){
+  mode=m;
+  document.getElementById('tabCO2').setAttribute('aria-selected',m==='co2');
+  document.getElementById('tabP').setAttribute('aria-selected',m==='p');
+  document.getElementById('gunit').textContent = m==='co2'?'ppm CO₂':'hPa';
+  document.getElementById('capmid').textContent = m==='co2'?'pH（暖色＝酸性）':'溶存 O₂（暗色＝低酸素）';
+  document.getElementById('event').textContent = m==='co2'?'窓を開ける':'台風を早送り';
+  drawLegend(); reset();
+}
+document.getElementById('tabCO2').onclick=()=>setMode('co2');
+document.getElementById('tabP').onclick=()=>setMode('p');
+document.getElementById('play').onclick=e=>{running=!running;
+  e.target.textContent=running?'⏸ 一時停止':'▶ 再生'};
+document.getElementById('event').onclick=()=>{
+  if(mode==='co2'){ windowOpen=true; windowT=t*TICK_MIN; }
+  else { for(let k=0;k<220;k++){stepSensor();stepField();stepOrgs();t++;if(t%2===0)record()} }
+};
+document.getElementById('ablate').onclick=e=>{ablate=!ablate;e.target.classList.toggle('on',ablate)};
+document.getElementById('reset').onclick=()=>reset();
+col.addEventListener('click',()=>{});
+setMode('co2'); frame();
+</script>
+</body>
+</html>

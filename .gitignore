@@ -118,3 +118,7 @@ Recordings/
 # .NET ビルド成果物（tools/ 配下）
 tools/**/bin/
 tools/**/obj/
+
+# Python の生成物（docs/prototypes の参照実装を走らせると出る）
+__pycache__/
+*.pyc
