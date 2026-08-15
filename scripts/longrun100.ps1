@@ -63,6 +63,10 @@ param(
     [int]$Size = 100,
     [int]$CheckpointInterval = 10000,
     [int]$Images = 2,
+    # SimRunner の --conditions にそのまま渡す（カンマ区切り）。
+    # 空なら SimRunner の既定（default 単独）になる。
+    # 第4.5段の E1 のように条件を指定して長時間回す用途で使う
+    [string]$Conditions = "",
     [string]$OutDir = "runs/longrun100_20260812"
 )
 
@@ -177,6 +181,9 @@ if ($Detach) {
         '-File "{0}" -Seeds {1} -Ticks {2} -Size {3} ' +
         '-CheckpointInterval {4} -Images {5} -OutDir "{6}"') -f `
         $self, $Seeds, $Ticks, $Size, $CheckpointInterval, $Images, $outPath
+    if ($Conditions -ne "") {
+        $childCmd += ' -Conditions "{0}"' -f $Conditions
+    }
 
     # 端末のプロセスツリー / Job Object の外へ出す（冒頭のコメント参照）。
     # 失敗したら従来どおり Start-Process へ落とすが、その場合は
@@ -201,6 +208,7 @@ if ($Detach) {
             "-CheckpointInterval", $CheckpointInterval, "-Images", $Images,
             "-OutDir", $outPath
         )
+        if ($Conditions -ne "") { $childArgs += @("-Conditions", $Conditions) }
         $child = Start-Process -FilePath "powershell.exe" -ArgumentList $childArgs `
             -WorkingDirectory $projectRoot -WindowStyle Hidden -PassThru
         $childPid = $child.Id
@@ -239,6 +247,7 @@ function Write-ProgressFile([string]$state, [string]$detail, [double]$fraction) 
         "開始: $($start.ToString('yyyy-MM-dd HH:mm:ss'))",
         "経過: $([int]$elapsed.TotalMinutes) 分 $([int]($elapsed.TotalSeconds % 60)) 秒",
         "構成: ${Size}x${Size} / $Ticks ティック / $Seeds シード / チェックポイント $CheckpointInterval ティックごと",
+        "条件: $(if ($Conditions -ne '') { $Conditions } else { 'default（既定）' })",
         $detail
     )
     if ($fraction -gt 0 -and $fraction -lt 1) {
@@ -264,6 +273,7 @@ $simArgs = @(
     "--checkpoint-interval", $CheckpointInterval,
     "--out", $outPath
 )
+if ($Conditions -ne "") { $simArgs += @("--conditions", $Conditions) }
 
 # 標準出力をファイルへ流し、こちらは**定期的に読む**。
 # パイプで受けて1行ずつ処理する形にすると、SimRunner の進捗行が
