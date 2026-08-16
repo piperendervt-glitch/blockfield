@@ -47,7 +47,29 @@ namespace BlockField.SimCore.Fluid
         public float SwimVx => m_ModelVx * m_SpeedScale;
         public float SwimVz => m_ModelVz * m_SpeedScale;
 
+        /// <summary>
+        /// **その瞬間の**自力遊泳の速さ (m/s)。
+        ///
+        /// 【平均値として読んではいけない】推力は発火したステップにしか出ず、
+        /// あとは抗力で減衰するので、この値は 1 拍動のあいだに 0.19 から 0.0004 まで振れる。
+        /// 2026-08-16 の実機ログは 1 秒間隔（= 拍動周期そのもの）でこれを出していたため、
+        /// **常に減衰しきった位相で標本化**され、0.0007 m/s と出ていた。目標は 0.040 m/s。
+        /// 平均を見たいときは <see cref="SwimPathX"/> の差分を使うこと。
+        /// </summary>
         public float SwimSpeed => (float)Math.Sqrt(SwimVx * SwimVx + SwimVz * SwimVz);
+
+        /// <summary>
+        /// 自力遊泳ぶんだけを積分した変位 (m)。流れに運ばれたぶんは含まない。
+        /// 2点の差を経過時間で割れば、その区間の平均遊泳速度になる
+        /// （<see cref="CalibrateSpeedScale"/> が目標へ合わせているのと同じ統計量）。
+        /// </summary>
+        public float SwimPathX { get; private set; }
+        public float SwimPathZ { get; private set; }
+
+        /// <summary>流れに運ばれたぶんだけを積分した変位 (m)。鉛直はこちらにしか出ない。</summary>
+        public float DriftPathX { get; private set; }
+        public float DriftPathY { get; private set; }
+        public float DriftPathZ { get; private set; }
 
         /// <summary>これまでの拍動回数（ペースメーカーが実際に発火した数）。</summary>
         public long PulseCount { get; private set; }
@@ -57,6 +79,9 @@ namespace BlockField.SimCore.Fluid
 
         public ExcitableField Ring => m_Ring;
         public float BellDiameter => m_Params.BellDiameter;
+
+        /// <summary>1拍動のステップ数。平均を取る窓の長さに使う。</summary>
+        public int PulsePeriodTicks => m_Params.PulsePeriodTicks;
 
         /// <summary>モデル速度を m/s へ換算する係数（診断用）。</summary>
         public float SpeedScale => m_SpeedScale;
@@ -162,6 +187,13 @@ namespace BlockField.SimCore.Fluid
             X += (SwimVx + flowVx) * dtSeconds;
             Y += flowVy * dtSeconds;
             Z += (SwimVz + flowVz) * dtSeconds;
+
+            // 診断用の内訳。位置の更新式はそのまま（丸めの経路を変えないため）
+            SwimPathX += SwimVx * dtSeconds;
+            SwimPathZ += SwimVz * dtSeconds;
+            DriftPathX += flowVx * dtSeconds;
+            DriftPathY += flowVy * dtSeconds;
+            DriftPathZ += flowVz * dtSeconds;
 
             StepCount++;
         }

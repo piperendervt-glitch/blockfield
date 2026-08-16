@@ -41,12 +41,13 @@ namespace BlockField.Aquarium
             var body = m_Jelly != null ? m_Jelly.Body : null;
             if (body == null) return "Jelly[R-B]: 未投入";
 
-            float flowSpeed = m_Jelly.FlowAt.magnitude;
-            float ratio = flowSpeed > 1e-6f ? body.SwimSpeed / flowSpeed : 0f;
+            // 【平均で出す】瞬時値は拍動の位相で 0.19〜0.0004 m/s まで振れるので、
+            // パネルで読んでも比の判定に使えない。直近1拍動の平均を出す
             return $"Jelly[R-B]: {body.BellDiameter * 100f:F0}cm " +
                 $"({m_Jelly.BellIndex + 1}/{AquariumJellyfish.BellDiameterChoices.Length})" +
-                $"   pulse={body.PulseCount}   swim={body.SwimSpeed:F3}   flow={flowSpeed:F3}" +
-                $"   swim/flow={ratio:F2}";
+                $"   pulse={body.PulseCount}   swim={m_Jelly.SwimSpeedMean:F3}" +
+                $"   flow={m_Jelly.DriftSpeedMean:F3}" +
+                $"   swim/flow={m_Jelly.SwimToFlowRatio:F2}";
         }
 
         void Update()

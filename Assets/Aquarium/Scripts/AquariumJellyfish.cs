@@ -38,14 +38,38 @@ namespace BlockField.Aquarium
         /// <summary>直近の流速 (m/s)。パネルとログ用。</summary>
         public Vector3 FlowAt { get; private set; }
 
+        /// <summary>
+        /// 直近1拍動(1.0秒)の**平均**遊泳速度 (m/s) と、流れに運ばれた平均速度 (m/s)。
+        ///
+        /// 【瞬時値では判定できない】<see cref="Jellyfish.SwimSpeed"/> は拍動の位相で
+        /// 0.19〜0.0004 m/s まで振れる。1秒ごとの標本化は拍動周期と同じなので
+        /// 位相が固定され、実機ログには常に減衰しきった値だけが載っていた。
+        /// **傘径と流速の比を判定するには平均が要る**ので、変位の差分で測る。
+        /// </summary>
+        public float SwimSpeedMean { get; private set; }
+        public float DriftSpeedMean { get; private set; }
+
+        /// <summary>遊泳が流れに勝っているか。1 を超えていれば自力が勝つ。</summary>
+        public float SwimToFlowRatio =>
+            DriftSpeedMean > 1e-6f ? SwimSpeedMean / DriftSpeedMean : 0f;
+
         float m_Accumulator;
+
+        // 平均を取る窓（1拍動ぶん）の始点
+        long m_WindowStep;
+        float m_WinSwimX, m_WinSwimZ, m_WinDriftX, m_WinDriftY, m_WinDriftZ;
 
         void Update()
         {
             var field = m_Flow != null ? m_Flow.Field : null;
             if (field == null)
             {
-                Body = null;
+                // 【焼き直しでクラゲを作り直さない】セルサイズの切り替えは
+                // Field を一度 null にする。以前はここで Body も捨てていたため、
+                // 2026-08-16 のセッションでは 7 分間に **36 回**湧き直していた
+                // （うち利用者の傘径操作は 3 回だけ）。毎回スポーン地点へ戻るので
+                // 「生きて見えるか」を時間をかけて見ることができない。
+                // 格子が変わっても部屋座標は同じなので、位置はそのまま持ち越せる
                 return;
             }
             if (Body == null)
@@ -67,6 +91,29 @@ namespace BlockField.Aquarium
                 m_Accumulator -= step;
                 stepped++;
             }
+
+            UpdateMeanSpeeds();
+        }
+
+        /// <summary>窓（1拍動）が閉じたら平均を出し直す。</summary>
+        void UpdateMeanSpeeds()
+        {
+            long elapsed = Body.StepCount - m_WindowStep;
+            if (elapsed < Body.PulsePeriodTicks) return;
+
+            float seconds = elapsed / k_NeuralHz;
+            float sx = Body.SwimPathX - m_WinSwimX, sz = Body.SwimPathZ - m_WinSwimZ;
+            float dx = Body.DriftPathX - m_WinDriftX;
+            float dy = Body.DriftPathY - m_WinDriftY;
+            float dz = Body.DriftPathZ - m_WinDriftZ;
+
+            SwimSpeedMean = Mathf.Sqrt(sx * sx + sz * sz) / seconds;
+            DriftSpeedMean = Mathf.Sqrt(dx * dx + dy * dy + dz * dz) / seconds;
+
+            m_WindowStep = Body.StepCount;
+            m_WinSwimX = Body.SwimPathX; m_WinSwimZ = Body.SwimPathZ;
+            m_WinDriftX = Body.DriftPathX; m_WinDriftY = Body.DriftPathY;
+            m_WinDriftZ = Body.DriftPathZ;
         }
 
         /// <summary>傘径を切り替える。位置は引き継がず、湧かせ直す。</summary>
@@ -88,6 +135,11 @@ namespace BlockField.Aquarium
             var p = JellyParams.Default;
             p.BellDiameter = BellDiameter;
             Body = new Jellyfish(p, cx, cy, cz);
+
+            m_WindowStep = 0;
+            m_WinSwimX = m_WinSwimZ = 0f;
+            m_WinDriftX = m_WinDriftY = m_WinDriftZ = 0f;
+            SwimSpeedMean = DriftSpeedMean = 0f;
 
             Debug.Log($"[Aquarium] クラゲを投入: 傘 {BellDiameter * 100f:F0}cm / " +
                 $"目標遊泳 {p.SwimSpeed:F3}m/s / 拍動 {p.PulsePeriodTicks / k_NeuralHz:F2}秒 / " +
