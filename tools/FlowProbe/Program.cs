@@ -71,6 +71,73 @@ static (double normalMean, double normalP90, double nearFarRatio, double median)
             near.Average() / far.Average(), all[all.Count / 2]);
 }
 
+// ---------------------------------------------------------------------------
+// セルサイズ等価性の検証（2026-08-16 の3回目のセッション後）
+//
+// 実機で「セルサイズの差が分からない」となった。正規化でセルサイズと
+// 流速・渦スケールの結合を切ったなら、**同じ流れ場を違う解像度で標本化して
+// いるだけ**になっているはず。それを確かめる。
+// ---------------------------------------------------------------------------
+
+static (double p10, double p50, double p90, double reversal, int cells)
+    Sample(float cellSize)
+{
+    // 同じ物理サイズの部屋・同じ位置の障害物にする（セル数ではなく m で決める）
+    var g = FlowGrid.FromBounds(0f, 0f, 0f, 4.10f, 2.21f, 4.16f, cellSize);
+    FlowBoundaryBaker.SealBorders(g);
+    int Cx(float m) => (int)(m / cellSize);
+    for (int z = Cx(1.6f); z <= Cx(2.2f); z++)
+        for (int y = Cx(0.2f); y <= Cx(0.7f); y++)
+            for (int x = Cx(1.3f); x <= Cx(2.1f); x++)
+                if (g.InRange(x, y, z)) g.SetSolid(x, y, z, true);
+    FlowBoundaryBaker.BakeDistance(g);
+
+    var f = new FlowField(g, FlowParams.Default);
+    f.RebuildAll();
+
+    var speeds = new List<double>();
+    for (int z = 1; z < g.Depth - 1; z++)
+        for (int y = 1; y < g.Height - 1; y++)
+            for (int x = 1; x < g.Width - 1; x++)
+            {
+                if (g.IsSolid(x, y, z)) continue;
+                f.VelocityAt(x, y, z, out float vx, out float vy, out float vz);
+                speeds.Add(Math.Sqrt(vx * vx + vy * vy + vz * vz));
+            }
+    speeds.Sort();
+
+    // 渦のスケール: 速度の向きが反転するまでの距離（m）。セル数ではなく m で測る
+    var lengths = new List<double>();
+    for (float wz = 0.4f; wz < 3.8f; wz += 0.35f)
+        for (float wy = 1.0f; wy < 2.0f; wy += 0.3f)
+        {
+            float bx = 0, by = 0, bz = 0; double run = 0;
+            for (float wx = 0.2f; wx < 3.9f; wx += cellSize)
+            {
+                f.SampleVelocity(wx, wy, wz, out float vx, out float vy, out float vz);
+                double n = Math.Sqrt(vx * vx + vy * vy + vz * vz);
+                if (n < 1e-12) { run = 0; continue; }
+                vx = (float)(vx / n); vy = (float)(vy / n); vz = (float)(vz / n);
+                if (run > 0 && vx * bx + vy * by + vz * bz < 0) { lengths.Add(run); run = 0; continue; }
+                bx = vx; by = vy; bz = vz; run += cellSize;
+            }
+        }
+    lengths.Sort();
+    return (speeds[(int)(speeds.Count * 0.1)], speeds[speeds.Count / 2],
+            speeds[(int)(speeds.Count * 0.9)],
+            lengths.Count > 0 ? lengths[lengths.Count / 2] : double.NaN, g.CellCount);
+}
+
+Console.WriteLine("=== セルサイズ等価性（同じ部屋・同じ障害物・同じ目標流速 0.08 m/s）===");
+Console.WriteLine($"  {"セル",7} {"セル数",9} {"p10",9} {"p50",9} {"p90",9} {"渦の反転距離",13}");
+foreach (float c in new[] { 0.08f, 0.065f, 0.055f })
+{
+    var r = Sample(c);
+    Console.WriteLine($"  {c * 100,5:F1}cm {r.cells,9} {r.p10,9:F4} {r.p50,9:F4} {r.p90,9:F4} {r.reversal * 100,10:F0} cm");
+}
+Console.WriteLine("  → 一致するなら「同じ流れ場を違う解像度で標本化しているだけ」");
+Console.WriteLine();
+
 Console.WriteLine("=== 0. 境界ランプ幅の掃引（壁面基準に修正後）===");
 Console.WriteLine($"  {"ramp",6} {"|u·n|/|u| 平均",14} {"p90",8} {"境界/開け",10} {"中央流速",10}");
 foreach (float ramp in new[] { 1.0f, 1.5f, 2.0f, 2.5f, 3.0f, 4.0f, 5.0f })

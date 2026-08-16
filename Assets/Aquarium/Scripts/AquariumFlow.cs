@@ -43,7 +43,11 @@ namespace BlockField.Aquarium
 
         [SerializeField] RoomScanner m_Scanner;
         [SerializeField] DioramaOrigin m_Origin;
-        [SerializeField] int m_CellSizeIndex = 1;
+        // 既定は 8cm（選択肢0）。2026-08-16 の実機で 8cm / 6.5cm / 5.5cm の
+        // 見た目に差が無いことを確認し、ヘッドレスでも流速分布が一致する
+        // （中央値は3種とも厳密に 0.0800、p90 の差 3%）ことを確かめたうえで、
+        // 最も軽い 8cm を採った（ティック 4.41ms、72FPS 予算の 32%）
+        [SerializeField] int m_CellSizeIndex;
         [SerializeField] int m_SpeedIndex = 1;
         [SerializeField] FlowParticleView m_Particles;
 
