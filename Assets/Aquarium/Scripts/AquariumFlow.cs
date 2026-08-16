@@ -60,6 +60,9 @@ namespace BlockField.Aquarium
         /// <summary>現在の目標流速 (m/s)。</summary>
         public float TargetSpeed => TargetSpeedChoices[m_SpeedIndex];
 
+        /// <summary>目標流速の選択肢番号（パネルに「今/全体」を出すため）。</summary>
+        public int SpeedIndex => m_SpeedIndex;
+
         /// <summary>流れ場。焼き込みが済むまで null。</summary>
         public FlowField Field { get; private set; }
 

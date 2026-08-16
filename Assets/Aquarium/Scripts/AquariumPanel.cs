@@ -47,12 +47,18 @@ namespace BlockField.Aquarium
             var g = field.Grid;
             var preset = m_Particles != null ? m_Particles.Current : default;
 
+            // 【切り替えられる値は現在値を必ず出す】2026-08-16 のセッションで
+            // 目標流速とセルサイズの現在値がパネルに無く、**自分がどの段階にいるか
+            // 分からないまま比較する**ことになった。ボタン名も実物と食い違っていた
+            // （表示は B、実際は Y）。段階は「今/全体」の形で出す
             m_Text.text =
                 $"FPS: {fps:F1}   Tick: {m_Flow.TickMs:F2}ms   Bake: {m_Flow.BakeMs}ms\n" +
-                $"Cell[A]: {m_Flow.CellSize * 100f:F1}cm   Grid: {g.Width}x{g.Height}x{g.Depth} = {g.CellCount}\n" +
-                $"Solid: {m_Flow.SolidCells}   MaxSpeed: {m_Flow.MaxSpeed:F4}   t={field.TickCount}\n" +
-                $"View[B]: {preset.Name}   n={(m_Particles != null ? m_Particles.DrawnParticles : 0)}   " +
-                $"size={preset.Size * 100f:F1}cm   bright={preset.Brightness:F2}";
+                $"Speed[R-A]: {m_Flow.TargetSpeed:F3} m/s ({m_Flow.SpeedIndex + 1}/{AquariumFlow.TargetSpeedChoices.Length})" +
+                $"  = {m_Flow.TargetSpeed / 72f * 100f:F2}cm/frame   Max: {m_Flow.MaxSpeed:F3}\n" +
+                $"Cell[L-X]: {m_Flow.CellSize * 100f:F1}cm ({m_Flow.CellSizeIndex + 1}/{AquariumFlow.CellSizeChoices.Length})" +
+                $"   {g.Width}x{g.Height}x{g.Depth}={g.CellCount}   Solid: {m_Flow.SolidCells}\n" +
+                $"View[L-Y]: {preset.Name} ({m_Particles.PresetIndex + 1}/{FlowParticleView.Presets.Length})" +
+                $"   n={m_Particles.DrawnParticles}   size={preset.Size * 100f:F1}cm   t={field.TickCount}";
         }
     }
 }

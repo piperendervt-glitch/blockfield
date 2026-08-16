@@ -57,8 +57,11 @@ namespace BlockField.Aquarium
             // 大きめを少数。数が少ないぶん1粒の動きが追える
             new Preset { Name = "粗い粒", Count = 900, Size = 0.022f, SizeSpread = 0.8f,
                          Brightness = 0.75f, Contrast = 0.5f, LifeMin = 20f, LifeMax = 60f },
-            // 速い所だけ光らせる。流れの構造（渦・剥離）を強調する狙い
-            new Preset { Name = "流線強調", Count = 2000, Size = 0.013f, SizeSpread = 0.3f,
+            // 速い所だけ明るくする。**線は描かない**。
+            // 以前は「流線強調」という名前だったが、名前からライン描画を想像させ、
+            // 実際には出ないので混乱を招いた（2026-08-16 のセッションで指摘）。
+            // 名前は実態に合わせる（テストの改名と同じ趣旨）
+            new Preset { Name = "速い所が明るい", Count = 2000, Size = 0.013f, SizeSpread = 0.3f,
                          Brightness = 0.25f, Contrast = 2.0f, LifeMin = 20f, LifeMax = 60f },
         };
 

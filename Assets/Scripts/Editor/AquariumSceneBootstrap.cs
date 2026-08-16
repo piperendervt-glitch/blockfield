@@ -132,9 +132,18 @@ public static class AquariumSceneBootstrap
         flow.origin = diorama;
 
         // 粒子は不透明で描く（アルファ<1 はパススルーと合成されるため使えない）。
-        // 明度とスケールで速さを見せる
+        // 明度とスケールで速さを見せる。
+        //
+        // 【オクルージョン対応シェーダーを使う】2026-08-16 のセッションで
+        // **家具の向こう側の粒子が手前に重なって見えた**。原因はここで
+        // URP/Unlit を指定していたことで、環境深度による遮蔽が一切効いていなかった。
+        // 「環境深度の取得だけでは不足。ARShaderOcclusion ＋ XR_HARD_OCCLUSION 対応
+        // シェーダーが必須」は Demo 0 で確立済みの知見だったのに、
+        // 新しいマテリアルで踏み外した。
+        // BlockFieldOcclusionUnlit は multi_compile_instancing を持つので
+        // DrawMeshInstanced とも両立する。
         var particleMat = GetOrCreateMaterial("FlowParticle", new Color(0.6f, 0.85f, 1f),
-            "Universal Render Pipeline/Unlit");
+            k_OcclusionShader);
         particleMat.enableInstancing = true;
         EditorUtility.SetDirty(particleMat);
 
