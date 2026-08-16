@@ -21,11 +21,13 @@ namespace BlockField.Aquarium
         [SerializeField] AquariumFlow m_Flow;
         [SerializeField] FlowParticleView m_Particles;
         [SerializeField] AquariumJellyfish m_Jelly;
+        [SerializeField] AquariumDebugView m_Debug;
         [SerializeField] Text m_Text;
 
         public AquariumFlow flow { get => m_Flow; set => m_Flow = value; }
         public FlowParticleView particles { get => m_Particles; set => m_Particles = value; }
         public AquariumJellyfish jelly { get => m_Jelly; set => m_Jelly = value; }
+        public AquariumDebugView debugView { get => m_Debug; set => m_Debug = value; }
         public Text text { get => m_Text; set => m_Text = value; }
 
         float m_Smoothed;
@@ -48,6 +50,18 @@ namespace BlockField.Aquarium
                 $"   pulse={body.PulseCount}   swim={m_Jelly.SwimSpeedMean:F3}" +
                 $"   flow={m_Jelly.DriftSpeedMean:F3}" +
                 $"   swim/flow={m_Jelly.SwimToFlowRatio:F2}";
+        }
+
+        /// <summary>
+        /// デバッグ表示の行。**焼き込んだ壁が現実の壁と重なっているか**を見るための表示で、
+        /// いま何を描いているかが分からないと判定にならない。
+        /// </summary>
+        string DebugLine()
+        {
+            if (m_Debug == null) return "Debug[L-Grip]: 未配線";
+            return $"Debug[L-Grip]: {m_Debug.CurrentName} " +
+                $"({(int)m_Debug.Current + 1}/{AquariumDebugView.ModeNames.Length})" +
+                $"   n={m_Debug.DrawnCells}";
         }
 
         void Update()
@@ -81,7 +95,7 @@ namespace BlockField.Aquarium
                 $"   Solid: {m_Flow.SolidCells} (壁{m_Flow.MeshSolidCells}+縁{m_Flow.BorderSolidCells})\n" +
                 $"View[L-Y]: {preset.Name} ({m_Particles.PresetIndex + 1}/{FlowParticleView.Presets.Length})" +
                 $"   n={m_Particles.DrawnParticles}   size={preset.Size * 100f:F1}cm   t={field.TickCount}\n" +
-                JellyLine();
+                JellyLine() + "\n" + DebugLine();
         }
     }
 }

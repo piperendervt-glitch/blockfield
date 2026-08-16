@@ -11,9 +11,11 @@ namespace BlockField.Aquarium
     /// - **左手Y: 粒子プリセット**（微粒子 → 粗い粒 → 速い所が明るい）。水に見えるかを探す
     /// - **右手A: 目標流速**（0.03 → 0.08 → 0.15 m/s）。速さは一発で当たらないので振る
     /// - **右手B: 傘径**（10 → 15 → 25 cm）。実部屋での見え方に直結する
+    /// - **左手グリップ: デバッグ表示**（なし → 固体セル(遮蔽あり) → 固体セル(遮蔽なし)
+    ///   → 水槽の外接箱）。**焼き込んだ壁が現実の壁と重なっているか**を目で確かめる
     ///
     /// セッション時間は5分が目安（CLAUDE.md）なので、
-    /// 装着したまま両方を回せる形にしてある。
+    /// 装着したまま全部を回せる形にしてある。
     /// </summary>
     public sealed class AquariumInput : MonoBehaviour
     {
@@ -25,10 +27,14 @@ namespace BlockField.Aquarium
         public FlowParticleView particles { get => m_Particles; set => m_Particles = value; }
         public AquariumJellyfish jelly { get => m_Jelly; set => m_Jelly = value; }
 
+        [SerializeField] AquariumDebugView m_Debug;
+        public AquariumDebugView debugView { get => m_Debug; set => m_Debug = value; }
+
         InputAction m_CellSizeAction;
         InputAction m_PresetAction;
         InputAction m_SpeedAction;
         InputAction m_BellAction;
+        InputAction m_DebugAction;
 
         void OnEnable()
         {
@@ -51,6 +57,17 @@ namespace BlockField.Aquarium
                 "<XRController>{RightHand}/secondaryButton");
             m_BellAction.performed += OnBell;
             m_BellAction.Enable();
+
+            // ボタン4つは既に埋まっているのでグリップを使う
+            m_DebugAction = new InputAction("AquariumDebug", InputActionType.Button,
+                "<XRController>{LeftHand}/gripPressed");
+            m_DebugAction.performed += OnDebug;
+            m_DebugAction.Enable();
+        }
+
+        void OnDebug(InputAction.CallbackContext _)
+        {
+            if (m_Debug != null) m_Debug.CycleMode();
         }
 
         void OnDisable()
@@ -82,6 +99,13 @@ namespace BlockField.Aquarium
                 m_BellAction.Disable();
                 m_BellAction.Dispose();
                 m_BellAction = null;
+            }
+            if (m_DebugAction != null)
+            {
+                m_DebugAction.performed -= OnDebug;
+                m_DebugAction.Disable();
+                m_DebugAction.Dispose();
+                m_DebugAction = null;
             }
         }
 

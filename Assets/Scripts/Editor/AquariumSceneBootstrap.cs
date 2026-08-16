@@ -184,11 +184,32 @@ public static class AquariumSceneBootstrap
         jellyView.material = bellMat;
         jellyView.anchorSpace = anchorGo.transform;
 
+        // --- デバッグ表示（焼き込んだ壁が現実の壁と重なっているかを見る）---
+        // 遮蔽ありは粒子と同じオクルージョン対応シェーダー。遮蔽なしは素の Unlit で、
+        // 壁の向こう側にあるセルも描く。2つを切り替えると前後関係が読める
+        var solidOccludedMat = GetOrCreateMaterial("DebugSolidOccluded",
+            new Color(1f, 0.35f, 0.1f), k_OcclusionShader);
+        var solidThroughMat = GetOrCreateMaterial("DebugSolidThrough",
+            new Color(0.15f, 1f, 0.35f), "Universal Render Pipeline/Unlit");
+        // DrawMeshInstanced はマテリアル側で有効になっていないと1個ずつ描かれる
+        solidOccludedMat.enableInstancing = true;
+        solidThroughMat.enableInstancing = true;
+        EditorUtility.SetDirty(solidOccludedMat);
+        EditorUtility.SetDirty(solidThroughMat);
+        AssetDatabase.SaveAssets();
+        var debugGo = new GameObject("Aquarium Debug View");
+        var debugView = debugGo.AddComponent<BlockField.Aquarium.AquariumDebugView>();
+        debugView.flow = flow;
+        debugView.occludedMaterial = solidOccludedMat;
+        debugView.throughMaterial = solidThroughMat;
+        debugView.anchorSpace = anchorGo.transform;
+
         var inputGo = new GameObject("Aquarium Input");
         var input = inputGo.AddComponent<BlockField.Aquarium.AquariumInput>();
         input.flow = flow;
         input.particles = particles;
         input.jelly = jelly;
+        input.debugView = debugView;
 
         // --- パネル（Main.unity と同じ様式。FPS を先頭行に置く）---
         var canvasGo = new GameObject("Aquarium Panel");
@@ -197,7 +218,8 @@ public static class AquariumSceneBootstrap
         canvasGo.transform.localScale = Vector3.one * 0.0007f;
         var canvas = canvasGo.AddComponent<Canvas>();
         canvas.renderMode = RenderMode.WorldSpace;
-        canvasGo.GetComponent<RectTransform>().sizeDelta = new Vector2(620f, 200f);
+        // 6行ぶん（デバッグ表示の行を足した）
+        canvasGo.GetComponent<RectTransform>().sizeDelta = new Vector2(620f, 235f);
 
         var bgGo = new GameObject("Background");
         bgGo.transform.SetParent(canvasGo.transform, false);
@@ -227,6 +249,7 @@ public static class AquariumSceneBootstrap
         panel.flow = flow;
         panel.particles = particles;
         panel.jelly = jelly;
+        panel.debugView = debugView;
         panel.text = uiText;
 
         Directory.CreateDirectory(Path.GetDirectoryName(ScenePath));

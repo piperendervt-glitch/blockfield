@@ -94,6 +94,16 @@ namespace BlockField.Aquarium
 
         /// <summary>格子の外周を塞いだぶんの固体セル数（水槽の縁。1セル厚のリング）。</summary>
         public int BorderSolidCells => SolidCells - MeshSolidCells;
+
+        /// <summary>
+        /// **外周シールを掛ける前**の固体マスク（＝現実の壁・家具だけ）。
+        /// デバッグ表示が「焼き込んだ壁が現実の壁と重なっているか」を描くのに使う。
+        /// 縁を混ぜると部屋の外側に層が出て、ずれているように見えてしまう。
+        /// </summary>
+        public bool[] MeshSolidMask { get; private set; }
+
+        /// <summary>焼き直しの通し番号。表示側がキャッシュを作り直す合図に使う。</summary>
+        public long BakeSerial { get; private set; }
         public double TickMs { get; private set; }
         public double MaxSpeed { get; private set; }
         public string Status { get; private set; } = "スキャン待ち";
@@ -226,6 +236,12 @@ namespace BlockField.Aquarium
                 maxX + cell, maxY + cell, maxZ + cell, cell);
 
             MeshSolidCells = FlowBoundaryBaker.BakeSolid(grid, local, scan.Triangles);
+
+            // 縁を塞ぐ前に、現実の壁・家具だけのマスクを控える（デバッグ表示用）
+            MeshSolidMask = new bool[grid.CellCount];
+            for (int i = 0; i < grid.CellCount; i++) MeshSolidMask[i] = grid.IsSolidAt(i);
+            BakeSerial++;
+
             FlowBoundaryBaker.SealBorders(grid);
             FlowBoundaryBaker.BakeDistance(grid);
 
@@ -253,6 +269,95 @@ namespace BlockField.Aquarium
                 $"{grid.OriginY + grid.Height * cell:F2}m (アンカー基準)");
 
             LogHeightProfile(grid, field, minY);
+            LogWorldPlacement(scan, grid);
+            LogPlaneVsMesh(scan);
+        }
+
+        /// <summary>
+        /// 水槽が**世界座標のどこに置かれたか**を出す。
+        ///
+        /// 【なぜ要るか】これまでのログはすべてアンカー基準で、内部座標系どうしの
+        /// 整合しか確かめられなかった。世界座標（XROrigin は Floor モードなので Y=0 が床）
+        /// に直しておけば、床・天井との対応を後から数値で追える。
+        /// ただし**これも内部の値**である。焼き込んだ壁が現実の壁と重なっているかは
+        /// <see cref="AquariumDebugView"/> でパススルー越しに見るしかない。
+        /// </summary>
+        static void LogWorldPlacement(RoomScanner.ScanResult scan, FlowGrid g)
+        {
+            if (!scan.HasOriginPose)
+            {
+                Debug.Log("[Aquarium] 世界座標: アンカー未確定（ワールド直置き）");
+                return;
+            }
+            var pose = scan.OriginPoseAtScan;
+            var toWorld = Matrix4x4.TRS(pose.position, pose.rotation, Vector3.one);
+            var lo = toWorld.MultiplyPoint3x4(new Vector3(g.OriginX, g.OriginY, g.OriginZ));
+            var hi = toWorld.MultiplyPoint3x4(new Vector3(
+                g.OriginX + g.Width * g.CellSize,
+                g.OriginY + g.Height * g.CellSize,
+                g.OriginZ + g.Depth * g.CellSize));
+
+            Debug.Log($"[Aquarium] 世界座標 (Y=0 が床): アンカー pos={pose.position:F3} " +
+                $"rot={pose.rotation.eulerAngles:F1} / 水槽の高さ範囲 " +
+                $"{Mathf.Min(lo.y, hi.y):F3}〜{Mathf.Max(lo.y, hi.y):F3}m / " +
+                $"部屋メッシュ {scan.Bounds.min.y:F3}〜{scan.Bounds.max.y:F3}m");
+        }
+
+        /// <summary>
+        /// **平面データ (Space Setup) とシーンメッシュを突き合わせる。**
+        ///
+        /// 【なぜ要るか】焼き込みはシーンメッシュ (ARMeshManager) だけを使っている。
+        /// 平面 (ARPlaneManager) は利用者が Space Setup で引いた部屋の実体で、
+        /// **メッシュとは独立した出所**である。両者がずれていれば、焼き込んだ壁が
+        /// 現実の壁とずれている可能性が高い。内部整合の確認ではないが、
+        /// 目視の前に機械で分かる範囲を潰しておく。
+        /// </summary>
+        static void LogPlaneVsMesh(RoomScanner.ScanResult scan)
+        {
+            var v = scan.Vertices;
+            if (v == null || v.Length < 3) return;
+
+            var sb = new System.Text.StringBuilder();
+            sb.Append("[Aquarium] 平面 vs メッシュ:");
+
+            if (scan.HasCeiling)
+            {
+                sb.Append($" 天井 平面={scan.CeilingWorldY:F3}m メッシュ最上={scan.Bounds.max.y:F3}m " +
+                    $"差={(scan.Bounds.max.y - scan.CeilingWorldY) * 100f:F1}cm;");
+            }
+            else
+            {
+                sb.Append(" 天井平面なし;");
+            }
+
+            if (scan.Walls == null || scan.Walls.Count == 0)
+            {
+                sb.Append(" 壁平面なし");
+                Debug.Log(sb.ToString());
+                return;
+            }
+
+            for (int w = 0; w < scan.Walls.Count; w++)
+            {
+                var seg = scan.Walls[w];
+                // 壁は鉛直。XZ 平面で直線からの符号付き距離を測る
+                float nx = -seg.dirZ, nz = seg.dirX;
+                var offsets = new System.Collections.Generic.List<float>();
+                for (int i = 0; i + 2 < v.Length; i += 3)
+                {
+                    float dx = v[i] - seg.centerX, dz = v[i + 2] - seg.centerZ;
+                    float along = dx * seg.dirX + dz * seg.dirZ;
+                    if (Mathf.Abs(along) > seg.halfLength) continue;
+                    float perp = dx * nx + dz * nz;
+                    if (Mathf.Abs(perp) > 0.30f) continue;     // 壁の近傍だけ見る
+                    offsets.Add(perp);
+                }
+                if (offsets.Count < 20) { sb.Append($" 壁{w}:頂点不足;"); continue; }
+                offsets.Sort();
+                float median = offsets[offsets.Count / 2];
+                sb.Append($" 壁{w}: ずれ中央値={median * 100f:F1}cm (n={offsets.Count});");
+            }
+            Debug.Log(sb.ToString());
         }
 
         /// <summary>
