@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEngine.UI;
 
 namespace BlockField.Aquarium
@@ -62,7 +62,9 @@ namespace BlockField.Aquarium
             int i = (int)m_Debug.Current;
             // 【何を確かめる段かを画面に出す】装着中は色の意味も手順も覚えていられない。
             // 「水色がどっちだったか」を思い出せないまま見ても判定にならない（2026-08-16）
-            return $"Debug[L-Grip]: {m_Debug.CurrentName} " +
+            string anchor = m_Debug.space == null ? "  [アンカー未配線]"
+                : m_Debug.space.IsReady ? "" : "  [アンカー未確定: 描画停止中]";
+            return $"Debug[L-Grip]: {m_Debug.CurrentName}{anchor} " +
                 $"({i + 1}/{AquariumDebugView.ModeNames.Length})   n={m_Debug.DrawnCells}\n" +
                 $"  → {AquariumDebugView.ModeHints[i]}";
         }

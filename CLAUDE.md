@@ -1,4 +1,4 @@
-# blockfield 開発規約
+﻿# blockfield 開発規約
 
 ## アーキテクチャ
 - Assets/Scripts/SimCore は UnityEngine 非依存（asmdefで強制済み）。
@@ -8,6 +8,14 @@
 - RNGは SimCore/Rng の決定論実装のみ使用。System.Random / UnityEngine.Random 禁止
 - 生態系から地形を書き換えるコードは VoxelGrid.TrySetBlockEcology を必ず使う
   （Player 出所ブロックは生態系から不変 — 固定レイヤー原則）
+- **系列2（Aquarium）の描画はアンカー基準。** `Graphics.DrawMesh*` を呼んで
+  良いのは `Assets/Aquarium/Scripts/AnchorSpaceRenderer.cs` だけ
+  （grep テストで pre-push ゲートに載せてある）。空間行列を各所で
+  組み立てると、アンカーの適用漏れと回転の符号ミスが同じ数だけ起こる
+  （実際に3か所すべてで両方起きた）。**アンカーが未確定のときは
+  identity へ落とさず描かない** — 静かに壊れると実機で見るまで分からない。
+  HMD の着脱と Meta ボタンはワールド座標系そのものを動かすので、
+  ワールド基準の描画はセッションのたびに必ずずれる
 - MR合成の制約: アルファ<1の描画はパススルー（現実映像）と
   合成される。半透明表現は原則使わず、スケール・ワイヤー
   フレーム・明度で代替する

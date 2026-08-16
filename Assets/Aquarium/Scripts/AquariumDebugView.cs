@@ -80,14 +80,14 @@ namespace BlockField.Aquarium
         [SerializeField] Material m_OccludedMaterial;
         [SerializeField] Material m_ThroughMaterial;
         [SerializeField] Material m_RawMeshMaterial;
-        [SerializeField] Transform m_AnchorSpace;
+        [SerializeField] AnchorSpaceRenderer m_Space;
         [SerializeField] Mode m_Mode = Mode.None;
 
         public AquariumFlow flow { get => m_Flow; set => m_Flow = value; }
         public Material occludedMaterial { get => m_OccludedMaterial; set => m_OccludedMaterial = value; }
         public Material throughMaterial { get => m_ThroughMaterial; set => m_ThroughMaterial = value; }
         public Material rawMeshMaterial { get => m_RawMeshMaterial; set => m_RawMeshMaterial = value; }
-        public Transform anchorSpace { get => m_AnchorSpace; set => m_AnchorSpace = value; }
+        public AnchorSpaceRenderer space { get => m_Space; set => m_Space = value; }
 
         public Mode Current => m_Mode;
         public string CurrentName => ModeNames[(int)m_Mode];
@@ -120,15 +120,13 @@ namespace BlockField.Aquarium
             if (m_Cube == null) m_Cube = BuildCube();
             if (m_Batch == null) m_Batch = new Matrix4x4[1023];
 
-            // 部屋座標 → アンカー → ワールド（粒子・クラゲと同じ経路）
-            var space = m_AnchorSpace != null ? m_AnchorSpace.localToWorldMatrix : Matrix4x4.identity;
-            space *= AquariumFlow.RoomToAnchorRotation(m_Flow.RoomYawDegrees);
+            if (m_Space == null) return;
 
             if (m_Mode == Mode.BoundsCompare)
             {
                 var g = field.Grid;
                 // 水槽の外接箱（橙）
-                DrawBox(space,
+                DrawBox(
                     new Vector3(g.OriginX, g.OriginY, g.OriginZ),
                     new Vector3(g.OriginX + g.Width * g.CellSize,
                                 g.OriginY + g.Height * g.CellSize,
@@ -136,7 +134,7 @@ namespace BlockField.Aquarium
                     m_OccludedMaterial != null ? m_ThroughMaterial : null, k_EdgeThickness);
                 // 元データの外接箱（水色）。細くして内側にあることが分かるようにする
                 var b = m_Flow.ScanRoomBounds;
-                DrawBox(space, b.min, b.max, m_RawMeshMaterial, k_EdgeThickness * 0.6f);
+                DrawBox(b.min, b.max, m_RawMeshMaterial, k_EdgeThickness * 0.6f);
                 return;
             }
 
@@ -148,34 +146,19 @@ namespace BlockField.Aquarium
             // 重ねたときにボクセル化だけを比べられる
             if (m_Mode == Mode.RawMesh || m_Mode == Mode.RawMeshAndSolid)
             {
-                DrawRawMeshEdges(space);
+                DrawRawMeshEdges();
             }
             if (m_Mode == Mode.RawMesh) return;
 
             var mat = m_Mode == Mode.SolidOccluded ? m_OccludedMaterial : m_ThroughMaterial;
-            DrawPoints(m_Points, space, mat, k_DotSize);
+            DrawPoints(m_Points, mat, k_DotSize);
         }
 
-        void DrawPoints(Vector3[] points, Matrix4x4 space, Material mat, float size)
+        void DrawPoints(Vector3[] points, Material mat, float size)
         {
-            if (mat == null || points == null) return;
-            var scale = Vector3.one * size;
-            int batched = 0;
-            for (int i = 0; i < points.Length; i++)
-            {
-                m_Batch[batched++] = space * Matrix4x4.TRS(points[i], Quaternion.identity, scale);
-                if (batched == m_Batch.Length)
-                {
-                    Graphics.DrawMeshInstanced(m_Cube, 0, mat, m_Batch, batched);
-                    DrawnCells += batched;
-                    batched = 0;
-                }
-            }
-            if (batched > 0)
-            {
-                Graphics.DrawMeshInstanced(m_Cube, 0, mat, m_Batch, batched);
-                DrawnCells += batched;
-            }
+            if (points == null) return;
+            DrawnCells += m_Space.DrawInstanced(m_Cube, mat, points, points.Length,
+                Vector3.one * size, Quaternion.identity);
         }
 
         /// <summary>
@@ -186,7 +169,7 @@ namespace BlockField.Aquarium
         /// 長い辺ほど形を決めるので、**辺を長さ順に上から採る**。間引くにしても
         /// 短い辺（面の内側の細分）から捨てるほうが形が残る。
         /// </summary>
-        void DrawRawMeshEdges(Matrix4x4 space)
+        void DrawRawMeshEdges()
         {
             var v = m_Flow.ScanRoomVertices;
             var tris = m_Flow.ScanTriangles;
@@ -197,14 +180,8 @@ namespace BlockField.Aquarium
                 m_RawBuiltFor = m_Flow.BakeSerial;
                 BuildEdges(v, tris);
             }
-            for (int i = 0; i < m_Edges.Length; i += 1023)
-            {
-                int n = Mathf.Min(1023, m_Edges.Length - i);
-                System.Array.Copy(m_Edges, i, m_Batch, 0, n);
-                for (int k = 0; k < n; k++) m_Batch[k] = space * m_Batch[k];
-                Graphics.DrawMeshInstanced(m_Cube, 0, m_RawMeshMaterial, m_Batch, n);
-                DrawnCells += n;
-            }
+            DrawnCells += m_Space.DrawInstancedRaw(m_Cube, m_RawMeshMaterial,
+                m_Edges, m_Edges.Length);
         }
 
         void BuildEdges(float[] v, int[] tris)
@@ -245,7 +222,7 @@ namespace BlockField.Aquarium
         }
 
         /// <summary>直方体の12稜線を細長い立方体で描く。</summary>
-        void DrawBox(Matrix4x4 space, Vector3 lo, Vector3 hi, Material mat, float t)
+        void DrawBox(Vector3 lo, Vector3 hi, Material mat, float t)
         {
             if (mat == null) return;
             int n = 0;
@@ -255,7 +232,7 @@ namespace BlockField.Aquarium
                 var s = new Vector3(Mathf.Max(t, Mathf.Abs(bx - ax)),
                                     Mathf.Max(t, Mathf.Abs(by - ay)),
                                     Mathf.Max(t, Mathf.Abs(bz - az)));
-                m_Batch[n++] = space * Matrix4x4.TRS(c, Quaternion.identity, s);
+                m_Batch[n++] = Matrix4x4.TRS(c, Quaternion.identity, s);
             }
             foreach (float y in new[] { lo.y, hi.y })
             {
@@ -265,8 +242,7 @@ namespace BlockField.Aquarium
             Edge(lo.x, lo.y, lo.z, lo.x, hi.y, lo.z); Edge(hi.x, lo.y, lo.z, hi.x, hi.y, lo.z);
             Edge(lo.x, lo.y, hi.z, lo.x, hi.y, hi.z); Edge(hi.x, lo.y, hi.z, hi.x, hi.y, hi.z);
 
-            Graphics.DrawMeshInstanced(m_Cube, 0, mat, m_Batch, n);
-            DrawnCells += n;
+            DrawnCells += m_Space.DrawInstancedRaw(m_Cube, mat, m_Batch, n);
         }
 
         /// <summary>

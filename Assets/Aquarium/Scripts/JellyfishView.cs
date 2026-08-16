@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 
 namespace BlockField.Aquarium
 {
@@ -21,11 +21,11 @@ namespace BlockField.Aquarium
     {
         [SerializeField] AquariumJellyfish m_Jelly;
         [SerializeField] Material m_Material;
-        [SerializeField] Transform m_AnchorSpace;
+        [SerializeField] AnchorSpaceRenderer m_Space;
 
         public AquariumJellyfish jelly { get => m_Jelly; set => m_Jelly = value; }
         public Material material { get => m_Material; set => m_Material = value; }
-        public Transform anchorSpace { get => m_AnchorSpace; set => m_AnchorSpace = value; }
+        public AnchorSpaceRenderer space { get => m_Space; set => m_Space = value; }
 
         /// <summary>傘の高さ（直径に対する比）。ミズクラゲはやや扁平。</summary>
         internal const float k_HeightRatio = 0.55f;
@@ -61,21 +61,10 @@ namespace BlockField.Aquarium
             m_Mesh.RecalculateNormals();
             m_Mesh.RecalculateBounds();
 
-            // 部屋座標 → アンカー → ワールド（粒子と同じ経路。適用は1回ずつ）。
-            //
-            // 【傾きの原因ではない】主軸戻しは **Y軸まわりのヨーだけ**なので、
-            // 二重に掛かっても水平面は水平のままで、傾きは生じない。
-            // 実機セッションでここが疑われたが、傾きは上の
-            // <see cref="BuildBellVertices"/> の写像が原因だった。
-            // アンカー自体の傾きも、焼き込みバウンズの高さ 2.09m が
-            // 実部屋 2.07m とほぼ一致することから 0.4° 未満と分かっている
-            var anchor = m_AnchorSpace != null ? m_AnchorSpace.localToWorldMatrix : Matrix4x4.identity;
-            var roomToAnchor = AquariumFlow.RoomToAnchorRotation(
-                m_Jelly.flow != null ? m_Jelly.flow.RoomYawDegrees : 0f);
-            var trs = Matrix4x4.TRS(new Vector3(body.X, body.Y, body.Z),
-                                    Quaternion.identity, Vector3.one);
-
-            Graphics.DrawMesh(m_Mesh, anchor * roomToAnchor * trs, m_Material, 0);
+            // 描画は AnchorSpaceRenderer に集約している。ここで空間行列を組み立てない
+            // （粒子・デバッグ表示と同じ組み立てを3回書いて3回間違えた経緯がある）
+            if (m_Space != null) m_Space.DrawOne(m_Mesh, m_Material,
+                new Vector3(body.X, body.Y, body.Z));
         }
 
         /// <summary>

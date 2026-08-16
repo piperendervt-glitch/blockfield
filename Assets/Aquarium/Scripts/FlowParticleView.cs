@@ -1,4 +1,4 @@
-using BlockField.SimCore.Fluid;
+﻿using BlockField.SimCore.Fluid;
 using UnityEngine;
 
 namespace BlockField.Aquarium
@@ -67,13 +67,13 @@ namespace BlockField.Aquarium
 
         [SerializeField] AquariumFlow m_Flow;
         [SerializeField] Material m_Material;
-        [SerializeField] Transform m_AnchorSpace;
+        [SerializeField] AnchorSpaceRenderer m_Space;
         [SerializeField] int m_PresetIndex;
 
         public AquariumFlow flow { get => m_Flow; set => m_Flow = value; }
         public Material material { get => m_Material; set => m_Material = value; }
-        /// <summary>格子はアンカーローカルなので、描画もこの下に置く。</summary>
-        public Transform anchorSpace { get => m_AnchorSpace; set => m_AnchorSpace = value; }
+        /// <summary>描画は AnchorSpaceRenderer に集約している（規約: 描画の入口は1つ）。</summary>
+        public AnchorSpaceRenderer space { get => m_Space; set => m_Space = value; }
 
         public int PresetIndex => m_PresetIndex;
         public Preset Current => Presets[m_PresetIndex];
@@ -194,17 +194,14 @@ namespace BlockField.Aquarium
         void Draw(FlowField field)
         {
             var preset = Current;
-            // 【部屋座標 → アンカー → ワールド】格子は部屋の主軸に合わせて
-            // 回した座標系で持っている（AquariumFlow.RoomYawDegrees）。
-            // ここでその回転を戻さないと、流れが部屋に対して斜めに描かれる
-            var anchor = m_AnchorSpace != null ? m_AnchorSpace.localToWorldMatrix : Matrix4x4.identity;
-            var space = anchor * AquariumFlow.RoomToAnchorRotation(m_Flow.RoomYawDegrees);
+            DrawnParticles = 0;
+            if (m_Space == null) return;
+
             var camera = Camera.main;
             var faceCamera = camera != null ? camera.transform.rotation : Quaternion.identity;
 
             float reference = Mathf.Max(1e-5f, (float)m_Flow.MaxSpeed);
             int batched = 0;
-            DrawnParticles = 0;
 
             for (int i = 0; i < m_Position.Length; i++)
             {
@@ -216,8 +213,8 @@ namespace BlockField.Aquarium
                 float brightness = Mathf.Clamp01(preset.Brightness + (speed - 0.5f) * preset.Contrast);
                 float scale = m_Scale[i] * (0.7f + 0.6f * Mathf.Clamp01(speed));
 
-                var world = space.MultiplyPoint3x4(p);
-                m_Batch[batched++] = Matrix4x4.TRS(world, faceCamera, Vector3.one * scale);
+                // 部屋座標のまま渡す。ワールドへの変換は AnchorSpaceRenderer の仕事
+                m_Batch[batched++] = Matrix4x4.TRS(p, faceCamera, Vector3.one * scale);
 
                 // 明度はインスタンスごとに変えたいが、DrawMeshInstanced では
                 // バッチ内で共通になる。速度帯でバッチを割る手もあるが、
@@ -225,14 +222,12 @@ namespace BlockField.Aquarium
                 if (batched == m_Batch.Length)
                 {
                     Flush(batched, brightness);
-                    DrawnParticles += batched;
                     batched = 0;
                 }
             }
             if (batched > 0)
             {
                 Flush(batched, preset.Brightness);
-                DrawnParticles += batched;
             }
         }
 
@@ -240,8 +235,8 @@ namespace BlockField.Aquarium
         {
             m_Block.SetColor("_BaseColor",
                 new Color(brightness * 0.65f, brightness * 0.9f, brightness, 1f));
-            Graphics.DrawMeshInstanced(m_Mesh, 0, m_Material, m_Batch, count, m_Block,
-                UnityEngine.Rendering.ShadowCastingMode.Off, false);
+            // 部屋座標のまま渡す。ワールドへの変換は AnchorSpaceRenderer が持つ
+            DrawnParticles += m_Space.DrawInstancedRaw(m_Mesh, m_Material, m_Batch, count, m_Block);
         }
 
         static Mesh BuildQuad()

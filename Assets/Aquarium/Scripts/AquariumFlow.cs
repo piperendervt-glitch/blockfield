@@ -270,7 +270,11 @@ namespace BlockField.Aquarium
 
             // 頂点はワールド座標なので、アンカーローカルへ移す。
             // アンカー基準で持てば、再センタリングやアンカー復元で格子がずれない
-            var toLocal = AnchorWorldToLocal(scan);
+            if (!TryGetAnchorWorldToLocal(scan, out var toLocal))
+            {
+                Status = "アンカー待ち（焼き込みは行わない）";
+                return;
+            }
             int vertexCount = scan.Vertices.Length / 3;
             var local = new float[scan.Vertices.Length];
             for (int v = 0; v < vertexCount; v++)
@@ -585,16 +589,28 @@ namespace BlockField.Aquarium
         /// ワールド → アンカーローカルの行列。
         /// スキャン時のアンカーポーズを使う（現在のポーズではない）。
         /// 観測時の座標系で焼き込むことで、後から原点が動いても格子が部屋に貼り付く。
+        ///
+        /// 【アンカーが無ければ焼かない】以前はここで <c>Matrix4x4.identity</c> へ
+        /// 落ちていた。つまり**黙ってワールド座標で焼き込む**という意味で、
+        /// その格子は HMD を被り直すたびに部屋からずれる。静かに壊れるので
+        /// 実機で見るまで分からない。焼かずに待つほうが正しい。
         /// </summary>
-        Matrix4x4 AnchorWorldToLocal(RoomScanner.ScanResult scan)
+        bool TryGetAnchorWorldToLocal(RoomScanner.ScanResult scan, out Matrix4x4 toLocal)
         {
             if (scan.HasOriginPose)
             {
-                return Matrix4x4.TRS(scan.OriginPoseAtScan.position,
-                                     scan.OriginPoseAtScan.rotation, Vector3.one).inverse;
+                toLocal = Matrix4x4.TRS(scan.OriginPoseAtScan.position,
+                                        scan.OriginPoseAtScan.rotation, Vector3.one).inverse;
+                return true;
             }
             var t = m_Origin != null ? m_Origin.OriginTransform : null;
-            return t != null ? t.worldToLocalMatrix : Matrix4x4.identity;
+            if (t != null)
+            {
+                toLocal = t.worldToLocalMatrix;
+                return true;
+            }
+            toLocal = Matrix4x4.zero;
+            return false;
         }
 
         /// <summary>

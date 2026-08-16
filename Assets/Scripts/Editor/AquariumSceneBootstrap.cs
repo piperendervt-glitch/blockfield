@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -131,6 +131,18 @@ public static class AquariumSceneBootstrap
         flow.scanner = roomScanner;
         flow.origin = diorama;
 
+        // --- 描画の唯一の入口（規約: AquariumRenderingConventionTests で固定）---
+        // 【anchorGo.transform を渡してはいけない】anchorGo は DioramaOrigin を
+        // 載せているだけの箱で、原点に作られたまま一度も動かない。本物のアンカーは
+        // 実行時に ARAnchor の子として作られる diorama.OriginTransform のほう。
+        // 以前ここで anchorGo.transform を渡していたため、粒子・クラゲ・デバッグ表示の
+        // すべてが実質ワールド座標で描かれ、被り直すたびに部屋からずれていた。
+        // AnchorSpaceRenderer は DioramaOrigin を持ち、毎フレーム現在のポーズを読む
+        var anchorSpaceGo = new GameObject("Anchor Space Renderer");
+        var anchorSpace = anchorSpaceGo.AddComponent<BlockField.Aquarium.AnchorSpaceRenderer>();
+        anchorSpace.origin = diorama;
+        anchorSpace.flow = flow;
+
         // 粒子は不透明で描く（アルファ<1 はパススルーと合成されるため使えない）。
         // 明度とスケールで速さを見せる。
         //
@@ -152,7 +164,7 @@ public static class AquariumSceneBootstrap
         particles.flow = flow;
         particles.material = particleMat;
         // 格子はアンカーローカルなので、描画もアンカーの下に置く
-        particles.anchorSpace = anchorGo.transform;
+        particles.space = anchorSpace;
 
         // ログに粒子数を出すための参照（View には干渉しない）
         flow.particles = particles;
@@ -182,7 +194,7 @@ public static class AquariumSceneBootstrap
         var jellyView = jellyViewGo.AddComponent<BlockField.Aquarium.JellyfishView>();
         jellyView.jelly = jelly;
         jellyView.material = bellMat;
-        jellyView.anchorSpace = anchorGo.transform;
+        jellyView.space = anchorSpace;
 
         // --- デバッグ表示（焼き込んだ壁が現実の壁と重なっているかを見る）---
         // 遮蔽ありは粒子と同じオクルージョン対応シェーダー。遮蔽なしは素の Unlit で、
@@ -208,7 +220,7 @@ public static class AquariumSceneBootstrap
         debugView.occludedMaterial = solidOccludedMat;
         debugView.throughMaterial = solidThroughMat;
         debugView.rawMeshMaterial = rawMeshMat;
-        debugView.anchorSpace = anchorGo.transform;
+        debugView.space = anchorSpace;
 
         var inputGo = new GameObject("Aquarium Input");
         var input = inputGo.AddComponent<BlockField.Aquarium.AquariumInput>();
