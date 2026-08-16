@@ -20,14 +20,34 @@ namespace BlockField.Aquarium
 
         [SerializeField] AquariumFlow m_Flow;
         [SerializeField] FlowParticleView m_Particles;
+        [SerializeField] AquariumJellyfish m_Jelly;
         [SerializeField] Text m_Text;
 
         public AquariumFlow flow { get => m_Flow; set => m_Flow = value; }
         public FlowParticleView particles { get => m_Particles; set => m_Particles = value; }
+        public AquariumJellyfish jelly { get => m_Jelly; set => m_Jelly = value; }
         public Text text { get => m_Text; set => m_Text = value; }
 
         float m_Smoothed;
         float m_Next;
+
+        /// <summary>
+        /// クラゲの行。**遊泳と流れの比**を出すのが要点で、
+        /// 「流されている」のか「泳いでいる」のかを数値で見分けるため
+        /// （比が 1 を超えていれば自力が勝っている）。
+        /// </summary>
+        string JellyLine()
+        {
+            var body = m_Jelly != null ? m_Jelly.Body : null;
+            if (body == null) return "Jelly[R-B]: 未投入";
+
+            float flowSpeed = m_Jelly.FlowAt.magnitude;
+            float ratio = flowSpeed > 1e-6f ? body.SwimSpeed / flowSpeed : 0f;
+            return $"Jelly[R-B]: {body.BellDiameter * 100f:F0}cm " +
+                $"({m_Jelly.BellIndex + 1}/{AquariumJellyfish.BellDiameterChoices.Length})" +
+                $"   pulse={body.PulseCount}   swim={body.SwimSpeed:F3}   flow={flowSpeed:F3}" +
+                $"   swim/flow={ratio:F2}";
+        }
 
         void Update()
         {
@@ -58,7 +78,8 @@ namespace BlockField.Aquarium
                 $"Cell[L-X]: {m_Flow.CellSize * 100f:F1}cm ({m_Flow.CellSizeIndex + 1}/{AquariumFlow.CellSizeChoices.Length})" +
                 $"   {g.Width}x{g.Height}x{g.Depth}={g.CellCount}   Solid: {m_Flow.SolidCells}\n" +
                 $"View[L-Y]: {preset.Name} ({m_Particles.PresetIndex + 1}/{FlowParticleView.Presets.Length})" +
-                $"   n={m_Particles.DrawnParticles}   size={preset.Size * 100f:F1}cm   t={field.TickCount}";
+                $"   n={m_Particles.DrawnParticles}   size={preset.Size * 100f:F1}cm   t={field.TickCount}\n" +
+                JellyLine();
         }
     }
 }

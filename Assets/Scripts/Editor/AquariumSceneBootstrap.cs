@@ -157,10 +157,29 @@ public static class AquariumSceneBootstrap
         // ログに粒子数を出すための参照（View には干渉しない）
         flow.particles = particles;
 
+        // --- クラゲ1体（Phase C-7/8）---
+        // 神経は jelly_1 (jelly-1.1) の ExcitableField をそのまま使う。
+        // 推力は 2D リム収縮のまま（dV/dt は抗力係数の逆算後）
+        var jellyGo = new GameObject("Aquarium Jellyfish");
+        var jelly = jellyGo.AddComponent<BlockField.Aquarium.AquariumJellyfish>();
+        jelly.flow = flow;
+        flow.jelly = jelly;
+
+        // 傘も不透明（アルファ<1 はパススルーと合成される）。
+        // オクルージョン対応シェーダーを使う——粒子で踏み外した轍を踏まない
+        var bellMat = GetOrCreateMaterial("JellyfishBell", new Color(0.85f, 0.9f, 1f),
+            k_OcclusionShader);
+        var jellyViewGo = new GameObject("Jellyfish View");
+        var jellyView = jellyViewGo.AddComponent<BlockField.Aquarium.JellyfishView>();
+        jellyView.jelly = jelly;
+        jellyView.material = bellMat;
+        jellyView.anchorSpace = anchorGo.transform;
+
         var inputGo = new GameObject("Aquarium Input");
         var input = inputGo.AddComponent<BlockField.Aquarium.AquariumInput>();
         input.flow = flow;
         input.particles = particles;
+        input.jelly = jelly;
 
         // --- パネル（Main.unity と同じ様式。FPS を先頭行に置く）---
         var canvasGo = new GameObject("Aquarium Panel");
@@ -169,7 +188,7 @@ public static class AquariumSceneBootstrap
         canvasGo.transform.localScale = Vector3.one * 0.0007f;
         var canvas = canvasGo.AddComponent<Canvas>();
         canvas.renderMode = RenderMode.WorldSpace;
-        canvasGo.GetComponent<RectTransform>().sizeDelta = new Vector2(620f, 160f);
+        canvasGo.GetComponent<RectTransform>().sizeDelta = new Vector2(620f, 200f);
 
         var bgGo = new GameObject("Background");
         bgGo.transform.SetParent(canvasGo.transform, false);
@@ -198,6 +217,7 @@ public static class AquariumSceneBootstrap
         var panel = canvasGo.AddComponent<BlockField.Aquarium.AquariumPanel>();
         panel.flow = flow;
         panel.particles = particles;
+        panel.jelly = jelly;
         panel.text = uiText;
 
         Directory.CreateDirectory(Path.GetDirectoryName(ScenePath));

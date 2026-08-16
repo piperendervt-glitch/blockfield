@@ -37,9 +37,12 @@ namespace BlockField.Aquarium
         /// 2026-08-16 の実機セッションで「速すぎて流れに見えない」となった
         /// （実測は中央 14.5 m/s、1フレーム 20cm）。一発で当てるより
         /// セッション中に振れる方が早いので3段階にした。
-        /// 既定の 0.08 は 1フレーム 0.11cm で、粒子径 1〜2cm の 1/10 程度。
+        /// 既定は **0.03**（Phase C）。クラゲの目標遊泳 0.04 m/s に対し、
+        /// 0.08 だと流れが2倍速くほぼ流されるだけになる。0.03 ならクラゲがやや上回り、
+        /// 「流されている」のか「泳いでいる」のかが見分けられる。
+        /// Phase B（流れだけを見せる段）では 0.08 が良かった。
         /// </summary>
-        public static readonly float[] TargetSpeedChoices = { 0.02f, 0.08f, 0.3f };
+        public static readonly float[] TargetSpeedChoices = { 0.03f, 0.08f, 0.15f };
 
         [SerializeField] RoomScanner m_Scanner;
         [SerializeField] DioramaOrigin m_Origin;
@@ -48,13 +51,16 @@ namespace BlockField.Aquarium
         // （中央値は3種とも厳密に 0.0800、p90 の差 3%）ことを確かめたうえで、
         // 最も軽い 8cm を採った（ティック 4.41ms、72FPS 予算の 32%）
         [SerializeField] int m_CellSizeIndex;
-        [SerializeField] int m_SpeedIndex = 1;
+        [SerializeField] int m_SpeedIndex;
         [SerializeField] FlowParticleView m_Particles;
+        [SerializeField] AquariumJellyfish m_Jelly;
 
         public RoomScanner scanner { get => m_Scanner; set => m_Scanner = value; }
         public DioramaOrigin origin { get => m_Origin; set => m_Origin = value; }
         /// <summary>粒子の描画数をログへ出すためだけの参照（View には干渉しない）。</summary>
         public FlowParticleView particles { get => m_Particles; set => m_Particles = value; }
+        /// <summary>クラゲの状態をログへ出すための参照。</summary>
+        public AquariumJellyfish jelly { get => m_Jelly; set => m_Jelly = value; }
 
         /// <summary>現在のセルサイズの選択肢番号（0 = 8cm, 1 = 6.5cm, 2 = 5.5cm）。</summary>
         public int CellSizeIndex => m_CellSizeIndex;
@@ -329,6 +335,17 @@ namespace BlockField.Aquarium
                 $"粒子={(m_Particles != null ? m_Particles.DrawnParticles : -1)}" +
                 $"({(m_Particles != null ? m_Particles.Current.Name : "-")}) " +
                 $"tick={Field.TickCount} FPS={1f / Mathf.Max(1e-4f, Time.smoothDeltaTime):F1}");
+
+            var body = m_Jelly != null ? m_Jelly.Body : null;
+            if (body != null)
+            {
+                var fl = m_Jelly.FlowAt;
+                float flowSpeed = fl.magnitude;
+                Debug.Log($"[Jelly] 傘={body.BellDiameter * 100f:F0}cm 拍動={body.PulseCount} " +
+                    $"遊泳={body.SwimSpeed:F4}m/s 流れ={flowSpeed:F4}m/s " +
+                    $"比={(flowSpeed > 1e-6f ? body.SwimSpeed / flowSpeed : 0f):F2} " +
+                    $"位置=({body.X:F2}, {body.Y:F2}, {body.Z:F2}) step={body.StepCount}");
+            }
         }
     }
 }

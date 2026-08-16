@@ -9,7 +9,8 @@ namespace BlockField.Aquarium
     /// 実機セッションで確かめたいのは2点なので、それぞれにボタンを割り当てる。
     /// - **左手X: セルサイズ**（8cm → 6.5cm → 5.5cm）。コストと見え方の変化を見る
     /// - **左手Y: 粒子プリセット**（微粒子 → 粗い粒 → 速い所が明るい）。水に見えるかを探す
-    /// - **右手A: 目標流速**（0.02 → 0.08 → 0.3 m/s）。速さは一発で当たらないので振る
+    /// - **右手A: 目標流速**（0.03 → 0.08 → 0.15 m/s）。速さは一発で当たらないので振る
+    /// - **右手B: 傘径**（10 → 15 → 25 cm）。実部屋での見え方に直結する
     ///
     /// セッション時間は5分が目安（CLAUDE.md）なので、
     /// 装着したまま両方を回せる形にしてある。
@@ -18,13 +19,16 @@ namespace BlockField.Aquarium
     {
         [SerializeField] AquariumFlow m_Flow;
         [SerializeField] FlowParticleView m_Particles;
+        [SerializeField] AquariumJellyfish m_Jelly;
 
         public AquariumFlow flow { get => m_Flow; set => m_Flow = value; }
         public FlowParticleView particles { get => m_Particles; set => m_Particles = value; }
+        public AquariumJellyfish jelly { get => m_Jelly; set => m_Jelly = value; }
 
         InputAction m_CellSizeAction;
         InputAction m_PresetAction;
         InputAction m_SpeedAction;
+        InputAction m_BellAction;
 
         void OnEnable()
         {
@@ -42,6 +46,11 @@ namespace BlockField.Aquarium
                 "<XRController>{RightHand}/primaryButton");
             m_SpeedAction.performed += OnSpeed;
             m_SpeedAction.Enable();
+
+            m_BellAction = new InputAction("AquariumBell", InputActionType.Button,
+                "<XRController>{RightHand}/secondaryButton");
+            m_BellAction.performed += OnBell;
+            m_BellAction.Enable();
         }
 
         void OnDisable()
@@ -67,6 +76,18 @@ namespace BlockField.Aquarium
                 m_SpeedAction.Dispose();
                 m_SpeedAction = null;
             }
+            if (m_BellAction != null)
+            {
+                m_BellAction.performed -= OnBell;
+                m_BellAction.Disable();
+                m_BellAction.Dispose();
+                m_BellAction = null;
+            }
+        }
+
+        void OnBell(InputAction.CallbackContext _)
+        {
+            if (m_Jelly != null) m_Jelly.CycleBellDiameter();
         }
 
         void OnSpeed(InputAction.CallbackContext _)
