@@ -86,9 +86,16 @@ namespace BlockField.SimCore.Fluid
         /// <summary>モデル速度を m/s へ換算する係数（診断用）。</summary>
         public float SpeedScale => m_SpeedScale;
 
-        public Jellyfish(JellyParams p, float x, float y, float z)
+        /// <summary>
+        /// 水槽の形。渡すと固体セルへ入る移動を受け付けなくなる
+        /// （<see cref="JellyBoundary"/>）。null なら境界なし（単体テスト用）。
+        /// </summary>
+        readonly FlowGrid m_Tank;
+
+        public Jellyfish(JellyParams p, float x, float y, float z, FlowGrid tank = null)
         {
             m_Params = p;
+            m_Tank = tank;
             m_Ring = new ExcitableField(ExcitableGraphs.Ring(p.RingCells));
 
             m_Cos = new float[p.RingCells];
@@ -184,9 +191,13 @@ namespace BlockField.SimCore.Fluid
             m_ModelVz *= (1f - m_Params.Drag);
 
             // 流れが運ぶ。自力遊泳は水平のみ（リング平面が水平に固定されているため）
-            X += (SwimVx + flowVx) * dtSeconds;
-            Y += flowVy * dtSeconds;
-            Z += (SwimVz + flowVz) * dtSeconds;
+            float toX = X + (SwimVx + flowVx) * dtSeconds;
+            float toY = Y + flowVy * dtSeconds;
+            float toZ = Z + (SwimVz + flowVz) * dtSeconds;
+
+            // 壁の中へは入らせない。壁は環境の情報で、神経が決めた推力は書き換えない
+            JellyBoundary.ClampMove(m_Tank, X, Y, Z, ref toX, ref toY, ref toZ);
+            X = toX; Y = toY; Z = toZ;
 
             // 診断用の内訳。位置の更新式はそのまま（丸めの経路を変えないため）
             SwimPathX += SwimVx * dtSeconds;

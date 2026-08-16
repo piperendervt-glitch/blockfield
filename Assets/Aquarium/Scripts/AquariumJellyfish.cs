@@ -134,7 +134,7 @@ namespace BlockField.Aquarium
 
             var p = JellyParams.Default;
             p.BellDiameter = BellDiameter;
-            Body = new Jellyfish(p, cx, cy, cz);
+            Body = new Jellyfish(p, cx, cy, cz, g);
 
             m_WindowStep = 0;
             m_WinSwimX = m_WinSwimZ = 0f;
@@ -167,16 +167,12 @@ namespace BlockField.Aquarium
             float y = Mathf.Clamp(Body.Y, minY, maxY);
             float z = Mathf.Clamp(Body.Z, minZ, maxZ);
 
-            // 固体セルに入っていたら、近くの水セルへ寄せる
-            int gx = Mathf.FloorToInt((x - g.OriginX) / g.CellSize);
-            int gy = Mathf.FloorToInt((y - g.OriginY) / g.CellSize);
-            int gz = Mathf.FloorToInt((z - g.OriginZ) / g.CellSize);
-            if (g.InRange(gx, gy, gz) && g.IsSolid(gx, gy, gz))
-            {
-                y = Mathf.Min(maxY, y + g.CellSize);   // まず上へ逃がす（床が最も多い）
-            }
-
-            Body.Teleport(x, y, z);
+            // 【上へ逃がす処理を消した】固体セルに入ったら1セルぶん上へ押していたが、
+            // 壁や家具の中では上へ押しても壁の中のままなので、毎ステップ登り続けて
+            // 天井に到達する。2026-08-16 の実機ログに72秒間貼り付いた記録が残っている。
+            // 固体セルへは JellyBoundary.ClampMove で入らせないので、逃がす必要もない。
+            // ここに残すのは格子の外へ出さないクランプだけ（焼き直しで格子が変わる場合の保険）
+            if (x != Body.X || y != Body.Y || z != Body.Z) Body.Teleport(x, y, z);
         }
     }
 }

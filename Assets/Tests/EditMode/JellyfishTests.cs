@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using BlockField.SimCore.Fluid;
 using NUnit.Framework;
 
@@ -327,5 +327,60 @@ namespace BlockField.Tests.EditMode
                 Assert.Greater(normal.y, 0f, $"面 {f} の法線が下向き（巻き方向が逆）");
             }
         }
-    }
+    
+        // ================= 水槽の境界（2026-08-16 の脱走） =================
+
+        /// <summary>
+        /// **固体セルの中へ入らないこと。**
+        ///
+        /// 実機でクラゲが壁の向こうへ移動した。位置更新に境界の項が無く、
+        /// 唯一あった処理は「固体セルに入ったら1セルぶん上へ押す」だった。
+        /// 壁の中では上へ押しても壁の中のままなので毎ステップ登り、
+        /// 天井に貼り付く（72秒間の記録が残っている）。入らせない形に直した。
+        /// </summary>
+        [Test]
+        public void Tank_JellyfishNeverEntersASolidCell()
+        {
+            var grid = MakeTank();
+            var jelly = new Jellyfish(JellyParams.Default, 1.6f, 1.1f, 1.3f, grid);
+
+            // 壁へ押し付ける向きの強い流れを当て続ける
+            for (int i = 0; i < 4000; i++)
+            {
+                jelly.Step(1f / 40f, 0.5f, -0.5f, 0.5f);
+                Assert.IsTrue(JellyBoundary.IsFluid(grid, jelly.X, jelly.Y, jelly.Z),
+                    $"t={i} で固体セルに入った 位置=({jelly.X:F2}, {jelly.Y:F2}, {jelly.Z:F2})");
+            }
+        }
+
+        /// <summary>
+        /// **壁に当たっても止まりきらないこと。** 軸ごとに拒否しているので
+        /// 壁に沿って滑る。3成分まとめて拒否すると完全停止して「死んで見える」。
+        /// </summary>
+        [Test]
+        public void Tank_JellyfishSlidesAlongTheWallInsteadOfStopping()
+        {
+            var grid = MakeTank();
+            var jelly = new Jellyfish(JellyParams.Default, 1.6f, 1.1f, 1.3f, grid);
+
+            // 下向きの流れで床へ押し付ける
+            for (int i = 0; i < 1200; i++) jelly.Step(1f / 40f, 0f, -0.5f, 0f);
+            float x0 = jelly.X, z0 = jelly.Z;
+            for (int i = 0; i < 800; i++) jelly.Step(1f / 40f, 0f, -0.5f, 0f);
+
+            Assert.Greater(Math.Abs(jelly.X - x0) + Math.Abs(jelly.Z - z0), 0.01f,
+                "床に押し付けられた後、水平にも動かなくなっている");
+        }
+
+        /// <summary>
+        /// 境界を渡さなければ従来どおり素通しであること（単体テストの前提）。
+        /// </summary>
+        [Test]
+        public void Tank_WithoutAGridThereIsNoBoundary()
+        {
+            var jelly = Spawn(JellyParams.Default);
+            for (int i = 0; i < 400; i++) jelly.Step(1f / 40f, 0f, -1f, 0f);
+            Assert.Less(jelly.Y, 0f, "境界なしなら下へ抜けるはず");
+        }
+}
 }
