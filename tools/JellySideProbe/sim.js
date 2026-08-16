@@ -142,7 +142,7 @@ function step(){
 }
 
 module.exports = {
-  step, birth, get bell(){return bell;}, world, M, Rb, Hb, CS, GW, GH,
+  step, birth, fireNerve, get bell(){return bell;}, world, M, Rb, Hb, CS, GW, GH,
   // 【world も戻す】birth() は bell と流体しか初期化しない。world.pace を
   // 戻し忘れると、前の計測でペースメーカーを切った状態が次へ漏れる
   // （最初に書いたとき M-K1c がペースメーカーOFFのまま測られていた）
