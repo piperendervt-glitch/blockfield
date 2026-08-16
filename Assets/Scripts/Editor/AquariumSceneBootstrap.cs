@@ -225,7 +225,7 @@ public static class AquariumSceneBootstrap
         var canvas = canvasGo.AddComponent<Canvas>();
         canvas.renderMode = RenderMode.WorldSpace;
         // 6行ぶん（デバッグ表示の行を足した）
-        canvasGo.GetComponent<RectTransform>().sizeDelta = new Vector2(620f, 235f);
+        canvasGo.GetComponent<RectTransform>().sizeDelta = new Vector2(620f, 270f);
 
         var bgGo = new GameObject("Background");
         bgGo.transform.SetParent(canvasGo.transform, false);

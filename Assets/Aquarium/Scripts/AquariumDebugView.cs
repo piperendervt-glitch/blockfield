@@ -1,4 +1,4 @@
-using BlockField.SimCore.Fluid;
+﻿using BlockField.SimCore.Fluid;
 using UnityEngine;
 
 namespace BlockField.Aquarium
@@ -34,20 +34,34 @@ namespace BlockField.Aquarium
             /// <summary>固体セル（遮蔽なし）。層の全体像が見える。</summary>
             SolidThrough = 2,
             /// <summary>
-            /// **生メッシュ（ワールド直描き）**。ARMeshManager が返した頂点を
-            /// 焼き込みの座標変換を一切通さずに描く。元データが部屋に合っているかを見る。
+            /// **生メッシュの線画**。焼き込みの元データの三角形の辺をそのまま描く。
+            /// 点で描くと部屋がただの箱に見えて凹凸が分からなかった（2026-08-16）。
             /// </summary>
             RawMesh = 3,
-            /// <summary>生メッシュ（水色）と固体セル（橙）を重ねる。ずれの量が目で分かる。</summary>
+            /// <summary>生メッシュ（水色の線）と固体セル（橙の点）を重ねる。</summary>
             RawMeshAndSolid = 4,
-            /// <summary>水槽の外接箱だけ。部屋を覆えているかを見る。</summary>
-            TankBounds = 5,
+            /// <summary>
+            /// **外接箱の比較**。水槽の外接箱（橙）と元データの外接箱（水色）を並べる。
+            /// 同じデータから作られているので、水槽が元データを1セルぶん囲むはず。
+            /// </summary>
+            BoundsCompare = 5,
         }
 
         public static readonly string[] ModeNames =
         {
             "なし", "固体セル(遮蔽あり)", "固体セル(遮蔽なし)",
-            "生メッシュ(ワールド直)", "生メッシュ＋固体セル", "水槽の外接箱",
+            "生メッシュの線画", "生メッシュ＋固体セル", "外接箱の比較",
+        };
+
+        /// <summary>各段で何を確かめるか。装着中に読めるようパネルへ出す。</summary>
+        public static readonly string[] ModeHints =
+        {
+            "グリップで切り替え",
+            "点が現実の壁・床・机の面に載っていれば OK",
+            "段2で消えた点がここで出るなら、そのセルは壁の向こう",
+            "水色の線が現実の部屋の形と重なっていれば OK",
+            "水色の線と橙の点が重なっていれば焼き込みは正しい",
+            "橙(水槽)が水色(元データ)を1セルぶん囲んでいれば OK",
         };
 
         /// <summary>点の一辺 (m)。セルより十分小さくしないと位置関係が読めない。</summary>
@@ -55,6 +69,12 @@ namespace BlockField.Aquarium
 
         /// <summary>外接箱の稜線の太さ (m)。</summary>
         const float k_EdgeThickness = 0.012f;
+
+        /// <summary>生メッシュの線の太さ (m)。細くしないと面が塗り潰れる。</summary>
+        const float k_LineThickness = 0.004f;
+
+        /// <summary>描く辺の上限。72FPS を保てる範囲で形が読める本数。</summary>
+        const int k_MaxEdges = 12000;
 
         [SerializeField] AquariumFlow m_Flow;
         [SerializeField] Material m_OccludedMaterial;
@@ -77,7 +97,7 @@ namespace BlockField.Aquarium
         Matrix4x4[] m_Batch;
         Vector3[] m_Points;          // 部屋座標での点（焼き直しのたびに作り直す）
         long m_BuiltForBake = -1;
-        Vector3[] m_RawPoints;       // 生メッシュの点（ワールド座標のまま）
+        Matrix4x4[] m_Edges;         // 生メッシュの辺（部屋座標）
         long m_RawBuiltFor = -1;
 
         public void CycleMode()
@@ -104,19 +124,31 @@ namespace BlockField.Aquarium
             var space = m_AnchorSpace != null ? m_AnchorSpace.localToWorldMatrix : Matrix4x4.identity;
             space *= AquariumFlow.RoomToAnchorRotation(m_Flow.RoomYawDegrees);
 
-            if (m_Mode == Mode.TankBounds)
+            if (m_Mode == Mode.BoundsCompare)
             {
-                DrawTankBounds(field.Grid, space);
+                var g = field.Grid;
+                // 水槽の外接箱（橙）
+                DrawBox(space,
+                    new Vector3(g.OriginX, g.OriginY, g.OriginZ),
+                    new Vector3(g.OriginX + g.Width * g.CellSize,
+                                g.OriginY + g.Height * g.CellSize,
+                                g.OriginZ + g.Depth * g.CellSize),
+                    m_OccludedMaterial != null ? m_ThroughMaterial : null, k_EdgeThickness);
+                // 元データの外接箱（水色）。細くして内側にあることが分かるようにする
+                var b = m_Flow.ScanRoomBounds;
+                DrawBox(space, b.min, b.max, m_RawMeshMaterial, k_EdgeThickness * 0.6f);
                 return;
             }
 
             if (m_BuiltForBake != m_Flow.BakeSerial) BuildPoints(field.Grid);
 
-            // 【生メッシュはワールド直描き】焼き込みが通る座標変換を一切通さない。
-            // これが部屋に合っていれば、メッシュの取得と描画側の座標は正しい
+            // 【生メッシュも部屋座標で描く】以前はワールド直描きにしていたが、
+            // リセンタでワールド座標系そのものが動くので基準にならない。
+            // 固体セルとまったく同じ経路にしておけば、リセンタしても互いの関係は崩れず、
+            // 重ねたときにボクセル化だけを比べられる
             if (m_Mode == Mode.RawMesh || m_Mode == Mode.RawMeshAndSolid)
             {
-                DrawRawMesh(Matrix4x4.identity);
+                DrawRawMeshEdges(space);
             }
             if (m_Mode == Mode.RawMesh) return;
 
@@ -147,30 +179,94 @@ namespace BlockField.Aquarium
         }
 
         /// <summary>
-        /// ARMeshManager の頂点をそのまま描く。**変換を一切掛けない**のが要点で、
-        /// 焼き込み側の座標変換が疑わしいときの基準線になる。
-        /// 点が多いので間引く（形が分かれば足りる）。
+        /// 元データの三角形の**辺を線で描く**。
+        ///
+        /// 【点をやめた理由】頂点を間引いて点で描いていたが、部屋がただの立方体に見えて
+        /// 壁・床・家具の凹凸が分からなかった（2026-08-16）。面の形は辺が見えないと読めない。
+        /// 長い辺ほど形を決めるので、**辺を長さ順に上から採る**。間引くにしても
+        /// 短い辺（面の内側の細分）から捨てるほうが形が残る。
         /// </summary>
-        void DrawRawMesh(Matrix4x4 space)
+        void DrawRawMeshEdges(Matrix4x4 space)
         {
-            var v = m_Flow.ScanWorldVertices;
-            if (v == null || m_RawMeshMaterial == null) return;
+            var v = m_Flow.ScanRoomVertices;
+            var tris = m_Flow.ScanTriangles;
+            if (v == null || tris == null || m_RawMeshMaterial == null) return;
 
-            if (m_RawPoints == null || m_RawBuiltFor != m_Flow.BakeSerial)
+            if (m_Edges == null || m_RawBuiltFor != m_Flow.BakeSerial)
             {
                 m_RawBuiltFor = m_Flow.BakeSerial;
-                int total = v.Length / 3;
-                int stride = Mathf.Max(1, total / 6000);
-                var list = new System.Collections.Generic.List<Vector3>(total / stride + 1);
-                for (int i = 0; i < total; i += stride)
-                {
-                    list.Add(new Vector3(v[i * 3], v[i * 3 + 1], v[i * 3 + 2]));
-                }
-                m_RawPoints = list.ToArray();
-                Debug.Log($"[Aquarium] 生メッシュの点を作成: {m_RawPoints.Length} 個" +
-                    $"（全 {total} 頂点を {stride} 個おきに間引き。ワールド座標のまま描く）");
+                BuildEdges(v, tris);
             }
-            DrawPoints(m_RawPoints, space, m_RawMeshMaterial, k_DotSize);
+            for (int i = 0; i < m_Edges.Length; i += 1023)
+            {
+                int n = Mathf.Min(1023, m_Edges.Length - i);
+                System.Array.Copy(m_Edges, i, m_Batch, 0, n);
+                for (int k = 0; k < n; k++) m_Batch[k] = space * m_Batch[k];
+                Graphics.DrawMeshInstanced(m_Cube, 0, m_RawMeshMaterial, m_Batch, n);
+                DrawnCells += n;
+            }
+        }
+
+        void BuildEdges(float[] v, int[] tris)
+        {
+            var seen = new System.Collections.Generic.HashSet<long>();
+            var edges = new System.Collections.Generic.List<(float len, Matrix4x4 m)>();
+
+            void AddEdge(int a, int b)
+            {
+                long key = a < b ? ((long)a << 32) | (uint)b : ((long)b << 32) | (uint)a;
+                if (!seen.Add(key)) return;
+                var pa = new Vector3(v[a * 3], v[a * 3 + 1], v[a * 3 + 2]);
+                var pb = new Vector3(v[b * 3], v[b * 3 + 1], v[b * 3 + 2]);
+                var d = pb - pa;
+                float len = d.magnitude;
+                if (len < 1e-4f) return;
+                var m = Matrix4x4.TRS((pa + pb) * 0.5f,
+                    Quaternion.FromToRotation(Vector3.forward, d / len),
+                    new Vector3(k_LineThickness, k_LineThickness, len));
+                edges.Add((len, m));
+            }
+
+            for (int t = 0; t + 2 < tris.Length; t += 3)
+            {
+                AddEdge(tris[t], tris[t + 1]);
+                AddEdge(tris[t + 1], tris[t + 2]);
+                AddEdge(tris[t + 2], tris[t]);
+            }
+
+            // 長い辺ほど形を決める。多すぎるときは短いものから捨てる
+            edges.Sort((p, q) => q.len.CompareTo(p.len));
+            int keep = Mathf.Min(edges.Count, k_MaxEdges);
+            m_Edges = new Matrix4x4[keep];
+            for (int i = 0; i < keep; i++) m_Edges[i] = edges[i].m;
+
+            Debug.Log($"[Aquarium] 生メッシュの辺を作成: {keep} 本" +
+                $"（全 {edges.Count} 本のうち長い順。部屋座標で描く）");
+        }
+
+        /// <summary>直方体の12稜線を細長い立方体で描く。</summary>
+        void DrawBox(Matrix4x4 space, Vector3 lo, Vector3 hi, Material mat, float t)
+        {
+            if (mat == null) return;
+            int n = 0;
+            void Edge(float ax, float ay, float az, float bx, float by, float bz)
+            {
+                var c = new Vector3((ax + bx) * 0.5f, (ay + by) * 0.5f, (az + bz) * 0.5f);
+                var s = new Vector3(Mathf.Max(t, Mathf.Abs(bx - ax)),
+                                    Mathf.Max(t, Mathf.Abs(by - ay)),
+                                    Mathf.Max(t, Mathf.Abs(bz - az)));
+                m_Batch[n++] = space * Matrix4x4.TRS(c, Quaternion.identity, s);
+            }
+            foreach (float y in new[] { lo.y, hi.y })
+            {
+                Edge(lo.x, y, lo.z, hi.x, y, lo.z); Edge(lo.x, y, hi.z, hi.x, y, hi.z);
+                Edge(lo.x, y, lo.z, lo.x, y, hi.z); Edge(hi.x, y, lo.z, hi.x, y, hi.z);
+            }
+            Edge(lo.x, lo.y, lo.z, lo.x, hi.y, lo.z); Edge(hi.x, lo.y, lo.z, hi.x, hi.y, lo.z);
+            Edge(lo.x, lo.y, hi.z, lo.x, hi.y, hi.z); Edge(hi.x, lo.y, hi.z, hi.x, hi.y, hi.z);
+
+            Graphics.DrawMeshInstanced(m_Cube, 0, mat, m_Batch, n);
+            DrawnCells += n;
         }
 
         /// <summary>
@@ -214,40 +310,6 @@ namespace BlockField.Aquarium
                 if (!mask[g.Index(nx, ny, nz)]) return true;
             }
             return false;
-        }
-
-        /// <summary>外接箱の12稜線を細長い直方体で描く。</summary>
-        void DrawTankBounds(FlowGrid g, Matrix4x4 space)
-        {
-            var mat = m_ThroughMaterial != null ? m_ThroughMaterial : m_OccludedMaterial;
-            if (mat == null) return;
-
-            float x0 = g.OriginX, y0 = g.OriginY, z0 = g.OriginZ;
-            float x1 = x0 + g.Width * g.CellSize;
-            float y1 = y0 + g.Height * g.CellSize;
-            float z1 = z0 + g.Depth * g.CellSize;
-            float t = k_EdgeThickness;
-
-            int n = 0;
-            void Edge(float ax, float ay, float az, float bx, float by, float bz)
-            {
-                var c = new Vector3((ax + bx) * 0.5f, (ay + by) * 0.5f, (az + bz) * 0.5f);
-                var s = new Vector3(Mathf.Max(t, Mathf.Abs(bx - ax)),
-                                    Mathf.Max(t, Mathf.Abs(by - ay)),
-                                    Mathf.Max(t, Mathf.Abs(bz - az)));
-                m_Batch[n++] = space * Matrix4x4.TRS(c, Quaternion.identity, s);
-            }
-
-            foreach (float y in new[] { y0, y1 })
-            {
-                Edge(x0, y, z0, x1, y, z0); Edge(x0, y, z1, x1, y, z1);
-                Edge(x0, y, z0, x0, y, z1); Edge(x1, y, z0, x1, y, z1);
-            }
-            Edge(x0, y0, z0, x0, y1, z0); Edge(x1, y0, z0, x1, y1, z0);
-            Edge(x0, y0, z1, x0, y1, z1); Edge(x1, y0, z1, x1, y1, z1);
-
-            Graphics.DrawMeshInstanced(m_Cube, 0, mat, m_Batch, n);
-            DrawnCells = n;
         }
 
         /// <summary>一辺1の立方体。DrawMeshInstanced のスケールで大きさを決める。</summary>

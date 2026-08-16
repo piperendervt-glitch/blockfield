@@ -59,9 +59,12 @@ namespace BlockField.Aquarium
         string DebugLine()
         {
             if (m_Debug == null) return "Debug[L-Grip]: 未配線";
+            int i = (int)m_Debug.Current;
+            // 【何を確かめる段かを画面に出す】装着中は色の意味も手順も覚えていられない。
+            // 「水色がどっちだったか」を思い出せないまま見ても判定にならない（2026-08-16）
             return $"Debug[L-Grip]: {m_Debug.CurrentName} " +
-                $"({(int)m_Debug.Current + 1}/{AquariumDebugView.ModeNames.Length})" +
-                $"   n={m_Debug.DrawnCells}";
+                $"({i + 1}/{AquariumDebugView.ModeNames.Length})   n={m_Debug.DrawnCells}\n" +
+                $"  → {AquariumDebugView.ModeHints[i]}";
         }
 
         void Update()

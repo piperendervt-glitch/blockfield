@@ -106,14 +106,27 @@ namespace BlockField.Aquarium
         public long BakeSerial { get; private set; }
 
         /// <summary>
-        /// ARMeshManager から取れた**ワールド座標のまま**の頂点（焼き込みの元データ）。
+        /// 焼き込みの元データ（ARMeshManager の頂点）を**アンカーローカル**にしたもの。
+        /// 主軸ヨーは掛けていないので、焼き込みの手前の段階に相当する。
         ///
-        /// デバッグ表示がこれを**無変換で**描く。焼き込みが通る座標変換
-        /// （アンカー逆変換 → 主軸ヨー → 描画で戻す）を一切通さないので、
-        /// 「元データは部屋に合っているのに焼き込み後がずれる」のか
-        /// 「元データからずれている」のかを切り分けられる。
+        /// 【ワールド直描きをやめた】Meta ボタン長押しのリセンタでトラッキング原点が
+        /// 再定義されると、**ワールド座標系そのものが動く**。ワールド基準で描いたものは
+        /// 実部屋からずれ、アンカー基準のものだけが残る。両者を並べて比べていると、
+        /// リセンタが起きた瞬間に対応が壊れて観測が汚染される
+        /// （2026-08-16 の指摘。susuwatari-mirror / blockfield VR に続き3度目の再発）。
+        /// 全部を同じアンカーに乗せておけば、リセンタしても互いの関係は崩れない。
         /// </summary>
-        public float[] ScanWorldVertices { get; private set; }
+        /// <remarks>
+        /// 主軸ヨーまで掛けた**部屋座標**で持つ。固体セルとまったく同じ座標系なので、
+        /// 描画経路も同じになり、両者を重ねればボクセル化だけを比べられる。
+        /// </remarks>
+        public float[] ScanRoomVertices { get; private set; }
+
+        /// <summary>焼き込みの元データの三角形（辺を線で描くのに使う）。</summary>
+        public int[] ScanTriangles { get; private set; }
+
+        /// <summary>元データの部屋座標での外接箱（水槽の外接箱と並べて比べる）。</summary>
+        public Bounds ScanRoomBounds { get; private set; }
         public double TickMs { get; private set; }
         public double MaxSpeed { get; private set; }
         public string Status { get; private set; } = "スキャン待ち";
@@ -125,9 +138,56 @@ namespace BlockField.Aquarium
         /// </summary>
         public float RoomYawDegrees { get; private set; }
 
+        /// <summary>
+        /// スキャン時からアンカーのワールドポーズがどれだけ動いたか (m / 度)。
+        ///
+        /// 【なぜ見るか】Meta ボタン長押しのリセンタは**トラッキング原点の再定義**で、
+        /// ワールド座標系そのものが動く。空間アンカーは現実の部屋に貼り付いたままなので、
+        /// リセンタが起きると**アンカーのワールド座標が飛ぶ**。ここが 0 のままなら
+        /// 観測は信用できるし、飛んでいればその時刻以降の観測は疑うべきである。
+        /// 同じ現象は susuwatari-mirror (2026-08-05)、blockfield VR (2026-08-13) でも
+        /// 起きており、2026-08-16 で3度目。**起きたことが分からない**のが最大の問題だった。
+        /// </summary>
+        public float AnchorDriftMeters { get; private set; }
+        public float AnchorDriftDegrees { get; private set; }
+
+        /// <summary>リセンタとみなす閾値。これを超えたら警告を出し、以後ずっと出し続ける。</summary>
+        const float k_RecenterMeters = 0.02f;
+        const float k_RecenterDegrees = 1.0f;
+
+        /// <summary>リセンタを検出したか（一度検出したら下ろさない）。</summary>
+        public bool RecenterDetected { get; private set; }
+
         float m_TickAccumulator;
         float m_NextLog;
         readonly Stopwatch m_Watch = new Stopwatch();
+        Pose m_AnchorPoseAtBake;
+        bool m_HasAnchorPoseAtBake;
+
+        /// <summary>
+        /// アンカーのワールドポーズをスキャン時と比べる。リセンタの検出。
+        /// </summary>
+        void UpdateAnchorDrift()
+        {
+            var t = m_Origin != null ? m_Origin.OriginTransform : null;
+            if (t == null || !m_HasAnchorPoseAtBake) return;
+
+            AnchorDriftMeters = Vector3.Distance(t.position, m_AnchorPoseAtBake.position);
+            AnchorDriftDegrees = Quaternion.Angle(t.rotation, m_AnchorPoseAtBake.rotation);
+
+            bool moved = AnchorDriftMeters > k_RecenterMeters
+                || AnchorDriftDegrees > k_RecenterDegrees;
+            if (!moved) return;
+
+            if (!RecenterDetected)
+            {
+                RecenterDetected = true;
+                Debug.LogWarning($"[Aquarium] **リセンタを検出** アンカーのワールドポーズが動いた: " +
+                    $"位置 {AnchorDriftMeters * 100f:F1}cm / 回転 {AnchorDriftDegrees:F2}° " +
+                    $"(焼き込み時 {m_AnchorPoseAtBake.position:F3} → 現在 {t.position:F3})。" +
+                    "これ以降の実機観測は座標系がずれている可能性がある。焼き直しを推奨");
+            }
+        }
 
         void Update()
         {
@@ -157,6 +217,7 @@ namespace BlockField.Aquarium
             if (Time.unscaledTime >= m_NextLog)
             {
                 m_NextLog = Time.unscaledTime + k_LogInterval;
+                UpdateAnchorDrift();
                 LogMetrics();
             }
         }
@@ -250,8 +311,21 @@ namespace BlockField.Aquarium
             // 縁を塞ぐ前に、現実の壁・家具だけのマスクを控える（デバッグ表示用）
             MeshSolidMask = new bool[grid.CellCount];
             for (int i = 0; i < grid.CellCount; i++) MeshSolidMask[i] = grid.IsSolidAt(i);
-            ScanWorldVertices = scan.Vertices;
+            ScanRoomVertices = local;
+            ScanTriangles = scan.Triangles;
+            ScanRoomBounds = new Bounds(
+                new Vector3((minX + maxX) * 0.5f, (minY + maxY) * 0.5f, (minZ + maxZ) * 0.5f),
+                new Vector3(maxX - minX, maxY - minY, maxZ - minZ));
             BakeSerial++;
+
+            // リセンタ検出の基準点。焼き込みの瞬間のアンカーのワールドポーズを控える
+            var originT = m_Origin != null ? m_Origin.OriginTransform : null;
+            if (originT != null)
+            {
+                m_AnchorPoseAtBake = new Pose(originT.position, originT.rotation);
+                m_HasAnchorPoseAtBake = true;
+                AnchorDriftMeters = 0f; AnchorDriftDegrees = 0f; RecenterDetected = false;
+            }
 
             FlowBoundaryBaker.SealBorders(grid);
             FlowBoundaryBaker.BakeDistance(grid);
@@ -523,6 +597,37 @@ namespace BlockField.Aquarium
             return t != null ? t.worldToLocalMatrix : Matrix4x4.identity;
         }
 
+        /// <summary>
+        /// クラゲがいるセルが水か固体か。「壁の中で止まっている」のか
+        /// 「水の中で動いていない」のかを事後に切り分けるために出す
+        /// （2026-08-16「クラゲが全く動かない」の報告で、力学と描画のどちらの問題か
+        /// ログから判断できなかった）。
+        /// </summary>
+        string JellyCellState(Jellyfish body)
+        {
+            var g = Field?.Grid;
+            if (g == null) return "";
+            int gx = Mathf.FloorToInt((body.X - g.OriginX) / g.CellSize);
+            int gy = Mathf.FloorToInt((body.Y - g.OriginY) / g.CellSize);
+            int gz = Mathf.FloorToInt((body.Z - g.OriginZ) / g.CellSize);
+            if (!g.InRange(gx, gy, gz)) return "[格子外]";
+            return g.IsSolid(gx, gy, gz)
+                ? $"[固体 {gx},{gy},{gz}]"
+                : $"[水 {gx},{gy},{gz} 壁まで{g.DistanceInCells(g.Index(gx, gy, gz)) * g.CellSize * 100f:F0}cm]";
+        }
+
+        /// <summary>
+        /// クラゲが**ワールドのどこに描かれているか**。部屋座標だけでは
+        /// 「実際にどこに見えるはず」なのかが分からない。
+        /// </summary>
+        Vector3 JellyWorldPosition(Jellyfish body)
+        {
+            var t = m_Origin != null ? m_Origin.OriginTransform : null;
+            if (t == null) return new Vector3(body.X, body.Y, body.Z);
+            var m = t.localToWorldMatrix * RoomToAnchorRotation(RoomYawDegrees);
+            return m.MultiplyPoint3x4(new Vector3(body.X, body.Y, body.Z));
+        }
+
         void LogMetrics()
         {
             if (Field == null)
@@ -557,7 +662,9 @@ namespace BlockField.Aquarium
                 $"目標流速={TargetSpeed:F3}m/s 最大流速={MaxSpeed:F4}m/s " +
                 $"粒子={(m_Particles != null ? m_Particles.DrawnParticles : -1)}" +
                 $"({(m_Particles != null ? m_Particles.Current.Name : "-")}) " +
-                $"tick={Field.TickCount} FPS={1f / Mathf.Max(1e-4f, Time.smoothDeltaTime):F1}");
+                $"tick={Field.TickCount} FPS={1f / Mathf.Max(1e-4f, Time.smoothDeltaTime):F1} " +
+                $"アンカーずれ={AnchorDriftMeters * 100f:F1}cm/{AnchorDriftDegrees:F2}°" +
+                $"{(RecenterDetected ? " **リセンタ検出済み**" : "")}");
 
             var body = m_Jelly != null ? m_Jelly.Body : null;
             if (body != null)
@@ -569,7 +676,8 @@ namespace BlockField.Aquarium
                     $"遊泳={m_Jelly.SwimSpeedMean:F4}m/s 流れ={m_Jelly.DriftSpeedMean:F4}m/s " +
                     $"比={m_Jelly.SwimToFlowRatio:F2} " +
                     $"(瞬時 遊泳={body.SwimSpeed:F4} 流れ={m_Jelly.FlowAt.magnitude:F4}) " +
-                    $"位置=({body.X:F2}, {body.Y:F2}, {body.Z:F2}) step={body.StepCount}");
+                    $"位置=({body.X:F2}, {body.Y:F2}, {body.Z:F2}){JellyCellState(body)} " +
+                    $"世界={JellyWorldPosition(body):F2} step={body.StepCount}");
             }
         }
     }
