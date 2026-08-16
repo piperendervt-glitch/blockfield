@@ -1,0 +1,12 @@
+{
+    "name": "BlockField.Aquarium",
+    "references": [
+        "BlockField.SimCore",
+        "BlockField.Runtime",
+        "Unity.XR.ARFoundation",
+        "Unity.XR.ARSubsystems",
+        "Unity.XR.CoreUtils",
+        "Unity.InputSystem",
+        "UnityEngine.UI"
+    ]
+}

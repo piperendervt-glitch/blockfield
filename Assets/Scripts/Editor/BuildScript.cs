@@ -13,22 +13,51 @@ public static class BuildScript
     private const string OutputPath = "Builds/blockfield.apk";
 
     [MenuItem("Tools/Project Setup/Build Quest APK")]
-    public static void BuildQuest()
+    public static void BuildQuest() => Build(SceneBootstrap.ScenePath, EnsureMainScene);
+
+    /// <summary>
+    /// 水槽シーン (系列2 Phase B) をビルドする。
+    /// バッチモード: ... -executeMethod BuildScript.BuildAquarium
+    ///
+    /// **Main.unity とは別の APK にはしない。** 入れ替えて同じパッケージ名で
+    /// 上書きインストールする形なので、実機には最後にビルドしたほうが入る。
+    /// どちらを焼いたかはログの先頭行で分かるようにしてある。
+    /// </summary>
+    [MenuItem("Tools/Project Setup/Build Aquarium APK")]
+    public static void BuildAquarium() =>
+        Build(AquariumSceneBootstrap.ScenePath, EnsureAquariumScene);
+
+    static void EnsureMainScene()
+    {
+        if (!File.Exists(SceneBootstrap.ScenePath))
+        {
+            Debug.Log("[BuildScript] Main.unity が無いため生成する。");
+            SceneBootstrap.CreateMainScene();
+        }
+    }
+
+    static void EnsureAquariumScene()
+    {
+        if (!File.Exists(AquariumSceneBootstrap.ScenePath))
+        {
+            Debug.Log("[BuildScript] Aquarium.unity が無いため生成する。");
+            AquariumSceneBootstrap.CreateAquariumScene();
+        }
+    }
+
+    static void Build(string scenePath, Action ensureScene)
     {
         try
         {
             // シーンが無ければコードで生成（GUI手作業に依存しない）
-            if (!File.Exists(SceneBootstrap.ScenePath))
-            {
-                Debug.Log("[BuildScript] Main.unity が無いため生成する。");
-                SceneBootstrap.CreateMainScene();
-            }
+            ensureScene();
 
+            Debug.Log($"[BuildScript] 焼くシーン: {scenePath}");
             Directory.CreateDirectory("Builds");
 
             var options = new BuildPlayerOptions
             {
-                scenes = new[] { SceneBootstrap.ScenePath },
+                scenes = new[] { scenePath },
                 locationPathName = OutputPath,
                 target = BuildTarget.Android,
                 options = BuildOptions.None,

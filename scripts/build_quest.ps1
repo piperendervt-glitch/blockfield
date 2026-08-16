@@ -1,6 +1,17 @@
 ﻿# Quest 3 向け APK をバッチビルドする。
-# 使い方: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build_quest.ps1
+# 使い方:
+#   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build_quest.ps1
+#   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build_quest.ps1 -Aquarium
+#
+# -Aquarium は系列2 Phase B の水槽シーン (Assets/Scenes/Aquarium.unity) を焼く。
+# **同じパッケージ名で上書きインストールになる**ので、実機に入るのは
+# 最後にビルドしたほうだけ。どちらを焼いたかは Logs\build.log の
+# 「[BuildScript] 焼くシーン:」の行で確認できる。
+#
 # 終了コード: 0 = 成功 / 10 = Unity Editor が開いている / 11 = Unity.exe 不明 / それ以外 = Unity の終了コード
+[CmdletBinding()]
+param([switch]$Aquarium)
+
 $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
@@ -20,17 +31,21 @@ if (-not (Test-Path $unity)) {
 
 $logFile = Join-Path $projectRoot "Logs\build.log"
 
+$method = if ($Aquarium) { "BuildScript.BuildAquarium" } else { "BuildScript.BuildQuest" }
+$label = if ($Aquarium) { "水槽シーン (Aquarium.unity)" } else { "本編シーン (Main.unity)" }
+
 $unityArgs = @(
     "-batchmode",
     "-nographics",
     "-quit",
     "-projectPath", $projectRoot,
     "-buildTarget", "Android",
-    "-executeMethod", "BuildScript.BuildQuest",
+    "-executeMethod", $method,
     "-logFile", $logFile
 )
 
-Write-Host "Building Quest APK (Unity $editorVersion)... 初回は IL2CPP で10分以上かかることがある"
+Write-Host "Building Quest APK (Unity $editorVersion) — $label"
+Write-Host "  初回は IL2CPP で10分以上かかることがある"
 $proc = Start-Process -FilePath $unity -ArgumentList $unityArgs -Wait -PassThru
 $code = $proc.ExitCode
 
