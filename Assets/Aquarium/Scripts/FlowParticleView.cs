@@ -35,21 +35,31 @@ namespace BlockField.Aquarium
             public float Brightness;
             /// <summary>速度による明度の変調幅。大きいほど速い所だけ光る。</summary>
             public float Contrast;
-            /// <summary>速度をどれだけ増幅して動かすか（見かけの速さ）。</summary>
-            public float SpeedGain;
+            /// <summary>粒子の寿命の範囲（秒）。尽きたら別の水セルへ湧き直す。</summary>
+            public float LifeMin, LifeMax;
         }
 
+        // 【SpeedGain を削除した】流れ場が m/s で正規化される前は、
+        // 生の ∇×ψ を見えるようにするために 6〜9 倍していた。
+        // 正規化後にこれを残すと、目標流速 0.08 m/s を指定しても
+        // 粒子は 0.48 m/s で動く——**目標値が意味を失う**。
+        // 粒子は場の速度そのままで動かす。
+        //
+        // 【寿命を延ばした】以前は 1〜5 秒だった。流速を 1/180 にしたので
+        // 粒子はほとんど動かずに湧き直すことになり、**湧き直しのチラつきが
+        // 動きより目立つ**（3000粒子 × 1/3秒 で毎フレーム14個が消えて現れる）。
+        // 0.08 m/s では格子の横断に約51秒かかるので、寿命もその桁に合わせる。
         public static readonly Preset[] Presets =
         {
             // 細かい粒を多数。水中の微粒子に見せる狙い
             new Preset { Name = "微粒子", Count = 3000, Size = 0.010f, SizeSpread = 0.5f,
-                         Brightness = 0.55f, Contrast = 0.8f, SpeedGain = 6f },
+                         Brightness = 0.55f, Contrast = 0.8f, LifeMin = 20f, LifeMax = 60f },
             // 大きめを少数。数が少ないぶん1粒の動きが追える
             new Preset { Name = "粗い粒", Count = 900, Size = 0.022f, SizeSpread = 0.8f,
-                         Brightness = 0.75f, Contrast = 0.5f, SpeedGain = 6f },
+                         Brightness = 0.75f, Contrast = 0.5f, LifeMin = 20f, LifeMax = 60f },
             // 速い所だけ光らせる。流れの構造（渦・剥離）を強調する狙い
             new Preset { Name = "流線強調", Count = 2000, Size = 0.013f, SizeSpread = 0.3f,
-                         Brightness = 0.25f, Contrast = 2.0f, SpeedGain = 9f },
+                         Brightness = 0.25f, Contrast = 2.0f, LifeMin = 20f, LifeMax = 60f },
         };
 
         [SerializeField] AquariumFlow m_Flow;
@@ -122,7 +132,7 @@ namespace BlockField.Aquarium
                 // サイズは対数的に散らす。均一だと粒が揃いすぎて人工的に見える
                 float u = (float)m_ViewRng.NextDouble();
                 m_Scale[i] = preset.Size * Mathf.Lerp(1f, 1f + 3f * u, preset.SizeSpread);
-                m_Life[i] = 1f + (float)m_ViewRng.NextDouble() * 4f;
+                m_Life[i] = RandomLife(preset);
             }
 
             if (m_Mesh == null) m_Mesh = BuildQuad();
@@ -146,6 +156,9 @@ namespace BlockField.Aquarium
             return new Vector3(g.OriginX, g.OriginY, g.OriginZ);
         }
 
+        float RandomLife(Preset preset) =>
+            preset.LifeMin + (float)m_ViewRng.NextDouble() * (preset.LifeMax - preset.LifeMin);
+
         void Advect(FlowField field, float dt)
         {
             var preset = Current;
@@ -154,7 +167,8 @@ namespace BlockField.Aquarium
             {
                 var p = m_Position[i];
                 field.SampleVelocity(p.x, p.y, p.z, out float vx, out float vy, out float vz);
-                p += new Vector3(vx, vy, vz) * (preset.SpeedGain * dt);
+                // 場の速度そのままで動かす（目標流速が m/s で正規化済み）
+                p += new Vector3(vx, vy, vz) * dt;
 
                 m_Life[i] -= dt;
                 bool outside =
@@ -168,7 +182,7 @@ namespace BlockField.Aquarium
                 if (outside || m_Life[i] <= 0f)
                 {
                     p = RandomFluidPoint(field);
-                    m_Life[i] = 1f + (float)m_ViewRng.NextDouble() * 4f;
+                    m_Life[i] = RandomLife(preset);
                 }
                 m_Position[i] = p;
             }

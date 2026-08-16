@@ -31,17 +31,34 @@ namespace BlockField.Aquarium
         /// </summary>
         public static readonly float[] CellSizeChoices = { 0.08f, 0.065f, 0.055f };
 
+        /// <summary>
+        /// 実機で切り替える目標流速 (m/s)。
+        ///
+        /// 2026-08-16 の実機セッションで「速すぎて流れに見えない」となった
+        /// （実測は中央 14.5 m/s、1フレーム 20cm）。一発で当てるより
+        /// セッション中に振れる方が早いので3段階にした。
+        /// 既定の 0.08 は 1フレーム 0.11cm で、粒子径 1〜2cm の 1/10 程度。
+        /// </summary>
+        public static readonly float[] TargetSpeedChoices = { 0.02f, 0.08f, 0.3f };
+
         [SerializeField] RoomScanner m_Scanner;
         [SerializeField] DioramaOrigin m_Origin;
         [SerializeField] int m_CellSizeIndex = 1;
+        [SerializeField] int m_SpeedIndex = 1;
+        [SerializeField] FlowParticleView m_Particles;
 
         public RoomScanner scanner { get => m_Scanner; set => m_Scanner = value; }
         public DioramaOrigin origin { get => m_Origin; set => m_Origin = value; }
+        /// <summary>粒子の描画数をログへ出すためだけの参照（View には干渉しない）。</summary>
+        public FlowParticleView particles { get => m_Particles; set => m_Particles = value; }
 
         /// <summary>現在のセルサイズの選択肢番号（0 = 8cm, 1 = 6.5cm, 2 = 5.5cm）。</summary>
         public int CellSizeIndex => m_CellSizeIndex;
 
         public float CellSize => CellSizeChoices[m_CellSizeIndex];
+
+        /// <summary>現在の目標流速 (m/s)。</summary>
+        public float TargetSpeed => TargetSpeedChoices[m_SpeedIndex];
 
         /// <summary>流れ場。焼き込みが済むまで null。</summary>
         public FlowField Field { get; private set; }
@@ -100,6 +117,25 @@ namespace BlockField.Aquarium
             Debug.Log($"[Aquarium] セルサイズを {CellSize * 100f:F1}cm に切り替え。焼き直す");
         }
 
+        /// <summary>
+        /// 目標流速を切り替える。**格子は焼き直さない**（境界は変わらないので）。
+        /// 場の正規化だけをやり直す。焼き込みが済んでいなければ次回のバケに反映される。
+        /// </summary>
+        public void CycleTargetSpeed()
+        {
+            m_SpeedIndex = (m_SpeedIndex + 1) % TargetSpeedChoices.Length;
+            if (Field != null)
+            {
+                var p = FlowParams.Default;
+                p.TargetSpeed = TargetSpeed;
+                var rebuilt = new FlowField(Field.Grid, p);
+                rebuilt.RebuildAll();
+                Field = rebuilt;
+            }
+            Debug.Log($"[Aquarium] 目標流速を {TargetSpeed:F3} m/s に切り替え " +
+                $"(1フレーム {TargetSpeed / 72f * 100f:F2}cm @72FPS)");
+        }
+
         void TryBake()
         {
             if (m_Scanner == null || !m_Scanner.IsComplete)
@@ -145,7 +181,9 @@ namespace BlockField.Aquarium
             FlowBoundaryBaker.SealBorders(grid);
             FlowBoundaryBaker.BakeDistance(grid);
 
-            var field = new FlowField(grid, FlowParams.Default);
+            var fp = FlowParams.Default;
+            fp.TargetSpeed = TargetSpeed;
+            var field = new FlowField(grid, fp);
             field.RebuildAll();
             Field = field;
 
@@ -200,10 +238,15 @@ namespace BlockField.Aquarium
             }
             MaxSpeed = max;
 
+            // 【パネルに出す値はログにも出す】前回、粒子の描画数がパネルにしか
+            // 出ておらず、装着中のユーザーに読み上げてもらう羽目になった
             Debug.Log($"[Aquarium] 格子: セル {CellSize * 100f:F1}cm " +
                 $"{g.Width}x{g.Height}x{g.Depth}={g.CellCount} 固体={SolidCells} " +
                 $"焼き込み={BakeMs}ms / ティック={TickMs:F2}ms ({k_TickHz:F0}Hz) " +
-                $"最大流速={MaxSpeed:F4} tick={Field.TickCount} FPS={1f / Mathf.Max(1e-4f, Time.smoothDeltaTime):F1}");
+                $"目標流速={TargetSpeed:F3}m/s 最大流速={MaxSpeed:F4}m/s " +
+                $"粒子={(m_Particles != null ? m_Particles.DrawnParticles : -1)}" +
+                $"({(m_Particles != null ? m_Particles.Current.Name : "-")}) " +
+                $"tick={Field.TickCount} FPS={1f / Mathf.Max(1e-4f, Time.smoothDeltaTime):F1}");
         }
     }
 }

@@ -9,6 +9,7 @@ namespace BlockField.Aquarium
     /// 実機セッションで確かめたいのは2点なので、それぞれにボタンを割り当てる。
     /// - **左手X: セルサイズ**（8cm → 6.5cm → 5.5cm）。コストと見え方の変化を見る
     /// - **左手Y: 粒子プリセット**（微粒子 → 粗い粒 → 流線強調）。水に見えるかを探す
+    /// - **右手A: 目標流速**（0.02 → 0.08 → 0.3 m/s）。速さは一発で当たらないので振る
     ///
     /// セッション時間は5分が目安（CLAUDE.md）なので、
     /// 装着したまま両方を回せる形にしてある。
@@ -23,6 +24,7 @@ namespace BlockField.Aquarium
 
         InputAction m_CellSizeAction;
         InputAction m_PresetAction;
+        InputAction m_SpeedAction;
 
         void OnEnable()
         {
@@ -35,6 +37,11 @@ namespace BlockField.Aquarium
                 "<XRController>{LeftHand}/secondaryButton");
             m_PresetAction.performed += OnPreset;
             m_PresetAction.Enable();
+
+            m_SpeedAction = new InputAction("AquariumSpeed", InputActionType.Button,
+                "<XRController>{RightHand}/primaryButton");
+            m_SpeedAction.performed += OnSpeed;
+            m_SpeedAction.Enable();
         }
 
         void OnDisable()
@@ -53,6 +60,18 @@ namespace BlockField.Aquarium
                 m_PresetAction.Dispose();
                 m_PresetAction = null;
             }
+            if (m_SpeedAction != null)
+            {
+                m_SpeedAction.performed -= OnSpeed;
+                m_SpeedAction.Disable();
+                m_SpeedAction.Dispose();
+                m_SpeedAction = null;
+            }
+        }
+
+        void OnSpeed(InputAction.CallbackContext _)
+        {
+            if (m_Flow != null) m_Flow.CycleTargetSpeed();
         }
 
         void OnCellSize(InputAction.CallbackContext _)

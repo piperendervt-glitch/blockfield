@@ -145,6 +145,9 @@ public static class AquariumSceneBootstrap
         // 格子はアンカーローカルなので、描画もアンカーの下に置く
         particles.anchorSpace = anchorGo.transform;
 
+        // ログに粒子数を出すための参照（View には干渉しない）
+        flow.particles = particles;
+
         var inputGo = new GameObject("Aquarium Input");
         var input = inputGo.AddComponent<BlockField.Aquarium.AquariumInput>();
         input.flow = flow;

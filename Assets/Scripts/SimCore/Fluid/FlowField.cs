@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace BlockField.SimCore.Fluid
 {
@@ -37,8 +38,24 @@ namespace BlockField.SimCore.Fluid
 
         long m_Tick;
 
+        /// <summary>
+        /// ∇×ψ の生の値を目標流速へ合わせる係数。<see cref="RebuildAll"/> で1回決める。
+        ///
+        /// 【なぜ実測で決めるか】∇×ψ の大きさは fbm の勾配統計に依存するので、
+        /// 解析式で正確に出すのが難しい。**水セルの流速の中央値を測って
+        /// 目標値との比を取る**ほうが正確で、しかもセルサイズや渦の大きさを
+        /// 変えても自動で追従する。同じ格子・同じシードなら同じ値が出るので
+        /// 決定論は保たれる。
+        ///
+        /// ティックごとに測り直さないのは、流れの自然な強弱まで潰してしまうため。
+        /// </summary>
+        float m_SpeedScale = 1f;
+
         public FlowGrid Grid => m_Grid;
         public long TickCount => m_Tick;
+
+        /// <summary>目標流速へ合わせる係数（診断用）。</summary>
+        public float SpeedScale => m_SpeedScale;
 
         public FlowField(FlowGrid grid, FlowParams p)
         {
@@ -49,15 +66,52 @@ namespace BlockField.SimCore.Fluid
         }
 
         /// <summary>
-        /// 全セルの ψ を作り直す（初期化用）。以降は <see cref="Tick"/> が縞で更新する。
+        /// 全セルの ψ を作り直し、目標流速へ正規化する（初期化用）。
+        /// 以降は <see cref="Tick"/> が縞で更新する。
         /// </summary>
         public void RebuildAll()
         {
+            m_SpeedScale = 1f;
             for (int s = 0; s < NoiseStripes; s++)
             {
                 BuildPsiStripe(s, 0);
             }
             ComputeCurl();
+            Normalize();
+        }
+
+        /// <summary>
+        /// 水セルの流速の中央値が <see cref="FlowParams.TargetSpeed"/> になるよう
+        /// <see cref="m_SpeedScale"/> を決める。
+        /// </summary>
+        void Normalize()
+        {
+            var g = m_Grid;
+            var samples = new List<float>();
+            for (int z = 1; z < g.Depth - 1; z++)
+            {
+                for (int y = 1; y < g.Height - 1; y++)
+                {
+                    for (int x = 1; x < g.Width - 1; x++)
+                    {
+                        int cell = g.Index(x, y, z);
+                        if (g.IsSolidAt(cell)) continue;
+                        int i = cell * 3;
+                        samples.Add((float)Math.Sqrt(
+                            m_Velocity[i] * m_Velocity[i]
+                            + m_Velocity[i + 1] * m_Velocity[i + 1]
+                            + m_Velocity[i + 2] * m_Velocity[i + 2]));
+                    }
+                }
+            }
+            if (samples.Count == 0)
+            {
+                m_SpeedScale = 1f;
+                return;
+            }
+            samples.Sort();
+            float median = samples[samples.Count / 2];
+            m_SpeedScale = median > 1e-12f ? m_Params.TargetSpeed / median : 1f;
         }
 
         /// <summary>
@@ -82,14 +136,20 @@ namespace BlockField.SimCore.Fluid
         void BuildPsiStripe(int stripe, long tick)
         {
             var g = m_Grid;
-            float t = tick * m_Params.NoiseTimeStep;
-            float scale = m_Params.NoiseScale;
+
+            // 【ノイズ座標はワールド単位で取る】セル添字で取ると、
+            // セルサイズを変えたときに渦の物理的な大きさが変わってしまう。
+            // 渦の直径を m で指定し、位置を m で割ってから読む
+            float eddy = Math.Max(1e-4f, m_Params.EddySizeMeters);
+            float drift = tick * m_Params.NoiseDriftPerTick / eddy;
             float ramp = Math.Max(1e-6f, m_Params.BoundaryRampCells);
 
             for (int z = stripe; z < g.Depth; z += NoiseStripes)
             {
+                float wz = (g.OriginZ + z * g.CellSize) / eddy;
                 for (int y = 0; y < g.Height; y++)
                 {
+                    float wy = (g.OriginY + y * g.CellSize) / eddy;
                     for (int x = 0; x < g.Width; x++)
                     {
                         int cell = g.Index(x, y, z);
@@ -101,20 +161,26 @@ namespace BlockField.SimCore.Fluid
                             continue;
                         }
 
-                        float fx = x * scale, fy = y * scale, fz = z * scale;
+                        float wx = (g.OriginX + x * g.CellSize) / eddy;
 
                         // 3成分に別々のシードを与える。同じ場を3回読むと ψ が
                         // 対角線方向に潰れて回転が出ない
-                        float px = CurlNoise3.Fbm(fx, fy, fz + t, m_Params.Seed, m_Params.Octaves);
-                        float py = CurlNoise3.Fbm(fx + 31.416f, fy, fz + t, m_Params.Seed + 1u, m_Params.Octaves);
-                        float pz = CurlNoise3.Fbm(fx, fy + 17.705f, fz + t, m_Params.Seed + 2u, m_Params.Octaves);
+                        float px = CurlNoise3.Fbm(wx, wy, wz + drift, m_Params.Seed, m_Params.Octaves);
+                        float py = CurlNoise3.Fbm(wx + 31.416f, wy, wz + drift, m_Params.Seed + 1u, m_Params.Octaves);
+                        float pz = CurlNoise3.Fbm(wx, wy + 17.705f, wz + drift, m_Params.Seed + 2u, m_Params.Octaves);
 
                         // 浮力項。Phase D で温度センサが入るまで係数0（枠だけ用意する）
                         py += m_Params.BuoyancyWeight * 0f;
 
-                        // 境界のランプ。壁で 0 になるので u が壁に沿う
-                        float d = g.DistanceInCells(cell);
-                        float k = d >= ramp ? 1f : Smooth(d / ramp);
+                        // 【境界のランプ】壁面は水セル中心から 0.5 セルの位置にある。
+                        // 距離場が 0 になるのは固体セルなので、壁に接する最初の水セルの
+                        // 距離は 1.0 セル。そのまま d/ramp を入れると
+                        // smoothstep(1.0/2.5) = 0.35 も ψ が残り、流れが壁を貫く
+                        // （2026-08-16 の実測: |u·n|/|u| = 0.227）。**壁面からの距離**を入力にする
+                        float fromSurface = g.DistanceInCells(cell) - 0.5f;
+                        float k = fromSurface <= 0f ? 0f
+                            : fromSurface >= ramp ? 1f
+                            : Smooth(fromSurface / ramp);
 
                         m_Psi[i] = px * k;
                         m_Psi[i + 1] = py * k;
@@ -163,11 +229,13 @@ namespace BlockField.SimCore.Fluid
             }
         }
 
-        /// <summary>セルの流速（アンカーローカル、m/tick）。</summary>
+        /// <summary>セルの流速 (m/s)。目標流速へ正規化済み。</summary>
         public void VelocityAt(int x, int y, int z, out float vx, out float vy, out float vz)
         {
             int i = m_Grid.Index(x, y, z) * 3;
-            vx = m_Velocity[i]; vy = m_Velocity[i + 1]; vz = m_Velocity[i + 2];
+            vx = m_Velocity[i] * m_SpeedScale;
+            vy = m_Velocity[i + 1] * m_SpeedScale;
+            vz = m_Velocity[i + 2] * m_SpeedScale;
         }
 
         /// <summary>
@@ -206,6 +274,7 @@ namespace BlockField.SimCore.Fluid
                     }
                 }
             }
+            vx *= m_SpeedScale; vy *= m_SpeedScale; vz *= m_SpeedScale;
         }
 
         /// <summary>

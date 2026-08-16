@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using BlockField.SimCore.Fluid;
 using NUnit.Framework;
 
@@ -20,6 +22,42 @@ namespace BlockField.Tests.EditMode
             FlowBoundaryBaker.SealBorders(grid);
             FlowBoundaryBaker.BakeDistance(grid);
             return grid;
+        }
+
+        static readonly (int dx, int dy, int dz)[] k_Faces =
+        {
+            (1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1),
+        };
+
+        /// <summary>部屋 + 中央に家具相当の塊。境界の判定に使う。</summary>
+        static (FlowGrid grid, FlowField field) MakeRoomWithObstacle()
+        {
+            var grid = FlowGrid.FromBounds(0f, 0f, 0f, 3.19f, 2.07f, 2.60f, 0.065f);
+            FlowBoundaryBaker.SealBorders(grid);
+            for (int z = 16; z <= 25; z++)
+                for (int y = 3; y <= 11; y++)
+                    for (int x = 20; x <= 31; x++)
+                        grid.SetSolid(x, y, z, true);
+            FlowBoundaryBaker.BakeDistance(grid);
+
+            var field = new FlowField(grid, FlowParams.Default);
+            field.RebuildAll();
+            return (grid, field);
+        }
+
+        static float MedianSpeed(FlowGrid grid, FlowField field)
+        {
+            var speeds = new List<float>();
+            for (int z = 1; z < grid.Depth - 1; z++)
+                for (int y = 1; y < grid.Height - 1; y++)
+                    for (int x = 1; x < grid.Width - 1; x++)
+                    {
+                        if (grid.IsSolid(x, y, z)) continue;
+                        field.VelocityAt(x, y, z, out float vx, out float vy, out float vz);
+                        speeds.Add((float)Math.Sqrt(vx * vx + vy * vy + vz * vz));
+                    }
+            speeds.Sort();
+            return speeds[speeds.Count / 2];
         }
 
         // ================= 格子の形 =================
@@ -214,11 +252,20 @@ namespace BlockField.Tests.EditMode
         }
 
         /// <summary>
-        /// 家具（格子の中に置いた塊）の周りで流れが回ること。
-        /// 塊の中は 0、すぐ外側には流れがある——「岩を water が回る」の最小確認。
+        /// 塊の中は静止し、外側には流れがあること。
+        ///
+        /// 【名前を実態に合わせた】以前は `Boundary_FlowGoesAroundAnObstacleInTheMiddle`
+        /// という名前だったが、**測っているのは「外に流れがある」だけ**で
+        /// 「回り込んでいる」は一切見ていなかった。名前が主張と一致しないテストは、
+        /// 通ることで安心を生むぶん有害である（2026-08-16 の実機で回り込みが見えず、
+        /// |u·n|/|u| = 0.227 だったのに本テストは通っていた）。
+        ///
+        /// 回り込みそのものは <see cref="Boundary_FlowIsTangentialAtObstacleFaces"/> が見る。
+        /// **本テストも必要である** — 流れが全部ゼロなら接線性の判定は自明に通るので、
+        /// 「流れが存在する」を別に固定しておかなければならない。
         /// </summary>
         [Test]
-        public void Boundary_FlowGoesAroundAnObstacleInTheMiddle()
+        public void Boundary_FlowExistsOutsideTheObstacleAndIsZeroInside()
         {
             var grid = FlowGrid.FromBounds(0f, 0f, 0f, 2f, 2f, 2f, 0.1f);
             FlowBoundaryBaker.SealBorders(grid);
@@ -244,6 +291,175 @@ namespace BlockField.Tests.EditMode
                 }
             }
             Assert.Greater(outside, 0f, "塊の外側に流れが無い");
+        }
+
+        /// <summary>
+        /// **流れが障害物の面に沿っていること（回り込み）。**
+        ///
+        /// 面に接する水セルで、速度の法線成分の割合 |u·n|/|u| を測る。
+        /// 0 なら完全に接線、1 なら壁を向いている。**向きが無相関なら 0.5**。
+        ///
+        /// 【なぜ 0 にならないか】障害物はボクセル化された階段状の面なので、
+        /// ここで使う軸平行の面法線と、ランプが見ている滑らかな面の法線が一致しない。
+        /// 角の近くのセルほどずれる。
+        ///
+        /// 実測（2026-08-16 の修正後）: 平均 0.14 前後。修正前は 0.227 で、
+        /// ランプが**セル中心基準**だったため壁に接する最初の水セルに
+        /// ψ が 0.35 も残っていた（smoothstep(1.0/2.5)）。
+        /// </summary>
+        [Test]
+        public void Boundary_FlowIsTangentialAtObstacleFaces()
+        {
+            var (grid, field) = MakeRoomWithObstacle();
+
+            var ratios = new List<double>();
+            for (int z = 1; z < grid.Depth - 1; z++)
+            {
+                for (int y = 1; y < grid.Height - 1; y++)
+                {
+                    for (int x = 1; x < grid.Width - 1; x++)
+                    {
+                        if (grid.IsSolid(x, y, z)) continue;
+
+                        // 固体に接している面が1つだけのセルを拾う（角は法線が定まらない）
+                        int nx = 0, ny = 0, nz = 0, touching = 0;
+                        foreach (var (dx, dy, dz) in k_Faces)
+                        {
+                            if (!grid.InRange(x + dx, y + dy, z + dz)) continue;
+                            if (!grid.IsSolid(x + dx, y + dy, z + dz)) continue;
+                            nx -= dx; ny -= dy; nz -= dz; touching++;
+                        }
+                        if (touching != 1) continue;
+
+                        field.VelocityAt(x, y, z, out float vx, out float vy, out float vz);
+                        double speed = Math.Sqrt(vx * vx + vy * vy + vz * vz);
+                        if (speed < 1e-12) continue;
+                        ratios.Add(Math.Abs(vx * nx + vy * ny + vz * nz) / speed);
+                    }
+                }
+            }
+
+            Assert.Greater(ratios.Count, 200, "面に接する水セルの標本が少なすぎる");
+            double mean = ratios.Average();
+            Assert.Less(mean, 0.20,
+                $"|u·n|/|u| の平均が {mean:F4}。無相関なら 0.5、接線なら 0。" +
+                "境界ランプが壁面基準になっていない疑い");
+        }
+
+        /// <summary>
+        /// **境界の近くでは流れが弱まること。**
+        ///
+        /// ランプが ψ を落としているなら、壁際の流速は開けた所より小さくなる。
+        /// 修正前は比 0.988 で**まったく落ちていなかった**。修正後は 0.67 前後。
+        ///
+        /// ただし落としすぎると壁際の流れが死んで「回り込み」が見えなくなる。
+        /// ランプ幅 2.5 セルはその折り合いで選んだ（幅 5 にすると比 0.21 まで落ちる）。
+        /// </summary>
+        [Test]
+        public void Boundary_FlowIsSlowerNearWallsThanInTheOpen()
+        {
+            var (grid, field) = MakeRoomWithObstacle();
+
+            var near = new List<double>();
+            var far = new List<double>();
+            for (int z = 1; z < grid.Depth - 1; z++)
+            {
+                for (int y = 1; y < grid.Height - 1; y++)
+                {
+                    for (int x = 1; x < grid.Width - 1; x++)
+                    {
+                        int idx = grid.Index(x, y, z);
+                        if (grid.IsSolidAt(idx)) continue;
+                        field.VelocityAt(x, y, z, out float vx, out float vy, out float vz);
+                        double speed = Math.Sqrt(vx * vx + vy * vy + vz * vz);
+                        double d = grid.DistanceInCells(idx);
+                        if (d <= 1.01) near.Add(speed);
+                        else if (d >= 6.0) far.Add(speed);
+                    }
+                }
+            }
+
+            Assert.Greater(near.Count, 100, "壁際の標本が少なすぎる");
+            Assert.Greater(far.Count, 100, "開けた所の標本が少なすぎる");
+            double ratio = near.Average() / far.Average();
+            Assert.Less(ratio, 0.85,
+                $"壁際 / 開けた所 の流速比が {ratio:F3}。ランプが効いていない疑い");
+            Assert.Greater(ratio, 0.05,
+                $"流速比が {ratio:F3}。落としすぎると壁際の流れが死に、回り込みが見えなくなる");
+        }
+
+        // ================= 目標流速への正規化 =================
+
+        /// <summary>
+        /// **水セルの流速の中央値が目標流速に一致すること。**
+        ///
+        /// 2026-08-16 の実機セッションで、粒子が毎フレーム 20cm 飛んで
+        /// 流れに見えなかった。ψ の振幅に物理スケールを与えておらず、
+        /// 流速が ∇×ψ の生の値（中央 2.4、単位は ψ/m）のままだったため。
+        /// </summary>
+        [Test]
+        public void Speed_MedianMatchesTheTargetSpeed()
+        {
+            foreach (float target in new[] { 0.02f, 0.08f, 0.3f })
+            {
+                var p = FlowParams.Default;
+                p.TargetSpeed = target;
+                var grid = MakeRoomGrid();
+                var field = new FlowField(grid, p);
+                field.RebuildAll();
+
+                Assert.AreEqual(target, MedianSpeed(grid, field), target * 1e-3f,
+                    $"目標 {target} m/s に対して中央値が合っていない");
+            }
+        }
+
+        /// <summary>
+        /// **セルサイズを変えても流速が変わらないこと。**
+        ///
+        /// 修正前は ∇×ψ を 1/(2×セルサイズ) で割った生の値をそのまま使っていたので、
+        /// **流速がセルサイズに反比例していた**（実機ログ: 6.5cm で 7.72、
+        /// 5.5cm で 9.39、比 1.22 ≈ セルサイズ比 1.18）。
+        /// セルサイズの比較が「解像度の比較」になっていなかった。
+        /// </summary>
+        [Test]
+        public void Speed_IsIndependentOfCellSize()
+        {
+            var p = FlowParams.Default;
+            foreach (float cell in new[] { 0.08f, 0.065f, 0.055f })
+            {
+                var grid = FlowGrid.FromBounds(0f, 0f, 0f, 3.19f, 2.07f, 2.60f, cell);
+                FlowBoundaryBaker.SealBorders(grid);
+                FlowBoundaryBaker.BakeDistance(grid);
+                var field = new FlowField(grid, p);
+                field.RebuildAll();
+
+                Assert.AreEqual(p.TargetSpeed, MedianSpeed(grid, field), p.TargetSpeed * 1e-3f,
+                    $"セル {cell * 100f:F1}cm で流速が目標から外れた");
+            }
+        }
+
+        /// <summary>
+        /// **渦の大きさはメートルで決まること。**
+        /// ノイズ座標をセル添字ではなくワールド座標で取っているので、
+        /// セルサイズを変えても流れの空間構造が変わらない。
+        /// 渦を大きくすると生の ∇×ψ は小さくなり、目標へ合わせる係数は大きくなる。
+        /// </summary>
+        [Test]
+        public void Flow_EddyScaleIsSetInMetresNotCells()
+        {
+            var grid = MakeRoomGrid();
+
+            float ScaleFor(float eddyMeters)
+            {
+                var p = FlowParams.Default;
+                p.EddySizeMeters = eddyMeters;
+                var f = new FlowField(grid, p);
+                f.RebuildAll();
+                return f.SpeedScale;
+            }
+
+            Assert.Greater(ScaleFor(2.0f), ScaleFor(0.25f),
+                "渦の大きさが ∇×ψ の大きさに効いていない");
         }
 
         // ================= 決定論 =================
