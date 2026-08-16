@@ -197,8 +197,10 @@ namespace BlockField.Aquarium
             DrawnParticles = 0;
             if (m_Space == null) return;
 
-            var camera = Camera.main;
-            var faceCamera = camera != null ? camera.transform.rotation : Quaternion.identity;
+            // 【カメラに直接触らない】ビルボードの回転はワールドの量なので、
+            // 部屋座標の行列にそのまま入れるとアンカーの姿勢だけ余計に回る。
+            // 部屋座標へ直した回転を AnchorSpaceRenderer からもらう
+            if (!m_Space.TryGetBillboardRotation(out var faceCamera)) return;
 
             float reference = Mathf.Max(1e-5f, (float)m_Flow.MaxSpeed);
             int batched = 0;

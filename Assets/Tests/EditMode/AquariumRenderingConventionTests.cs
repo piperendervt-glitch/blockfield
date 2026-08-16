@@ -108,6 +108,39 @@ namespace BlockField.Tests.EditMode
         }
 
         /// <summary>
+        /// **カメラに触れて良いのも入口だけ。**
+        ///
+        /// 描画の入口を集約しても、**回転を引数で受け取る形なら呼ぶ側が
+        /// 間違った座標系の回転を渡せる**。実際、粒子のビルボードはカメラの
+        /// ワールド回転をそのまま部屋座標の行列に入れており、アンカーを
+        /// 正しく適用した瞬間に約 89° ずれて平面が横を向いた。
+        /// 位置だけ守って回転を守っていなかった、という穴だった。
+        ///
+        /// カメラの姿勢はワールド座標の量なので、部屋座標へ直す責任は
+        /// <see cref="BlockField.Aquarium.AnchorSpaceRenderer.TryGetBillboardRotation"/>
+        /// が持つ。呼ぶ側はカメラを見に行かない。
+        /// </summary>
+        [Test]
+        public void OnlyTheAnchorSpaceRendererMayReadTheCamera()
+        {
+            var violations = new List<string>();
+            foreach (var (file, line, text) in CodeLines())
+            {
+                if (file == k_Allowed) continue;
+                if (Regex.IsMatch(text, @"\bCamera\s*\.\s*(main|current|allCameras)\b")
+                    || Regex.IsMatch(text, @"\bCamera\s+\w+\s*[=;)]"))
+                {
+                    violations.Add($"{file}:{line} {text.Trim()}");
+                }
+            }
+
+            CollectionAssert.IsEmpty(violations,
+                "カメラの姿勢はワールド座標の量。部屋座標の行列へそのまま入れると" +
+                "アンカーの姿勢だけ余計に回る。部屋座標へ直した回転を " +
+                $"{k_Allowed} からもらうこと:\n  " + string.Join("\n  ", violations));
+        }
+
+        /// <summary>
         /// 規約の対象ファイル自体が存在すること（改名で空振りにならないように）。
         /// </summary>
         [Test]

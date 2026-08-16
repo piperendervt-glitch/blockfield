@@ -73,6 +73,36 @@ namespace BlockField.Aquarium
             return true;
         }
 
+        /// <summary>
+        /// **カメラを向く回転を、部屋座標で**返す。ビルボードはこれを使うこと。
+        ///
+        /// 【なぜ渡す側で作らせないか】カメラの回転はワールド座標の量である。
+        /// これをそのまま部屋座標の行列に入れると、<see cref="TryGetSpace"/> が
+        /// 左から掛かるぶん**アンカーの姿勢だけ余計に回る**。
+        /// 粒子はまさにこれをやっており、アンカーが効いていなかった間は
+        /// 主軸ヨーぶん（37.8°）だけずれていた。アンカーを正しく適用した瞬間に
+        /// アンカーのヨー 126.9° が乗り、**ずれが約 89° になって平面が横を向いた**
+        /// （2026-08-16 の実機報告）。新しい不具合ではなく、
+        /// アンカー修正で顕在化した既存の誤りだった。
+        ///
+        /// 【型で守る】呼ぶ側がカメラに触れないようにするのが要点。
+        /// `Assets/Aquarium/Scripts/` で `Camera` を参照して良いのはこのファイルだけ、
+        /// という grep テストを置いてある（<c>AquariumRenderingConventionTests</c>）。
+        /// 位置だけ集約しても、**回転を引数で受け取る形なら呼ぶ側が間違えられる**。
+        /// </summary>
+        public bool TryGetBillboardRotation(out Quaternion roomRotation)
+        {
+            roomRotation = Quaternion.identity;
+            if (!TryGetSpace(out var space)) return false;
+
+            var camera = Camera.main;
+            if (camera == null) return false;
+
+            // ワールドの向き → 部屋座標の向き。space が左から掛かるぶんを打ち消す
+            roomRotation = Quaternion.Inverse(space.rotation) * camera.transform.rotation;
+            return true;
+        }
+
         /// <summary>部屋座標の点群へ同じメッシュを並べて描く。</summary>
         public int DrawInstanced(Mesh mesh, Material material,
             Vector3[] roomPositions, int count, Vector3 scale, Quaternion rotation)
