@@ -353,6 +353,132 @@ foreach (int cell in new[] { 0, 4, 8, 12 })
     Console.WriteLine($"    pace=cell{cell,2} → {h,7:F1}°（期待 {exp,5:F1}°、誤差 {AngleError(h, exp),5:F2}°）dist {d,7:F1}");
 }
 
+// ---------------------------------------------------------------------------
+// M-J3b: 遊泳中の側方刺激で偏向し、刺激が消えると元の進路へ復帰する
+// ---------------------------------------------------------------------------
+
+static double[] Trajectory(int pace, int tPace, (int cell, int tick)[] stims, int steps, out double[] ys)
+{
+    var p = ExcitableParams.Default;
+    var s = new RingSwimmer(N);
+    var xs = new double[steps]; ys = new double[steps];
+    for (int t = 0; t < steps; t++)
+    {
+        foreach (var (cell, tick) in stims)
+        {
+            if (tick == t) s.TryStimulate(cell, p);
+        }
+        if (t % tPace == 0) s.TryStimulate(pace, p);
+        s.Step(p, 0.1);
+        xs[t] = s.X; ys[t] = s.Y;   // プロトタイプの traj.append((t,x,y)) と同じ位置づけ
+    }
+    return xs;
+}
+
+Console.WriteLine();
+Console.WriteLine("=== M-J3b: 側方刺激による偏向と復帰（pace=cell8 T=40、poke=cell4 @ t=100）===");
+{
+    var undisturbed = Trajectory(8, 40, Array.Empty<(int, int)>(), 400, out var uy);
+    var poked = Trajectory(8, 40, new[] { (4, 100) }, 400, out var py);
+
+    double HeadAt(double[] xs, double[] yy, int a, int b)
+        => HeadingOf(xs[b] - xs[a], yy[b] - yy[a]).heading;
+
+    Console.WriteLine($"  刺激なし t80-100 : {HeadAt(undisturbed, uy, 79, 99),7:F1}°");
+    Console.WriteLine($"  刺激あり t80-100 : {HeadAt(poked, py, 79, 99),7:F1}°  （刺激前）");
+    Console.WriteLine($"  刺激あり t100-140: {HeadAt(poked, py, 99, 139),7:F1}°  ← 90°側から逸れる");
+    Console.WriteLine($"  刺激あり t300-400: {HeadAt(poked, py, 299, 399),7:F1}°  ← 元の進路へ復帰");
+    Console.WriteLine("  プロトタイプ実測: 360.0 → 315.1 → 360.0");
+}
+
+// ---------------------------------------------------------------------------
+// 観察（判定にしない）: 限定2 の延長 — 拍動周期 T を R₀ に近づける
+// ---------------------------------------------------------------------------
+//
+// 追記5 の限定2 で「回復した最初のティックは両隣が揃わないので非対称になる」
+// ことが分かった。T を R₀ に近づけると、これが毎拍動で起きるはず。
+// 遊泳が成立しなくなる下限周期があるなら記録する（jelly_2 で拍動周期を
+// 遺伝子にするなら、その下限が探索空間の境界になる）。
+//
+// **stims は必ず明示する**（追記6 の教訓）。
+
+Console.WriteLine();
+Console.WriteLine("=== 観察A: 拍動周期 T を R₀=14 に近づける（pace=cell8、drag=0.1、1600ステップ）===");
+// 「刺激が入った」と「波が出た」は別物である。刺激セルは受け付けても、
+// **両隣がまだ不応期なら波は伝わらない**（追記5 の限定2）。両方数える。
+Console.WriteLine($"  {"T",4} {"刺激が入った",12} {"波が出た",12} {"平均速度",10} {"実効周期",9} {"誤差",7}");
+foreach (int tPace in new[] { 40, 30, 24, 20, 18, 16, 15, 14, 13, 12, 10, 8 })
+{
+    var p = ExcitableParams.Default;
+    var s = new RingSwimmer(N);
+    int attempts = 0, landed = 0, waves = 0;
+    bool pendingCheck = false;
+    const int steps = 1600;
+    var xs = new double[steps + 1]; var ys = new double[steps + 1];
+    for (int t = 0; t < steps; t++)
+    {
+        if (t % tPace == 0) { attempts++; if (s.TryStimulate(8, p)) { landed++; pendingCheck = true; } }
+        s.Step(p, 0.1);
+        // 刺激の直後のステップで近傍が発火したか＝波が出たか
+        if (pendingCheck) { if (s.Field.LastFired.Count > 0) waves++; pendingCheck = false; }
+        xs[t + 1] = s.X; ys[t + 1] = s.Y;
+    }
+    double speed = Math.Sqrt(Math.Pow(xs[1600] - xs[800], 2) + Math.Pow(ys[1600] - ys[800], 2)) / 800.0;
+    var (h, _) = HeadingOf(s.X, s.Y);
+    double effective = waves > 0 ? (double)steps / waves : double.NaN;
+    Console.WriteLine($"  {tPace,4} {landed,7}/{attempts,-4} {waves,7}/{attempts,-4} {speed,10:F6} {effective,9:F1} {AngleError(h, 0.0),7:F2}");
+}
+
+// ---------------------------------------------------------------------------
+// 観察（判定にしない）: 限定1 の延長 — 複数ペースメーカー
+// ---------------------------------------------------------------------------
+//
+// 重ね合わせが非線形（各セルは不応期の間1度しか発火できない）なので、
+// 複数ペースメーカーは線形合成にならないはず。受領した
+// jelly_dual_pacemaker.png の複雑な軌跡がそれを示唆している。
+
+Console.WriteLine();
+Console.WriteLine("=== 観察B: 複数ペースメーカー（1600ステップ、drag=0.1、stims=() 明示）===");
+Console.WriteLine($"  {"構成",-28} {"heading",9} {"dist",9} {"単純和の予測",14}");
+var paceSets = new (string label, (int cell, int period)[] paces)[]
+{
+    ("単一 cell8 T=40",            new[] { (8, 40) }),
+    ("二重 cell8 T=40 + cell0 T=40", new[] { (8, 40), (0, 40) }),
+    ("二重 cell8 T=40 + cell2 T=43", new[] { (8, 40), (2, 43) }),
+    ("二重 cell8 T=41 + cell12 T=47", new[] { (8, 41), (12, 47) }),
+    ("三重 8/T40 + 2/T43 + 12/T51", new[] { (8, 40), (2, 43), (12, 51) }),
+};
+foreach (var (label, paces) in paceSets)
+{
+    var p = ExcitableParams.Default;
+    var s = new RingSwimmer(N);
+    for (int t = 0; t < 1600; t++)
+    {
+        foreach (var (cell, period) in paces)
+        {
+            if (t % period == 0) s.TryStimulate(cell, p);
+        }
+        s.Step(p, 0.1);
+    }
+    var (h, d) = HeadingOf(s.X, s.Y);
+
+    // 各ペースメーカーを単独で走らせた変位のベクトル和（線形合成の予測）
+    double px = 0, py = 0;
+    foreach (var (cell, period) in paces)
+    {
+        var q = ExcitableParams.Default;
+        var one = new RingSwimmer(N);
+        for (int t = 0; t < 1600; t++)
+        {
+            if (t % period == 0) one.TryStimulate(cell, q);
+            one.Step(q, 0.1);
+        }
+        px += one.X; py += one.Y;
+    }
+    var pred = HeadingOf(px, py);
+    Console.WriteLine($"  {label,-28} {h,9:F1} {d,9:F1} {pred.heading,8:F1}°/{pred.dist,-6:F1}");
+}
+
 // 2つ目の刺激が実際に入ったのかを直接見る。
 // 「入らない」なら結果が R₀ に依らないのは当然であって、
 // R₀ が無関係だという主張にはならない

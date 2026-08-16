@@ -229,7 +229,11 @@ namespace BlockField.Tests.EditMode
         /// プロトタイプ `j2c_waveamp.py` と同一の乱数列（LCG）。
         /// シードから 刺激セル / g / drag を作る。照合対象なので式を変えない。
         /// </summary>
-        static IEnumerable<double> RngStream(uint seed)
+        /// <remarks>
+        /// M-J3a の48シードでも同じ列を使う（prereg 追記6-5）。
+        /// 判定ごとに別の乱数列を使うと、条件の差なのか列の差なのかが分からなくなる。
+        /// </remarks>
+        internal static IEnumerable<double> RngStreamFor(uint seed)
         {
             uint s = seed;
             while (true)
@@ -238,6 +242,8 @@ namespace BlockField.Tests.EditMode
                 yield return s / 4294967296.0;
             }
         }
+
+        static IEnumerable<double> RngStream(uint seed) => RngStreamFor(seed);
 
         /// <summary>
         /// **48シードで、刺激角と逃避角が 1:1 単調・オフセット 180° であること。**
