@@ -15,6 +15,64 @@ namespace BlockField.SimCore.Fluid
     /// </summary>
     public static class JellyBoundary
     {
+        /// <summary>
+        /// **壁から離れる向きの速度**を返す (m/s)。壁に近いほど強い。
+        ///
+        /// 【なぜ要るか】軸ごとの拒否は「壁を貫通しない」ことしか保証しない。
+        /// 推力の向きはペースメーカーの位置で決まっていて**一定**なので、
+        /// 壁に向かって進んだ個体は壁際で押し続け、そこに張り付いたままになる。
+        /// 流れがあれば押し戻されて目立たないが、**止水ではむき出しになる**
+        /// （2026-08-16 の実機。止水モードを入れて初めて見えた）。
+        ///
+        /// 【弾かれて見えないように】強さは壁からの距離で滑らかに落とす
+        /// （帯の縁で 0、壁で最大の二次カーブ）。役割は「弾き返す」ではなく
+        /// 「壁に沿って離れていく」こと。推力は書き換えず速度に足すだけなので、
+        /// 接線方向の遊泳はそのまま残り、結果として壁沿いに滑る。
+        ///
+        /// 【向きは環境の情報】距離場の勾配は壁の形であって動物の内部状態ではない。
+        /// M-J2b（動物が行き先を決めるのに方向を計算していない）とは別の層にある。
+        /// だからこのファイルは grep の走査対象に入れていない。
+        /// </summary>
+        /// <param name="bandCells">この距離（セル数）より外では反発しない。</param>
+        /// <param name="speed">壁面での強さ (m/s)。0 で無効。</param>
+        public static void Repulsion(FlowGrid g, float x, float y, float z,
+            float bandCells, float speed,
+            out float rx, out float ry, out float rz)
+        {
+            rx = 0f; ry = 0f; rz = 0f;
+            if (g == null || speed <= 0f || bandCells <= 0f) return;
+
+            int gx = (int)System.Math.Floor((x - g.OriginX) / g.CellSize);
+            int gy = (int)System.Math.Floor((y - g.OriginY) / g.CellSize);
+            int gz = (int)System.Math.Floor((z - g.OriginZ) / g.CellSize);
+            if (!g.InRange(gx, gy, gz)) return;
+
+            // 壁面からの距離。FlowField の境界ランプと同じ取り方（セル中心ではなく面）
+            float d = g.DistanceInCells(g.Index(gx, gy, gz)) - 0.5f;
+            if (d >= bandCells) return;
+            if (d < 0f) d = 0f;
+
+            // 距離場の勾配 = 壁から離れる向き
+            float nx = Sample(g, gx + 1, gy, gz) - Sample(g, gx - 1, gy, gz);
+            float ny = Sample(g, gx, gy + 1, gz) - Sample(g, gx, gy - 1, gz);
+            float nz = Sample(g, gx, gy, gz + 1) - Sample(g, gx, gy, gz - 1);
+            float len = (float)System.Math.Sqrt(nx * nx + ny * ny + nz * nz);
+            if (len < 1e-6f) return;
+
+            // 帯の縁で 0、壁で最大。二次で落とすと縁で滑らかにつながり、
+            // 「境界を越えた瞬間に弾かれる」感じにならない
+            float t = 1f - d / bandCells;
+            float strength = speed * t * t;
+
+            rx = nx / len * strength;
+            ry = ny / len * strength;
+            rz = nz / len * strength;
+        }
+
+        /// <summary>距離場の読み出し（格子の外は壁とみなして 0）。</summary>
+        static float Sample(FlowGrid g, int x, int y, int z) =>
+            g.InRange(x, y, z) ? g.DistanceInCells(g.Index(x, y, z)) : 0f;
+
         /// <summary>その座標のセルが水か（格子の外も水でないとみなす）。</summary>
         public static bool IsFluid(FlowGrid g, float x, float y, float z)
         {

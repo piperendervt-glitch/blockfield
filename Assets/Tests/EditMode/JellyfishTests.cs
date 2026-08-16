@@ -382,5 +382,94 @@ namespace BlockField.Tests.EditMode
             for (int i = 0; i < 400; i++) jelly.Step(1f / 40f, 0f, -1f, 0f);
             Assert.Less(jelly.Y, 0f, "境界なしなら下へ抜けるはず");
         }
+
+        /// <summary>
+        /// 水の領域の内面までの距離 (m)。**連続値で測る**。
+        /// 格子の量子化された距離場だとセル単位に丸まり、数 cm の差が消える。
+        /// MakeTank は外周1セルだけが固体なので、内面の座標は解析的に分かる。
+        /// </summary>
+        static float WallDistance(FlowGrid g, Jellyfish j)
+        {
+            float c = g.CellSize;
+            float loX = g.OriginX + c, hiX = g.OriginX + (g.Width - 1) * c;
+            float loY = g.OriginY + c, hiY = g.OriginY + (g.Height - 1) * c;
+            float loZ = g.OriginZ + c, hiZ = g.OriginZ + (g.Depth - 1) * c;
+            return Math.Min(
+                Math.Min(Math.Min(j.X - loX, hiX - j.X), Math.Min(j.Y - loY, hiY - j.Y)),
+                Math.Min(j.Z - loZ, hiZ - j.Z));
+        }
+
+        static Jellyfish SpawnWithRepel(FlowGrid g, float repel)
+        {
+            var p = JellyParams.Default;
+            p.WallRepelSpeed = repel;
+            return new Jellyfish(p, 1.6f, 1.1f, 1.3f, g);
+        }
+
+        /// <summary>
+        /// **反発があるとクラゲが壁面に貼り付かない。**
+        ///
+        /// 軸ごとの拒否は壁を貫通しないことしか保証しない。推力の向きは
+        /// ペースメーカーの位置で決まっていて一定なので、壁へ向かった個体は
+        /// 押し続けて壁際に張り付く。止水モードを入れて初めてむき出しになった
+        /// （2026-08-16 の実機）。
+        /// </summary>
+        [Test]
+        public void Wall_RepulsionKeepsTheJellyfishOffTheSurface()
+        {
+            var grid = MakeTank();
+
+            // 止水で長く泳がせる。推力の向きは一定なので必ず壁へ達する
+            var without = SpawnWithRepel(grid, 0f);
+            var with = SpawnWithRepel(grid, JellyParams.Default.WallRepelSpeed);
+            for (int i = 0; i < 6000; i++)
+            {
+                without.Step(1f / 40f, 0f, 0f, 0f);
+                with.Step(1f / 40f, 0f, 0f, 0f);
+            }
+
+            float dWithout = WallDistance(grid, without);
+            float dWith = WallDistance(grid, with);
+
+            // 既定の強さは「押し続ける推力（遊泳 0.04 m/s）に勝てること」で決めている。
+            // 弱すぎると釣り合う位置が壁のすぐ際になり、張り付きと見分けがつかない
+            Assert.Greater(dWith, dWithout + 0.03f,
+                $"反発が効いていない（反発なし {dWithout:F3}m / 反発あり {dWith:F3}m）");
+        }
+
+        /// <summary>**反発があっても固体セルへは入らない。** 拒否と両立すること。</summary>
+        [Test]
+        public void Wall_RepulsionNeverPushesIntoASolid()
+        {
+            var grid = MakeTank();
+            var jelly = SpawnWithRepel(grid, 0.12f);
+            for (int i = 0; i < 4000; i++)
+            {
+                jelly.Step(1f / 40f, 0.5f, -0.5f, 0.5f);
+                Assert.IsTrue(JellyBoundary.IsFluid(grid, jelly.X, jelly.Y, jelly.Z),
+                    $"t={i} で固体セルに入った");
+            }
+        }
+
+        /// <summary>
+        /// **反発は水の中ほどでは効かない。** 帯の外では力学を変えないこと
+        /// （効きっぱなしだと遊泳速度の較正が狂う）。
+        /// </summary>
+        [Test]
+        public void Wall_RepulsionDoesNotActFarFromWalls()
+        {
+            var grid = MakeTank();
+            var plain = SpawnWithRepel(grid, 0f);
+            var repel = SpawnWithRepel(grid, 0.12f);
+
+            // 中央付近にいる 400 ステップのあいだは同じ軌跡のはず
+            for (int i = 0; i < 400; i++)
+            {
+                plain.Step(1f / 40f, 0f, 0f, 0f);
+                repel.Step(1f / 40f, 0f, 0f, 0f);
+            }
+            Assert.AreEqual(plain.X, repel.X, 1e-6f, "壁から遠いのに軌跡が変わった");
+            Assert.AreEqual(plain.Z, repel.Z, 1e-6f, "壁から遠いのに軌跡が変わった");
+        }
 }
 }

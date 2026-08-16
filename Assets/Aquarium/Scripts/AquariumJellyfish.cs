@@ -1,4 +1,4 @@
-using BlockField.SimCore.Fluid;
+﻿using BlockField.SimCore.Fluid;
 using UnityEngine;
 
 namespace BlockField.Aquarium
@@ -24,12 +24,25 @@ namespace BlockField.Aquarium
         /// </summary>
         public static readonly float[] BellDiameterChoices = { 0.10f, 0.15f, 0.25f };
 
+        /// <summary>
+        /// 壁面での反発の強さ (m/s)。実機で振る。
+        ///
+        /// 【なぜ振れる形にするか】役割は「壁に沿って離れていく」ことで、
+        /// **弾かれるように見えると不自然**になる。適正値は見た目で決めるしかない。
+        /// 遊泳は 0.04 m/s なので、それを下回ると押し続ける推力に勝てず張り付きが残る。
+        /// 0.00 は反発なし（軸ごとの拒否だけ）で、比較のために置いてある。
+        /// </summary>
+        public static readonly float[] WallRepelChoices = { 0.10f, 0.20f, 0.00f, 0.05f };
+
         [SerializeField] AquariumFlow m_Flow;
         [SerializeField] int m_BellIndex = 1;
+        [SerializeField] int m_RepelIndex;
 
         public AquariumFlow flow { get => m_Flow; set => m_Flow = value; }
 
         public int BellIndex => m_BellIndex;
+        public int RepelIndex => m_RepelIndex;
+        public float WallRepelSpeed => WallRepelChoices[m_RepelIndex];
         public float BellDiameter => BellDiameterChoices[m_BellIndex];
 
         /// <summary>クラゲ本体。焼き込みが済むまで null。</summary>
@@ -116,6 +129,28 @@ namespace BlockField.Aquarium
             m_WinDriftZ = Body.DriftPathZ;
         }
 
+        /// <summary>
+        /// 壁の反発の強さを切り替える。**位置は引き継ぐ**（湧かせ直さない）。
+        /// 張り付いている個体がその場で離れるかを見たいので、作り直すと確認にならない。
+        /// </summary>
+        public void CycleWallRepel()
+        {
+            m_RepelIndex = (m_RepelIndex + 1) % WallRepelChoices.Length;
+            if (Body != null)
+            {
+                var p = JellyParams.Default;
+                p.BellDiameter = BellDiameter;
+                p.WallRepelSpeed = WallRepelSpeed;
+                var moved = new Jellyfish(p, Body.X, Body.Y, Body.Z, m_Flow.Field.Grid);
+                Body = moved;
+                m_WindowStep = 0;
+                m_WinSwimX = m_WinSwimZ = 0f;
+                m_WinDriftX = m_WinDriftY = m_WinDriftZ = 0f;
+                SwimSpeedMean = DriftSpeedMean = 0f;
+            }
+            Debug.Log($"[Aquarium] 壁の反発を {WallRepelSpeed:F2} m/s に切り替え");
+        }
+
         /// <summary>傘径を切り替える。位置は引き継がず、湧かせ直す。</summary>
         public void CycleBellDiameter()
         {
@@ -134,6 +169,7 @@ namespace BlockField.Aquarium
 
             var p = JellyParams.Default;
             p.BellDiameter = BellDiameter;
+            p.WallRepelSpeed = WallRepelSpeed;
             Body = new Jellyfish(p, cx, cy, cz, g);
 
             m_WindowStep = 0;

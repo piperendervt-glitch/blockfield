@@ -85,6 +85,16 @@ namespace BlockField.Aquarium
         public Preset Current => Presets[m_PresetIndex];
         public int DrawnParticles { get; private set; }
 
+        /// <summary>
+        /// 固体セルの中にいる粒子の数。**0 であるべき**値。
+        ///
+        /// 境界ランプは壁の中の流速をほぼ 0 にするので、入り込んだ粒子は寿命が
+        /// 尽きるまでその場で静止する。オフラインの実測で常時 7〜11% が壁の中に
+        /// いた。移流で固体判定を入れたので 0 になるはずだが、**実機で見るものでは
+        /// なくログで確かめる数値**なので、ここで数えて毎秒のログに出す。
+        /// </summary>
+        public int ParticlesInSolid { get; private set; }
+
         // View 専用の乱数。SimCore の Rng には触れない
         System.Random m_ViewRng = new System.Random(12345);
 
@@ -182,6 +192,7 @@ namespace BlockField.Aquarium
         {
             var preset = Current;
             var g = field.Grid;
+            int stuck = 0;
             for (int i = 0; i < m_Position.Length; i++)
             {
                 var p = m_Position[i];
@@ -201,6 +212,7 @@ namespace BlockField.Aquarium
                 // オフラインで測ると常時 7〜11% が壁の中で止まっていた。
                 // 壁の中に浮かぶ静止点は水に見えないうえ、実効的な粒子密度も下げる
                 bool inSolid = !outside && IsSolidAt(g, p);
+                if (inSolid) stuck++;
 
                 // 寿命が尽きたら別の場所へ。**淀みに全部溜まるのを防ぐ**ためで、
                 // 流れが遅い所ほど滞在が長くなる性質（走化性で既知）への対処でもある
@@ -211,6 +223,7 @@ namespace BlockField.Aquarium
                 }
                 m_Position[i] = p;
             }
+            ParticlesInSolid = stuck;
         }
 
         void Draw(FlowField field)

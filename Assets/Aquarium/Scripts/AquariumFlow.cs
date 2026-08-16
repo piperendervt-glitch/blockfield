@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using BlockField.SimCore.Fluid;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
@@ -685,6 +685,7 @@ namespace BlockField.Aquarium
                 $"目標流速={TargetSpeed:F3}m/s 最大流速={MaxSpeed:F4}m/s " +
                 $"粒子={(m_Particles != null ? m_Particles.DrawnParticles : -1)}" +
                 $"({(m_Particles != null ? m_Particles.Current.Name : "-")}) " +
+                $"壁の中={(m_Particles != null ? m_Particles.ParticlesInSolid : -1)} " +
                 $"tick={Field.TickCount} FPS={1f / Mathf.Max(1e-4f, Time.smoothDeltaTime):F1} " +
                 $"アンカーずれ={AnchorDriftMeters * 100f:F1}cm/{AnchorDriftDegrees:F2}°" +
                 $"{(RecenterDetected ? " **リセンタ検出済み**" : "")}");
@@ -699,6 +700,7 @@ namespace BlockField.Aquarium
                     $"遊泳={m_Jelly.SwimSpeedMean:F4}m/s 流れ={m_Jelly.DriftSpeedMean:F4}m/s " +
                     $"比={m_Jelly.SwimToFlowRatio:F2} " +
                     $"(瞬時 遊泳={body.SwimSpeed:F4} 流れ={m_Jelly.FlowAt.magnitude:F4}) " +
+                    $"反発={body.WallRepelSpeed:F2}m/s " +
                     $"位置=({body.X:F2}, {body.Y:F2}, {body.Z:F2}){JellyCellState(body)} " +
                     $"世界={JellyWorldPosition(body):F2} step={body.StepCount}");
             }

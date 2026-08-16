@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using BlockField.SimCore.Excitable;
 
 namespace BlockField.SimCore.Fluid
@@ -82,6 +82,9 @@ namespace BlockField.SimCore.Fluid
 
         /// <summary>1拍動のステップ数。平均を取る窓の長さに使う。</summary>
         public int PulsePeriodTicks => m_Params.PulsePeriodTicks;
+
+        /// <summary>壁面での反発の強さ (m/s)。実機で振るためパネルとログに出す。</summary>
+        public float WallRepelSpeed => m_Params.WallRepelSpeed;
 
         /// <summary>モデル速度を m/s へ換算する係数（診断用）。</summary>
         public float SpeedScale => m_SpeedScale;
@@ -190,10 +193,15 @@ namespace BlockField.SimCore.Fluid
             m_ModelVx *= (1f - m_Params.Drag);
             m_ModelVz *= (1f - m_Params.Drag);
 
+            // 壁から離れる向きの速度。壁は環境の情報で、神経が決めた推力は書き換えない
+            JellyBoundary.Repulsion(m_Tank, X, Y, Z,
+                m_Params.WallBandCells, m_Params.WallRepelSpeed,
+                out float rx, out float ry, out float rz);
+
             // 流れが運ぶ。自力遊泳は水平のみ（リング平面が水平に固定されているため）
-            float toX = X + (SwimVx + flowVx) * dtSeconds;
-            float toY = Y + flowVy * dtSeconds;
-            float toZ = Z + (SwimVz + flowVz) * dtSeconds;
+            float toX = X + (SwimVx + flowVx + rx) * dtSeconds;
+            float toY = Y + (flowVy + ry) * dtSeconds;
+            float toZ = Z + (SwimVz + flowVz + rz) * dtSeconds;
 
             // 壁の中へは入らせない。壁は環境の情報で、神経が決めた推力は書き換えない
             JellyBoundary.ClampMove(m_Tank, X, Y, Z, ref toX, ref toY, ref toZ);

@@ -1,4 +1,4 @@
-using BlockField.SimCore.Excitable;
+﻿using BlockField.SimCore.Excitable;
 
 namespace BlockField.SimCore.Fluid
 {
@@ -41,6 +41,16 @@ namespace BlockField.SimCore.Fluid
         /// <summary>擬似流体の抗力（神経1ステップあたり）。jelly_1 の J3 と同じ 0.1。</summary>
         public float Drag;
 
+        /// <summary>
+        /// 壁面での反発の強さ (m/s)。0 で無効。
+        /// 推力の向きは一定なので、これが無いと壁際に張り付いたままになる
+        /// （<see cref="JellyBoundary.Repulsion"/>）。
+        /// </summary>
+        public float WallRepelSpeed;
+
+        /// <summary>反発が働く帯の幅（セル数）。壁からこの距離より外では効かない。</summary>
+        public float WallBandCells;
+
         /// <summary>興奮性媒質のパラメータ。R₀=14 など jelly_1 の確定値。</summary>
         public ExcitableParams Excitable;
 
@@ -52,6 +62,13 @@ namespace BlockField.SimCore.Fluid
             PacemakerCell = 8,
             RingCells = 16,
             Drag = 0.1f,
+            // 【0.06 では足りなかった】反発は壁からの距離で二次に落ちるので、
+            // 釣り合う位置での強さが遊泳 0.04 m/s を上回る必要がある。
+            // 帯 2.5 セルで 0.06 だと釣り合いが d≈0.46 セル（3.7cm）になり、
+            // 軸ごとの拒否で止まる位置とほぼ同じで張り付きと見分けがつかない。
+            // 0.10 なら d≈0.92 セル（約7cm）で浮くので離れて見える
+            WallRepelSpeed = 0.10f,
+            WallBandCells = 2.5f,
             Excitable = ExcitableParams.Default,
         };
     }

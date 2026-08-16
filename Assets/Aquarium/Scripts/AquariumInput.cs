@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEngine.InputSystem;
 
 namespace BlockField.Aquarium
@@ -11,6 +11,8 @@ namespace BlockField.Aquarium
     /// - **左手Y: 粒子プリセット**（微粒子 → 粗い粒 → 速い所が明るい）。水に見えるかを探す
     /// - **右手A: 目標流速**（0.03 → 0.08 → 0.15 m/s）。速さは一発で当たらないので振る
     /// - **右手B: 傘径**（10 → 15 → 25 cm）。実部屋での見え方に直結する
+    /// - **右手グリップ: 壁の反発**（0.06 → 0.12 → 0.00 → 0.03 m/s）。
+    ///   止水でクラゲが壁に張り付く件の調整。弾かれて見えない強さを探す
     /// - **左手グリップ: デバッグ表示**（なし → 固体セル(遮蔽あり) → 固体セル(遮蔽なし)
     ///   → 水槽の外接箱）。**焼き込んだ壁が現実の壁と重なっているか**を目で確かめる
     ///
@@ -35,6 +37,7 @@ namespace BlockField.Aquarium
         InputAction m_SpeedAction;
         InputAction m_BellAction;
         InputAction m_DebugAction;
+        InputAction m_RepelAction;
 
         void OnEnable()
         {
@@ -63,6 +66,16 @@ namespace BlockField.Aquarium
                 "<XRController>{LeftHand}/gripPressed");
             m_DebugAction.performed += OnDebug;
             m_DebugAction.Enable();
+
+            m_RepelAction = new InputAction("AquariumRepel", InputActionType.Button,
+                "<XRController>{RightHand}/gripPressed");
+            m_RepelAction.performed += OnRepel;
+            m_RepelAction.Enable();
+        }
+
+        void OnRepel(InputAction.CallbackContext _)
+        {
+            if (m_Jelly != null) m_Jelly.CycleWallRepel();
         }
 
         void OnDebug(InputAction.CallbackContext _)
@@ -106,6 +119,13 @@ namespace BlockField.Aquarium
                 m_DebugAction.Disable();
                 m_DebugAction.Dispose();
                 m_DebugAction = null;
+            }
+            if (m_RepelAction != null)
+            {
+                m_RepelAction.performed -= OnRepel;
+                m_RepelAction.Disable();
+                m_RepelAction.Dispose();
+                m_RepelAction = null;
             }
         }
 

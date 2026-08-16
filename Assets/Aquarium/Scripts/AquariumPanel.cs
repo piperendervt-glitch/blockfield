@@ -47,6 +47,8 @@ namespace BlockField.Aquarium
             // パネルで読んでも比の判定に使えない。直近1拍動の平均を出す
             return $"Jelly[R-B]: {body.BellDiameter * 100f:F0}cm " +
                 $"({m_Jelly.BellIndex + 1}/{AquariumJellyfish.BellDiameterChoices.Length})" +
+                $"   repel[R-Grip]={m_Jelly.WallRepelSpeed:F2}" +
+                $"({m_Jelly.RepelIndex + 1}/{AquariumJellyfish.WallRepelChoices.Length})" +
                 $"   pulse={body.PulseCount}   swim={m_Jelly.SwimSpeedMean:F3}" +
                 $"   flow={m_Jelly.DriftSpeedMean:F3}"
                 // 止水（流速 0.00）では比が定義できない。0.00 と出すと
