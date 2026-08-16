@@ -77,6 +77,7 @@ function fireNerve(i,t){
 }
 function step(){
   const t=world.t;
+  world.lastJ=0;   // [計測用] 物理には影響しない。下で J が出たら記録する
   if(world.pace && t%230===10){ fireNerve(0,t); fireNerve(M-1,t); }  // bilateral -> straight pulse
   for(let i=0;i<M;i++){
     if(bell.fireAt[i]===t) fireNerve(i,t);
@@ -118,6 +119,7 @@ function step(){
     const jv=dA/ap;                                     // jet speed (px/tick)
     const dux=Math.sin(bell.tilt), duy=-Math.cos(bell.tilt);   // apex = swim direction
     const J=Math.min(1.0, 0.0035*dA*jv);
+    world.lastJ=J;   // [計測用] 読むだけ。dynamics には使わない
     bell.vx+=dux*J; bell.vy+=duy*J;
     const mx=(bell.px[0]+bell.px[M-1])/2, my=(bell.py[0]+bell.py[M-1])/2;
     for(let k=-1;k<=1;k++){                             // matching momentum into the water
