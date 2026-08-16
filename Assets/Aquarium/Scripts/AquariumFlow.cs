@@ -42,7 +42,14 @@ namespace BlockField.Aquarium
         /// 「流されている」のか「泳いでいる」のかが見分けられる。
         /// Phase B（流れだけを見せる段）では 0.08 が良かった。
         /// </summary>
-        public static readonly float[] TargetSpeedChoices = { 0.03f, 0.08f, 0.15f };
+        /// <remarks>
+        /// **0.00 は判定用の止水モード。** 流れがある状態では、クラゲが自力で
+        /// 進んでいるのか流されているのかを目で見分けられない（周囲との相対速度が
+        /// 見えないため、原理的に難しい）。止水なら動く分はすべて自力なので、
+        /// 一意に判別できる。2026-08-16 の実機で swim/flow の判定ができなかった
+        /// のはこれが無かったため。
+        /// </remarks>
+        public static readonly float[] TargetSpeedChoices = { 0.03f, 0.08f, 0.15f, 0.00f };
 
         [SerializeField] RoomScanner m_Scanner;
         [SerializeField] DioramaOrigin m_Origin;

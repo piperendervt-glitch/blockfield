@@ -48,8 +48,12 @@ namespace BlockField.Aquarium
             return $"Jelly[R-B]: {body.BellDiameter * 100f:F0}cm " +
                 $"({m_Jelly.BellIndex + 1}/{AquariumJellyfish.BellDiameterChoices.Length})" +
                 $"   pulse={body.PulseCount}   swim={m_Jelly.SwimSpeedMean:F3}" +
-                $"   flow={m_Jelly.DriftSpeedMean:F3}" +
-                $"   swim/flow={m_Jelly.SwimToFlowRatio:F2}";
+                $"   flow={m_Jelly.DriftSpeedMean:F3}"
+                // 止水（流速 0.00）では比が定義できない。0.00 と出すと
+                // 「自力で進んでいない」と読めてしまうので、判定の言葉で出す
+                + (m_Jelly.DriftSpeedMean > 1e-4f
+                    ? $"   swim/flow={m_Jelly.SwimToFlowRatio:F2}"
+                    : "   [止水: 動く分はすべて自力]");
         }
 
         /// <summary>

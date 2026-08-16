@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -495,7 +495,21 @@ namespace BlockField.Tests.EditMode
                 UnityEngine.Application.dataPath, "Scripts", "SimCore", "Excitable");
             Assert.IsTrue(Directory.Exists(dir), $"走査対象が見つからない: {dir}");
 
-            var files = Directory.GetFiles(dir, "*.cs");
+            var fileList = new List<string>(Directory.GetFiles(dir, "*.cs"));
+
+            // 【Fluid/Jellyfish.cs も走査する】水槽のクラゲは推力の計算を
+            // ここに持っており、M-J2b が主張しているのはまさにその推力が
+            // 方向を計算せずに出ることである。ところが走査対象は Excitable だけで、
+            // **Fluid 側の推力コードは保護の外**にあった（2026-08-16 の指摘）。
+            //
+            // 壁の扱い（法線・距離）は環境の情報であって動物の内部状態ではないので、
+            // JellyBoundary.cs は対象に入れない。同じ理由で別ファイルに分けてある。
+            string jellyfish = Path.Combine(
+                UnityEngine.Application.dataPath, "Scripts", "SimCore", "Fluid", "Jellyfish.cs");
+            Assert.IsTrue(File.Exists(jellyfish), $"走査対象が見つからない: {jellyfish}");
+            fileList.Add(jellyfish);
+
+            var files = fileList.ToArray();
             Assert.Greater(files.Length, 0, "走査対象のソースが1つも無い");
 
             var forbidden = new (string name, string pattern)[]

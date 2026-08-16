@@ -65,6 +65,12 @@ namespace BlockField.Aquarium
                          Brightness = 0.25f, Contrast = 2.0f, LifeMin = 20f, LifeMax = 60f },
         };
 
+        /// <summary>クラゲ近傍とみなす距離（傘径の倍数）。</summary>
+        const float k_HighlightRadiusInBells = 3f;
+
+        /// <summary>近傍の粒子を大きく見せる倍率。</summary>
+        const float k_HighlightScale = 1.6f;
+
         [SerializeField] AquariumFlow m_Flow;
         [SerializeField] Material m_Material;
         [SerializeField] AnchorSpaceRenderer m_Space;
@@ -87,6 +93,7 @@ namespace BlockField.Aquarium
         float[] m_Life;
         Mesh m_Mesh;
         Matrix4x4[] m_Batch;
+        Matrix4x4[] m_NearBatch;
         MaterialPropertyBlock m_Block;
         int m_BuiltFor = -1;
 
@@ -140,6 +147,7 @@ namespace BlockField.Aquarium
 
             if (m_Mesh == null) m_Mesh = BuildQuad();
             m_Batch = new Matrix4x4[1023];
+            m_NearBatch = new Matrix4x4[1023];
             m_Block = new MaterialPropertyBlock();
             m_BuiltFor = m_PresetIndex;
         }
@@ -157,6 +165,14 @@ namespace BlockField.Aquarium
                     g.OriginZ + (z + (float)m_ViewRng.NextDouble()) * g.CellSize);
             }
             return new Vector3(g.OriginX, g.OriginY, g.OriginZ);
+        }
+
+        static bool IsSolidAt(FlowGrid g, Vector3 p)
+        {
+            int x = Mathf.FloorToInt((p.x - g.OriginX) / g.CellSize);
+            int y = Mathf.FloorToInt((p.y - g.OriginY) / g.CellSize);
+            int z = Mathf.FloorToInt((p.z - g.OriginZ) / g.CellSize);
+            return g.InRange(x, y, z) && g.IsSolid(x, y, z);
         }
 
         float RandomLife(Preset preset) =>
@@ -180,9 +196,15 @@ namespace BlockField.Aquarium
                     || p.y > g.OriginY + g.Height * g.CellSize
                     || p.z > g.OriginZ + g.Depth * g.CellSize;
 
+                // 【固体セルに入ったら湧き直す】境界ランプは壁の中の流速をほぼ 0 に
+                // するので、入り込んだ粒子は**寿命が尽きるまでその場で静止する**。
+                // オフラインで測ると常時 7〜11% が壁の中で止まっていた。
+                // 壁の中に浮かぶ静止点は水に見えないうえ、実効的な粒子密度も下げる
+                bool inSolid = !outside && IsSolidAt(g, p);
+
                 // 寿命が尽きたら別の場所へ。**淀みに全部溜まるのを防ぐ**ためで、
                 // 流れが遅い所ほど滞在が長くなる性質（走化性で既知）への対処でもある
-                if (outside || m_Life[i] <= 0f)
+                if (outside || inSolid || m_Life[i] <= 0f)
                 {
                     p = RandomFluidPoint(field);
                     m_Life[i] = RandomLife(preset);
@@ -203,7 +225,18 @@ namespace BlockField.Aquarium
             if (!m_Space.TryGetBillboardRotation(out var faceCamera)) return;
 
             float reference = Mathf.Max(1e-5f, (float)m_Flow.MaxSpeed);
-            int batched = 0;
+            int batched = 0, near = 0;
+
+            // 【クラゲの周りを明るくする】流れがある状態では、クラゲが自力で
+            // 進んでいるのか流されているのかを目で見分けられない（周囲との相対速度が
+            // 見えないため）。近傍の粒子を目立たせると、クラゲが粒子を追い越すのか
+            // 一緒に動くのかで判別できる。**流速 0.00 が「判定用」なのに対し、
+            // こちらは流れがある状態のまま見るためのもの**
+            var body = m_Flow.jelly != null ? m_Flow.jelly.Body : null;
+            bool hasJelly = body != null;
+            var jellyPos = hasJelly ? new Vector3(body.X, body.Y, body.Z) : Vector3.zero;
+            float nearRadius = hasJelly ? body.BellDiameter * k_HighlightRadiusInBells : 0f;
+            float nearSq = nearRadius * nearRadius;
 
             for (int i = 0; i < m_Position.Length; i++)
             {
@@ -216,7 +249,18 @@ namespace BlockField.Aquarium
                 float scale = m_Scale[i] * (0.7f + 0.6f * Mathf.Clamp01(speed));
 
                 // 部屋座標のまま渡す。ワールドへの変換は AnchorSpaceRenderer の仕事
-                m_Batch[batched++] = Matrix4x4.TRS(p, faceCamera, Vector3.one * scale);
+                var m = Matrix4x4.TRS(p, faceCamera, Vector3.one * scale);
+
+                if (hasJelly && (p - jellyPos).sqrMagnitude < nearSq)
+                {
+                    // 近傍は別バッチ。明度がバッチ内で共通になる制約を逆に使う
+                    m_NearBatch[near++] = Matrix4x4.TRS(p, faceCamera,
+                        Vector3.one * scale * k_HighlightScale);
+                    if (near == m_NearBatch.Length) { FlushNear(near); near = 0; }
+                    continue;
+                }
+
+                m_Batch[batched++] = m;
 
                 // 明度はインスタンスごとに変えたいが、DrawMeshInstanced では
                 // バッチ内で共通になる。速度帯でバッチを割る手もあるが、
@@ -227,10 +271,16 @@ namespace BlockField.Aquarium
                     batched = 0;
                 }
             }
-            if (batched > 0)
-            {
-                Flush(batched, preset.Brightness);
-            }
+            if (batched > 0) Flush(batched, preset.Brightness);
+            if (near > 0) FlushNear(near);
+        }
+
+        /// <summary>クラゲ近傍の粒子。明るく、やや大きく描いて目立たせる。</summary>
+        void FlushNear(int count)
+        {
+            m_Block.SetColor("_BaseColor", new Color(1f, 0.85f, 0.45f, 1f));
+            DrawnParticles += m_Space.DrawInstancedRaw(m_Mesh, m_Material, m_NearBatch,
+                count, m_Block);
         }
 
         void Flush(int count, float brightness)

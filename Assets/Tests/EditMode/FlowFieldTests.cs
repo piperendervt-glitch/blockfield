@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using BlockField.SimCore.Fluid;
@@ -621,5 +621,55 @@ namespace BlockField.Tests.EditMode
             double delta = Math.Sqrt((bx - ax) * (bx - ax) + (by - ay) * (by - ay) + (bz - az) * (bz - az));
             Assert.Greater(delta, 1e-5, "時間が経っても流れが変わらない");
         }
-    }
+    
+        /// <summary>
+        /// **目標流速 0 で止水になること（NaN を出さないこと）。**
+        ///
+        /// 0.00 は実機の判定用モード。流れがある状態ではクラゲが自力で進んでいるのか
+        /// 流されているのかを目で見分けられないので、止水にして「動く分はすべて自力」
+        /// という一意な状況を作る。正規化は中央値で割るので、0 を入れる経路を
+        /// 実際に通しておく。
+        /// </summary>
+        [Test]
+        public void TargetSpeedZero_ProducesStillWaterWithoutNaN()
+        {
+            var grid = FlowGrid.FromBounds(0f, 0f, 0f, 2f, 2f, 2f, 0.1f);
+            FlowBoundaryBaker.SealBorders(grid);
+            FlowBoundaryBaker.BakeDistance(grid);
+
+            var p = FlowParams.Default;
+            p.TargetSpeed = 0f;
+            var field = new FlowField(grid, p);
+            field.RebuildAll();
+            for (int t = 0; t < 20; t++) field.Tick();
+
+            double max = 0;
+            for (int z = 0; z < grid.Depth; z++)
+                for (int y = 0; y < grid.Height; y++)
+                    for (int x = 0; x < grid.Width; x++)
+                    {
+                        field.VelocityAt(x, y, z, out float vx, out float vy, out float vz);
+                        Assert.IsFalse(float.IsNaN(vx) || float.IsNaN(vy) || float.IsNaN(vz),
+                            $"NaN が出た ({x},{y},{z})");
+                        max = Math.Max(max, Math.Sqrt(vx * vx + vy * vy + vz * vz));
+                    }
+
+            Assert.AreEqual(0.0, max, 1e-9, $"止水にならなかった（最大 {max}）");
+        }
+
+        /// <summary>止水でも粒子や描画が壊れないこと（ハッシュが取れる = 状態が健全）。</summary>
+        [Test]
+        public void TargetSpeedZero_StateStaysWellFormed()
+        {
+            var grid = FlowGrid.FromBounds(0f, 0f, 0f, 2f, 2f, 2f, 0.1f);
+            FlowBoundaryBaker.SealBorders(grid);
+            FlowBoundaryBaker.BakeDistance(grid);
+
+            var p = FlowParams.Default;
+            p.TargetSpeed = 0f;
+            var a = new FlowField(grid, p); a.RebuildAll();
+            var b = new FlowField(grid, p); b.RebuildAll();
+            Assert.AreEqual(a.ComputeContentHash(), b.ComputeContentHash());
+        }
+}
 }
