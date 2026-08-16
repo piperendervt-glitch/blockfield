@@ -258,6 +258,101 @@ foreach (var (label, stims) in cases)
     Console.WriteLine($"  {label,-20} {a.heading,8:F1}°/{a.dist,-8:F3} {b.heading,8:F1}°/{b.dist,-8:F3} {(same ? "同一" : "**違う**")}");
 }
 
+// ---------------------------------------------------------------------------
+// 参考: J3a の区間平均速度（閾値の妥当性を見るための素の実測）
+// ---------------------------------------------------------------------------
+
+static double[] IntervalSpeeds(int pace, int tPace, int r0, params (int a, int b)[] windows)
+{
+    var p = ExcitableParams.Default;
+    p.RefractoryTicks = r0;
+    var s = new RingSwimmer(N);
+    int last = windows.Max(w => w.b);
+    var xs = new double[last + 1];
+    var ys = new double[last + 1];
+    for (int t = 0; t < last; t++)
+    {
+        if (t % tPace == 0) s.TryStimulate(pace, p);
+        s.Step(p, 0.1);
+        xs[t + 1] = s.X; ys[t + 1] = s.Y;
+    }
+    return windows.Select(w =>
+    {
+        double dx = xs[w.b] - xs[w.a], dy = ys[w.b] - ys[w.a];
+        return Math.Sqrt(dx * dx + dy * dy) / (w.b - w.a);
+    }).ToArray();
+}
+
+Console.WriteLine();
+Console.WriteLine("=== 参考: J3a 区間平均速度（pace=cell8 / T=40 / R₀=14 / drag=0.1）===");
+{
+    var wins = new[] { (200, 400), (400, 800), (800, 1600) };
+    var v = IntervalSpeeds(8, 40, 14, wins);
+    for (int i = 0; i < wins.Length; i++)
+    {
+        Console.WriteLine($"  区間 {wins[i].Item1,4}-{wins[i].Item2,-5} 平均速度 {v[i]:F6}");
+    }
+    double mean = v.Average();
+    Console.WriteLine($"  相互の最大乖離: {v.Max(x => Math.Abs(x - mean) / mean) * 100:F3}%（平均基準）");
+    Console.WriteLine($"  最大/最小の比 : {v.Max() / v.Min():F6}  → 乖離 {(v.Max() / v.Min() - 1) * 100:F3}%");
+
+    // 追記1 の旧基準（累積距離比）も併記
+    var cum = IntervalSpeeds(8, 40, 14, (0, 100), (0, 200), (0, 400));
+    double d100 = cum[0] * 100, d200 = cum[1] * 200, d400 = cum[2] * 400;
+    Console.WriteLine($"  参考（追記1 の旧基準・累積距離）: {d100:F1} / {d200:F1} / {d400:F1}");
+    Console.WriteLine($"      線形からの乖離: t=200 {(d200 / (2 * d100) - 1) * 100:+0.0;-0.0}% "
+        + $"/ t=400 {(d400 / (4 * d100) - 1) * 100:+0.0;-0.0}%");
+}
+
+// 48シード版。シードから ペースメーカー位置 / g / drag を作る（M-J2c と同じ乱数列）
+Console.WriteLine();
+Console.WriteLine("=== 参考: J3a 48シード（pace位置 + g/drag の揺らぎ、T=40 / R₀=14）===");
+{
+    var wins = new[] { (200, 400), (400, 800), (800, 1600) };
+    double worst = 0; int worstSeed = -1;
+    for (uint seed = 1000; seed < 1048; seed++)
+    {
+        var r = RngStream(seed).GetEnumerator();
+        r.MoveNext(); int pace = (int)(r.Current * 16);
+        r.MoveNext(); double g = 0.75 + r.Current * 0.17;
+        r.MoveNext(); double drag = 0.05 + r.Current * 0.15;
+
+        var p = ExcitableParams.Default;
+        p.Attenuation = g;
+        var s = new RingSwimmer(N);
+        var xs = new double[1601]; var ys = new double[1601];
+        for (int t = 0; t < 1600; t++)
+        {
+            if (t % 40 == 0) s.TryStimulate(pace, p);
+            s.Step(p, drag);
+            xs[t + 1] = s.X; ys[t + 1] = s.Y;
+        }
+        var v = wins.Select(w =>
+            Math.Sqrt(Math.Pow(xs[w.Item2] - xs[w.Item1], 2)
+                    + Math.Pow(ys[w.Item2] - ys[w.Item1], 2)) / (w.Item2 - w.Item1)).ToArray();
+        double dev = (v.Max() / v.Min() - 1) * 100;
+        if (dev > worst) { worst = dev; worstSeed = (int)seed; }
+    }
+    Console.WriteLine($"  48シードの最大乖離: {worst:F4}%（最悪 seed={worstSeed}）");
+}
+
+Console.WriteLine();
+Console.WriteLine("  4方位の t=1600 移動距離:");
+foreach (int cell in new[] { 0, 4, 8, 12 })
+{
+    var (h, d) = SwimWave(Array.Empty<(int, int)>(), steps: 1600, pace: cell, tPace: 40);
+    Console.WriteLine($"    pace=cell{cell,2} → dist {d,8:F1}  heading {h,7:F1}°");
+}
+
+Console.WriteLine();
+Console.WriteLine("  4方位の進行方向（steps=400）:");
+foreach (int cell in new[] { 0, 4, 8, 12 })
+{
+    var (h, d) = SwimWave(Array.Empty<(int, int)>(), steps: 400, pace: cell, tPace: 40);
+    double exp = (360.0 * cell / N + 180.0) % 360.0;
+    Console.WriteLine($"    pace=cell{cell,2} → {h,7:F1}°（期待 {exp,5:F1}°、誤差 {AngleError(h, exp),5:F2}°）dist {d,7:F1}");
+}
+
 // 2つ目の刺激が実際に入ったのかを直接見る。
 // 「入らない」なら結果が R₀ に依らないのは当然であって、
 // R₀ が無関係だという主張にはならない
