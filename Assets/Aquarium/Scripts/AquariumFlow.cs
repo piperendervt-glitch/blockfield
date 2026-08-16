@@ -104,6 +104,16 @@ namespace BlockField.Aquarium
 
         /// <summary>焼き直しの通し番号。表示側がキャッシュを作り直す合図に使う。</summary>
         public long BakeSerial { get; private set; }
+
+        /// <summary>
+        /// ARMeshManager から取れた**ワールド座標のまま**の頂点（焼き込みの元データ）。
+        ///
+        /// デバッグ表示がこれを**無変換で**描く。焼き込みが通る座標変換
+        /// （アンカー逆変換 → 主軸ヨー → 描画で戻す）を一切通さないので、
+        /// 「元データは部屋に合っているのに焼き込み後がずれる」のか
+        /// 「元データからずれている」のかを切り分けられる。
+        /// </summary>
+        public float[] ScanWorldVertices { get; private set; }
         public double TickMs { get; private set; }
         public double MaxSpeed { get; private set; }
         public string Status { get; private set; } = "スキャン待ち";
@@ -240,6 +250,7 @@ namespace BlockField.Aquarium
             // 縁を塞ぐ前に、現実の壁・家具だけのマスクを控える（デバッグ表示用）
             MeshSolidMask = new bool[grid.CellCount];
             for (int i = 0; i < grid.CellCount; i++) MeshSolidMask[i] = grid.IsSolidAt(i);
+            ScanWorldVertices = scan.Vertices;
             BakeSerial++;
 
             FlowBoundaryBaker.SealBorders(grid);
@@ -462,6 +473,26 @@ namespace BlockField.Aquarium
             }
             return (maxX - minX) * (maxZ - minZ);
         }
+
+        /// <summary>
+        /// **部屋座標 → アンカー座標**の回転。描画側は必ずこれを使うこと。
+        ///
+        /// 【符号を間違えた経緯】焼き込みは <see cref="RotateAroundY"/> に -yaw を渡して
+        /// アンカー座標を部屋座標へ移す。描画側はその逆を掛けて戻す必要があるが、
+        /// 2つの回転は**符号の規約が逆**である:
+        ///   RotateAroundY(v, t)      : x' = x cos t - z sin t   (= Unity の Ry(-t))
+        ///   Quaternion.Euler(0,t,0)  : x' = x cos t + z sin t   (= Unity の Ry(+t))
+        /// 描画側は素朴に <c>Quaternion.Euler(0, RoomYawDegrees, 0)</c> と書いていたので、
+        /// **戻すどころか同じ向きに二重に掛かっていた**。ヨー 37.8° に対し 2倍の 75.6° ずれ、
+        /// 水槽が部屋と一致しなかった（2026-08-16 の実機報告）。
+        ///
+        /// クラゲの傾きを調べたとき「回転が二重に掛かっていないか」を見たが、
+        /// **適用回数だけを数えて向きを見なかった**ため見落とした。
+        /// 回転を書く場所を1か所に集め、往復が恒等になることをテストで固定する
+        /// （AquariumGridAlignmentTests.RoomToAnchor_RoundTripIsIdentity）。
+        /// </summary>
+        public static Matrix4x4 RoomToAnchorRotation(float roomYawDegrees) =>
+            Matrix4x4.Rotate(Quaternion.Euler(0f, -roomYawDegrees, 0f));
 
         /// <summary>頂点群を Y 軸まわりに deg だけ回す（その場で書き換える）。</summary>
         internal static void RotateAroundY(float[] verts, float deg)

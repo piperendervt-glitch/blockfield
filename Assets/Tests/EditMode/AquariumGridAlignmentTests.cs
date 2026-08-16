@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using BlockField.Aquarium;
 using NUnit.Framework;
@@ -146,5 +146,56 @@ namespace BlockField.Tests.EditMode
             var (w, d) = HorizontalExtent(verts);
             Assert.LessOrEqual(w * d, 3.0f * 3.0f * 1.02f, "正方形なら面積は増えないはず");
         }
-    }
+    
+        // ================= 部屋座標 ⇄ アンカー座標の往復 =================
+
+        /// <summary>
+        /// **焼き込みが掛けた回転を、描画側が正しく戻せること。**
+        ///
+        /// 焼き込みは <see cref="AquariumFlow.RotateAroundY"/> に -yaw を渡して
+        /// アンカー座標を「部屋座標」へ移す。描画側はその逆を掛けて戻す必要がある。
+        /// ところが両者は**回転の符号の規約が逆**である:
+        ///   RotateAroundY(v, t)  : x' = x cos t - z sin t   (= Unity の Ry(-t))
+        ///   Quaternion.Euler(0,t,0): x' = x cos t + z sin t (= Unity の Ry(+t))
+        /// そのため描画側で同じ符号の yaw を渡すと、**戻すどころか二重に掛かる**。
+        /// 2026-08-16 の実機で「水槽の外接箱が部屋と一致しない」と報告された件がこれで、
+        /// ヨー 37.8° に対し 2倍の 75.6° ずれていた。
+        ///
+        /// 数値の一致ではなく**往復が恒等になること**を見る。
+        /// 片方の実装を変えてももう片方が追従しないと落ちる。
+        /// </summary>
+        [Test]
+        public void RoomToAnchor_RoundTripIsIdentity()
+        {
+            foreach (float yaw in new[] { 0f, 15f, 37.8f, 90f, 126.7f })
+            {
+                var anchorLocal = new[] { 1.3f, 0.4f, -0.7f };
+                var room = (float[])anchorLocal.Clone();
+
+                // 焼き込みと同じ向き
+                AquariumFlow.RotateAroundY(room, -yaw);
+
+                // 描画と同じ向き（AquariumDebugView / FlowParticleView / JellyfishView）
+                var back = AquariumFlow.RoomToAnchorRotation(yaw)
+                    .MultiplyPoint3x4(new Vector3(room[0], room[1], room[2]));
+
+                Assert.AreEqual(anchorLocal[0], back.x, 1e-4f, $"yaw={yaw} で x が戻らない");
+                Assert.AreEqual(anchorLocal[1], back.y, 1e-4f, $"yaw={yaw} で y が戻らない");
+                Assert.AreEqual(anchorLocal[2], back.z, 1e-4f, $"yaw={yaw} で z が戻らない");
+            }
+        }
+
+        /// <summary>
+        /// 上のテストが「両方 0 なら通る」ような空振りでないことを見る。
+        /// ヨーが効いていれば、部屋座標はアンカー座標と実際に違う。
+        /// </summary>
+        [Test]
+        public void RoomToAnchor_RotationActuallyMovesThePoint()
+        {
+            var v = new[] { 1.3f, 0.4f, -0.7f };
+            AquariumFlow.RotateAroundY(v, -37.8f);
+            Assert.Greater(Math.Abs(v[0] - 1.3f) + Math.Abs(v[2] + 0.7f), 0.1f,
+                "回転が効いていない（往復テストが空振りになる）");
+        }
+}
 }

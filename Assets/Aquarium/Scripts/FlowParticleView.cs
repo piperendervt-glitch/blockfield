@@ -198,8 +198,7 @@ namespace BlockField.Aquarium
             // 回した座標系で持っている（AquariumFlow.RoomYawDegrees）。
             // ここでその回転を戻さないと、流れが部屋に対して斜めに描かれる
             var anchor = m_AnchorSpace != null ? m_AnchorSpace.localToWorldMatrix : Matrix4x4.identity;
-            var roomToAnchor = Matrix4x4.Rotate(Quaternion.Euler(0f, m_Flow.RoomYawDegrees, 0f));
-            var space = anchor * roomToAnchor;
+            var space = anchor * AquariumFlow.RoomToAnchorRotation(m_Flow.RoomYawDegrees);
             var camera = Camera.main;
             var faceCamera = camera != null ? camera.transform.rotation : Quaternion.identity;
 

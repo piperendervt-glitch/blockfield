@@ -33,12 +33,22 @@ namespace BlockField.Aquarium
             SolidOccluded = 1,
             /// <summary>固体セル（遮蔽なし）。層の全体像が見える。</summary>
             SolidThrough = 2,
+            /// <summary>
+            /// **生メッシュ（ワールド直描き）**。ARMeshManager が返した頂点を
+            /// 焼き込みの座標変換を一切通さずに描く。元データが部屋に合っているかを見る。
+            /// </summary>
+            RawMesh = 3,
+            /// <summary>生メッシュ（水色）と固体セル（橙）を重ねる。ずれの量が目で分かる。</summary>
+            RawMeshAndSolid = 4,
             /// <summary>水槽の外接箱だけ。部屋を覆えているかを見る。</summary>
-            TankBounds = 3,
+            TankBounds = 5,
         }
 
         public static readonly string[] ModeNames =
-            { "なし", "固体セル(遮蔽あり)", "固体セル(遮蔽なし)", "水槽の外接箱" };
+        {
+            "なし", "固体セル(遮蔽あり)", "固体セル(遮蔽なし)",
+            "生メッシュ(ワールド直)", "生メッシュ＋固体セル", "水槽の外接箱",
+        };
 
         /// <summary>点の一辺 (m)。セルより十分小さくしないと位置関係が読めない。</summary>
         const float k_DotSize = 0.025f;
@@ -49,12 +59,14 @@ namespace BlockField.Aquarium
         [SerializeField] AquariumFlow m_Flow;
         [SerializeField] Material m_OccludedMaterial;
         [SerializeField] Material m_ThroughMaterial;
+        [SerializeField] Material m_RawMeshMaterial;
         [SerializeField] Transform m_AnchorSpace;
         [SerializeField] Mode m_Mode = Mode.None;
 
         public AquariumFlow flow { get => m_Flow; set => m_Flow = value; }
         public Material occludedMaterial { get => m_OccludedMaterial; set => m_OccludedMaterial = value; }
         public Material throughMaterial { get => m_ThroughMaterial; set => m_ThroughMaterial = value; }
+        public Material rawMeshMaterial { get => m_RawMeshMaterial; set => m_RawMeshMaterial = value; }
         public Transform anchorSpace { get => m_AnchorSpace; set => m_AnchorSpace = value; }
 
         public Mode Current => m_Mode;
@@ -65,6 +77,8 @@ namespace BlockField.Aquarium
         Matrix4x4[] m_Batch;
         Vector3[] m_Points;          // 部屋座標での点（焼き直しのたびに作り直す）
         long m_BuiltForBake = -1;
+        Vector3[] m_RawPoints;       // 生メッシュの点（ワールド座標のまま）
+        long m_RawBuiltFor = -1;
 
         public void CycleMode()
         {
@@ -88,7 +102,7 @@ namespace BlockField.Aquarium
 
             // 部屋座標 → アンカー → ワールド（粒子・クラゲと同じ経路）
             var space = m_AnchorSpace != null ? m_AnchorSpace.localToWorldMatrix : Matrix4x4.identity;
-            space *= Matrix4x4.Rotate(Quaternion.Euler(0f, m_Flow.RoomYawDegrees, 0f));
+            space *= AquariumFlow.RoomToAnchorRotation(m_Flow.RoomYawDegrees);
 
             if (m_Mode == Mode.TankBounds)
             {
@@ -98,14 +112,26 @@ namespace BlockField.Aquarium
 
             if (m_BuiltForBake != m_Flow.BakeSerial) BuildPoints(field.Grid);
 
-            var mat = m_Mode == Mode.SolidOccluded ? m_OccludedMaterial : m_ThroughMaterial;
-            if (mat == null || m_Points == null) return;
-
-            var scale = Vector3.one * k_DotSize;
-            int batched = 0;
-            for (int i = 0; i < m_Points.Length; i++)
+            // 【生メッシュはワールド直描き】焼き込みが通る座標変換を一切通さない。
+            // これが部屋に合っていれば、メッシュの取得と描画側の座標は正しい
+            if (m_Mode == Mode.RawMesh || m_Mode == Mode.RawMeshAndSolid)
             {
-                m_Batch[batched++] = space * Matrix4x4.TRS(m_Points[i], Quaternion.identity, scale);
+                DrawRawMesh(Matrix4x4.identity);
+            }
+            if (m_Mode == Mode.RawMesh) return;
+
+            var mat = m_Mode == Mode.SolidOccluded ? m_OccludedMaterial : m_ThroughMaterial;
+            DrawPoints(m_Points, space, mat, k_DotSize);
+        }
+
+        void DrawPoints(Vector3[] points, Matrix4x4 space, Material mat, float size)
+        {
+            if (mat == null || points == null) return;
+            var scale = Vector3.one * size;
+            int batched = 0;
+            for (int i = 0; i < points.Length; i++)
+            {
+                m_Batch[batched++] = space * Matrix4x4.TRS(points[i], Quaternion.identity, scale);
                 if (batched == m_Batch.Length)
                 {
                     Graphics.DrawMeshInstanced(m_Cube, 0, mat, m_Batch, batched);
@@ -118,6 +144,33 @@ namespace BlockField.Aquarium
                 Graphics.DrawMeshInstanced(m_Cube, 0, mat, m_Batch, batched);
                 DrawnCells += batched;
             }
+        }
+
+        /// <summary>
+        /// ARMeshManager の頂点をそのまま描く。**変換を一切掛けない**のが要点で、
+        /// 焼き込み側の座標変換が疑わしいときの基準線になる。
+        /// 点が多いので間引く（形が分かれば足りる）。
+        /// </summary>
+        void DrawRawMesh(Matrix4x4 space)
+        {
+            var v = m_Flow.ScanWorldVertices;
+            if (v == null || m_RawMeshMaterial == null) return;
+
+            if (m_RawPoints == null || m_RawBuiltFor != m_Flow.BakeSerial)
+            {
+                m_RawBuiltFor = m_Flow.BakeSerial;
+                int total = v.Length / 3;
+                int stride = Mathf.Max(1, total / 6000);
+                var list = new System.Collections.Generic.List<Vector3>(total / stride + 1);
+                for (int i = 0; i < total; i += stride)
+                {
+                    list.Add(new Vector3(v[i * 3], v[i * 3 + 1], v[i * 3 + 2]));
+                }
+                m_RawPoints = list.ToArray();
+                Debug.Log($"[Aquarium] 生メッシュの点を作成: {m_RawPoints.Length} 個" +
+                    $"（全 {total} 頂点を {stride} 個おきに間引き。ワールド座標のまま描く）");
+            }
+            DrawPoints(m_RawPoints, space, m_RawMeshMaterial, k_DotSize);
         }
 
         /// <summary>

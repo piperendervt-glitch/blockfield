@@ -191,17 +191,23 @@ public static class AquariumSceneBootstrap
             new Color(1f, 0.35f, 0.1f), k_OcclusionShader);
         var solidThroughMat = GetOrCreateMaterial("DebugSolidThrough",
             new Color(0.15f, 1f, 0.35f), "Universal Render Pipeline/Unlit");
+        // 生メッシュは水色。固体セル（橙）と重ねたときに区別できる色にする
+        var rawMeshMat = GetOrCreateMaterial("DebugRawMesh",
+            new Color(0.2f, 0.8f, 1f), "Universal Render Pipeline/Unlit");
         // DrawMeshInstanced はマテリアル側で有効になっていないと1個ずつ描かれる
         solidOccludedMat.enableInstancing = true;
         solidThroughMat.enableInstancing = true;
+        rawMeshMat.enableInstancing = true;
         EditorUtility.SetDirty(solidOccludedMat);
         EditorUtility.SetDirty(solidThroughMat);
+        EditorUtility.SetDirty(rawMeshMat);
         AssetDatabase.SaveAssets();
         var debugGo = new GameObject("Aquarium Debug View");
         var debugView = debugGo.AddComponent<BlockField.Aquarium.AquariumDebugView>();
         debugView.flow = flow;
         debugView.occludedMaterial = solidOccludedMat;
         debugView.throughMaterial = solidThroughMat;
+        debugView.rawMeshMaterial = rawMeshMat;
         debugView.anchorSpace = anchorGo.transform;
 
         var inputGo = new GameObject("Aquarium Input");

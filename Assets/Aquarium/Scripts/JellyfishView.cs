@@ -70,8 +70,8 @@ namespace BlockField.Aquarium
             // アンカー自体の傾きも、焼き込みバウンズの高さ 2.09m が
             // 実部屋 2.07m とほぼ一致することから 0.4° 未満と分かっている
             var anchor = m_AnchorSpace != null ? m_AnchorSpace.localToWorldMatrix : Matrix4x4.identity;
-            var roomToAnchor = Matrix4x4.Rotate(
-                Quaternion.Euler(0f, m_Jelly.flow != null ? m_Jelly.flow.RoomYawDegrees : 0f, 0f));
+            var roomToAnchor = AquariumFlow.RoomToAnchorRotation(
+                m_Jelly.flow != null ? m_Jelly.flow.RoomYawDegrees : 0f);
             var trs = Matrix4x4.TRS(new Vector3(body.X, body.Y, body.Z),
                                     Quaternion.identity, Vector3.one);
 
