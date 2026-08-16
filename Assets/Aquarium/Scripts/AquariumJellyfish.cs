@@ -25,14 +25,15 @@ namespace BlockField.Aquarium
         public static readonly float[] BellDiameterChoices = { 0.10f, 0.15f, 0.25f };
 
         /// <summary>
-        /// 壁面での反発の強さ (m/s)。実機で振る。
+        /// 壁面での反発の強さ (m/s)。**既定は 0（無効）。**
         ///
-        /// 【なぜ振れる形にするか】役割は「壁に沿って離れていく」ことで、
-        /// **弾かれるように見えると不自然**になる。適正値は見た目で決めるしかない。
-        /// 遊泳は 0.04 m/s なので、それを下回ると押し続ける推力に勝てず張り付きが残る。
-        /// 0.00 は反発なし（軸ごとの拒否だけ）で、比較のために置いてある。
+        /// 【旋回が入るまで効かない】2026-08-16 の実機で 0.05 / 0.10 / 0.20 を
+        /// 振ったが、どれでも壁の手前で止まった。強くすると釣り合う位置が
+        /// 遠くなるだけ（0.20 で壁から 11cm、10秒以上静止）で、釣り合うこと自体は
+        /// 変わらない。推力の向きが一定で、重心まわりの回転が無いためである。
+        /// 選択肢は残してあるが、**旋回が入るまでは 0 が既定**。
         /// </summary>
-        public static readonly float[] WallRepelChoices = { 0.10f, 0.20f, 0.00f, 0.05f };
+        public static readonly float[] WallRepelChoices = { 0.00f, 0.10f, 0.20f, 0.05f };
 
         [SerializeField] AquariumFlow m_Flow;
         [SerializeField] int m_BellIndex = 1;
@@ -62,6 +63,18 @@ namespace BlockField.Aquarium
         public float SwimSpeedMean { get; private set; }
         public float DriftSpeedMean { get; private set; }
 
+        /// <summary>
+        /// **実際に動いた**平均速度 (m/s)。位置の差分から測る。
+        ///
+        /// 【なぜ別に要るか】<see cref="SwimSpeedMean"/> は推力から積分した変位なので、
+        /// 壁で移動が拒否されても積分だけは進む。2026-08-16 の実機ログは
+        /// **完全に静止したクラゲに対して 0.0400 m/s（目標どおり）と報告していた**。
+        /// 「泳げている」と読める指標が「止まっている」個体に出るのは、
+        /// 瞬時値を平均として読んでいた件と同じ系統の欠陥である。
+        /// 実移動が 0 に落ちていれば、意図と結果の食い違いがログで分かる。
+        /// </summary>
+        public float ActualSpeedMean { get; private set; }
+
         /// <summary>遊泳が流れに勝っているか。1 を超えていれば自力が勝つ。</summary>
         public float SwimToFlowRatio =>
             DriftSpeedMean > 1e-6f ? SwimSpeedMean / DriftSpeedMean : 0f;
@@ -71,6 +84,7 @@ namespace BlockField.Aquarium
         // 平均を取る窓（1拍動ぶん）の始点
         long m_WindowStep;
         float m_WinSwimX, m_WinSwimZ, m_WinDriftX, m_WinDriftY, m_WinDriftZ;
+        float m_WinPosX, m_WinPosY, m_WinPosZ;
 
         void Update()
         {
@@ -123,10 +137,14 @@ namespace BlockField.Aquarium
             SwimSpeedMean = Mathf.Sqrt(sx * sx + sz * sz) / seconds;
             DriftSpeedMean = Mathf.Sqrt(dx * dx + dy * dy + dz * dz) / seconds;
 
+            float ax = Body.X - m_WinPosX, ay = Body.Y - m_WinPosY, az = Body.Z - m_WinPosZ;
+            ActualSpeedMean = Mathf.Sqrt(ax * ax + ay * ay + az * az) / seconds;
+
             m_WindowStep = Body.StepCount;
             m_WinSwimX = Body.SwimPathX; m_WinSwimZ = Body.SwimPathZ;
             m_WinDriftX = Body.DriftPathX; m_WinDriftY = Body.DriftPathY;
             m_WinDriftZ = Body.DriftPathZ;
+            m_WinPosX = Body.X; m_WinPosY = Body.Y; m_WinPosZ = Body.Z;
         }
 
         /// <summary>
@@ -146,7 +164,8 @@ namespace BlockField.Aquarium
                 m_WindowStep = 0;
                 m_WinSwimX = m_WinSwimZ = 0f;
                 m_WinDriftX = m_WinDriftY = m_WinDriftZ = 0f;
-                SwimSpeedMean = DriftSpeedMean = 0f;
+                SwimSpeedMean = DriftSpeedMean = ActualSpeedMean = 0f;
+            if (Body != null) { m_WinPosX = Body.X; m_WinPosY = Body.Y; m_WinPosZ = Body.Z; }
             }
             Debug.Log($"[Aquarium] 壁の反発を {WallRepelSpeed:F2} m/s に切り替え");
         }
@@ -175,7 +194,8 @@ namespace BlockField.Aquarium
             m_WindowStep = 0;
             m_WinSwimX = m_WinSwimZ = 0f;
             m_WinDriftX = m_WinDriftY = m_WinDriftZ = 0f;
-            SwimSpeedMean = DriftSpeedMean = 0f;
+            SwimSpeedMean = DriftSpeedMean = ActualSpeedMean = 0f;
+            if (Body != null) { m_WinPosX = Body.X; m_WinPosY = Body.Y; m_WinPosZ = Body.Z; }
 
             Debug.Log($"[Aquarium] クラゲを投入: 傘 {BellDiameter * 100f:F0}cm / " +
                 $"目標遊泳 {p.SwimSpeed:F3}m/s / 拍動 {p.PulsePeriodTicks / k_NeuralHz:F2}秒 / " +

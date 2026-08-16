@@ -1,4 +1,5 @@
 ﻿using System;
+using BlockField.Aquarium;
 using BlockField.SimCore.Fluid;
 using NUnit.Framework;
 
@@ -421,7 +422,7 @@ namespace BlockField.Tests.EditMode
 
             // 止水で長く泳がせる。推力の向きは一定なので必ず壁へ達する
             var without = SpawnWithRepel(grid, 0f);
-            var with = SpawnWithRepel(grid, JellyParams.Default.WallRepelSpeed);
+            var with = SpawnWithRepel(grid, 0.10f);
             for (int i = 0; i < 6000; i++)
             {
                 without.Step(1f / 40f, 0f, 0f, 0f);
@@ -435,6 +436,21 @@ namespace BlockField.Tests.EditMode
             // 弱すぎると釣り合う位置が壁のすぐ際になり、張り付きと見分けがつかない
             Assert.Greater(dWith, dWithout + 0.03f,
                 $"反発が効いていない（反発なし {dWithout:F3}m / 反発あり {dWith:F3}m）");
+        }
+
+        /// <summary>
+        /// **既定では反発は無効。** 旋回が無い以上、押し戻しても釣り合うだけで
+        /// 壁から離れられない（実機で 0.05 / 0.10 / 0.20 のいずれでも止まった）。
+        /// 有効にすると「対処済み」に見えてしまうので、既定は 0 にしてある。
+        /// 旋回（jelly_2 段2）が入ったらここを見直す。
+        /// </summary>
+        [Test]
+        public void Wall_RepulsionIsDisabledByDefaultUntilTurningExists()
+        {
+            Assert.AreEqual(0f, JellyParams.Default.WallRepelSpeed,
+                "旋回が無い状態で反発を既定有効にすると、対処済みに見えてしまう");
+            Assert.AreEqual(0f, AquariumJellyfish.WallRepelChoices[0],
+                "実機の初期状態も無効であること");
         }
 
         /// <summary>**反発があっても固体セルへは入らない。** 拒否と両立すること。</summary>

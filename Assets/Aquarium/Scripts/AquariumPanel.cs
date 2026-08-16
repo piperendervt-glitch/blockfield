@@ -50,7 +50,7 @@ namespace BlockField.Aquarium
                 $"   repel[R-Grip]={m_Jelly.WallRepelSpeed:F2}" +
                 $"({m_Jelly.RepelIndex + 1}/{AquariumJellyfish.WallRepelChoices.Length})" +
                 $"   pulse={body.PulseCount}   swim={m_Jelly.SwimSpeedMean:F3}" +
-                $"   flow={m_Jelly.DriftSpeedMean:F3}"
+                $"   flow={m_Jelly.DriftSpeedMean:F3}   実移動={m_Jelly.ActualSpeedMean:F3}"
                 // 止水（流速 0.00）では比が定義できない。0.00 と出すと
                 // 「自力で進んでいない」と読めてしまうので、判定の言葉で出す
                 + (m_Jelly.DriftSpeedMean > 1e-4f

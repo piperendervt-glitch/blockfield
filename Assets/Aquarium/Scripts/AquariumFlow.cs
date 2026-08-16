@@ -698,7 +698,7 @@ namespace BlockField.Aquarium
                 // 2026-08-16 のログは常に減衰しきった値だけを載せていた
                 Debug.Log($"[Jelly] 傘={body.BellDiameter * 100f:F0}cm 拍動={body.PulseCount} " +
                     $"遊泳={m_Jelly.SwimSpeedMean:F4}m/s 流れ={m_Jelly.DriftSpeedMean:F4}m/s " +
-                    $"比={m_Jelly.SwimToFlowRatio:F2} " +
+                    $"比={m_Jelly.SwimToFlowRatio:F2} 実移動={m_Jelly.ActualSpeedMean:F4}m/s " +
                     $"(瞬時 遊泳={body.SwimSpeed:F4} 流れ={m_Jelly.FlowAt.magnitude:F4}) " +
                     $"反発={body.WallRepelSpeed:F2}m/s " +
                     $"位置=({body.X:F2}, {body.Y:F2}, {body.Z:F2}){JellyCellState(body)} " +
