@@ -78,7 +78,22 @@ namespace BlockField.Aquarium
 
         // --- 計測（すべてログにも出す） ---
         public long BakeMs { get; private set; }
+        /// <summary>
+        /// 固体セルの総数（メッシュ由来 + 外周シール）。
+        ///
+        /// 【内訳を分けて持つ理由】以前は <see cref="FlowBoundaryBaker.BakeSolid"/> の
+        /// 戻り値（= メッシュ由来だけ）を「固体」として出していたのに、高さ分布の
+        /// 固体率は外周シールを含む値を出していた。**同じログの中で基準が違う**ため、
+        /// 「空中の固体率が4割は多すぎないか」を確かめるのに端末からメッシュを
+        /// 引き出して焼き直す必要があった（2026-08-16）。基準を揃えて両方出す。
+        /// </summary>
         public int SolidCells { get; private set; }
+
+        /// <summary>メッシュ（実際の壁・家具）由来の固体セル数。</summary>
+        public int MeshSolidCells { get; private set; }
+
+        /// <summary>格子の外周を塞いだぶんの固体セル数（水槽の縁。1セル厚のリング）。</summary>
+        public int BorderSolidCells => SolidCells - MeshSolidCells;
         public double TickMs { get; private set; }
         public double MaxSpeed { get; private set; }
         public string Status { get; private set; } = "スキャン待ち";
@@ -210,9 +225,12 @@ namespace BlockField.Aquarium
                 minX - cell, minY - cell, minZ - cell,
                 maxX + cell, maxY + cell, maxZ + cell, cell);
 
-            SolidCells = FlowBoundaryBaker.BakeSolid(grid, local, scan.Triangles);
+            MeshSolidCells = FlowBoundaryBaker.BakeSolid(grid, local, scan.Triangles);
             FlowBoundaryBaker.SealBorders(grid);
             FlowBoundaryBaker.BakeDistance(grid);
+
+            SolidCells = 0;
+            for (int i = 0; i < grid.CellCount; i++) if (grid.IsSolidAt(i)) SolidCells++;
 
             var fp = FlowParams.Default;
             fp.TargetSpeed = TargetSpeed;
@@ -227,7 +245,8 @@ namespace BlockField.Aquarium
             float anchorTilt = AnchorTiltDegrees(scan);
             Debug.Log($"[Aquarium] 焼き込み完了: セル {cell * 100f:F1}cm / " +
                 $"格子 {grid.Width}x{grid.Height}x{grid.Depth}={grid.CellCount} / " +
-                $"固体 {SolidCells} / 所要 {BakeMs}ms / " +
+                $"固体 {SolidCells}(メッシュ {MeshSolidCells} + 縁 {BorderSolidCells}) / " +
+                $"所要 {BakeMs}ms / " +
                 $"バウンズ({maxX - minX:F2}x{maxY - minY:F2}x{maxZ - minZ:F2}m) / " +
                 $"主軸ヨー {RoomYawDegrees:F1}° / アンカー傾き {anchorTilt:F2}° / " +
                 $"床={minY:F2}m 天井={maxY:F2}m 格子Y={grid.OriginY:F2}〜" +
@@ -265,26 +284,34 @@ namespace BlockField.Aquarium
         {
             int band = Mathf.Max(1, Mathf.RoundToInt(0.25f / g.CellSize));
             var sb = new System.Text.StringBuilder();
-            sb.Append("[Aquarium] 高さ分布 (床からの高さ: 固体率 平均流速m/s):");
+            sb.Append("[Aquarium] 高さ分布 (床からの高さ: 固体率(うち縁) 平均流速m/s):");
 
             for (int y0 = 0; y0 < g.Height; y0 += band)
             {
                 int y1 = Mathf.Min(g.Height, y0 + band);
-                int cells = 0, solid = 0;
+                int cells = 0, solid = 0, border = 0;
                 double sum = 0.0;
                 for (int y = y0; y < y1; y++)
                     for (int z = 0; z < g.Depth; z++)
                         for (int x = 0; x < g.Width; x++)
                         {
                             cells++;
-                            if (g.IsSolid(x, y, z)) { solid++; continue; }
+                            if (g.IsSolid(x, y, z))
+                            {
+                                solid++;
+                                // 外周リング（水槽の縁）か、メッシュ由来かを分ける。
+                                // 縁は1セル厚なので層あたりの割合はほぼ一定になる
+                                if (x == 0 || y == 0 || z == 0 || x == g.Width - 1
+                                    || y == g.Height - 1 || z == g.Depth - 1) border++;
+                                continue;
+                            }
                             field.VelocityAt(x, y, z, out float vx, out float vy, out float vz);
                             sum += Mathf.Sqrt(vx * vx + vy * vy + vz * vz);
                         }
 
                 int fluid = cells - solid;
                 float h = g.OriginY + y0 * g.CellSize - roomFloorY;
-                sb.Append($" [{h:F2}m {(solid * 100f / cells):F0}% " +
+                sb.Append($" [{h:F2}m {(solid * 100f / cells):F0}%({(border * 100f / cells):F0}%) " +
                     $"{(fluid > 0 ? sum / fluid : 0.0):F3}]");
             }
             Debug.Log(sb.ToString());
@@ -388,7 +415,8 @@ namespace BlockField.Aquarium
             // 【パネルに出す値はログにも出す】前回、粒子の描画数がパネルにしか
             // 出ておらず、装着中のユーザーに読み上げてもらう羽目になった
             Debug.Log($"[Aquarium] 格子: セル {CellSize * 100f:F1}cm " +
-                $"{g.Width}x{g.Height}x{g.Depth}={g.CellCount} 固体={SolidCells} " +
+                $"{g.Width}x{g.Height}x{g.Depth}={g.CellCount} " +
+                $"固体={SolidCells}(メッシュ {MeshSolidCells} + 縁 {BorderSolidCells}) " +
                 $"焼き込み={BakeMs}ms / ティック={TickMs:F2}ms ({k_TickHz:F0}Hz) " +
                 $"目標流速={TargetSpeed:F3}m/s 最大流速={MaxSpeed:F4}m/s " +
                 $"粒子={(m_Particles != null ? m_Particles.DrawnParticles : -1)}" +

@@ -77,7 +77,8 @@ namespace BlockField.Aquarium
                 $"Speed[R-A]: {m_Flow.TargetSpeed:F3} m/s ({m_Flow.SpeedIndex + 1}/{AquariumFlow.TargetSpeedChoices.Length})" +
                 $"  = {m_Flow.TargetSpeed / 72f * 100f:F2}cm/frame   Max: {m_Flow.MaxSpeed:F3}\n" +
                 $"Cell[L-X]: {m_Flow.CellSize * 100f:F1}cm ({m_Flow.CellSizeIndex + 1}/{AquariumFlow.CellSizeChoices.Length})" +
-                $"   {g.Width}x{g.Height}x{g.Depth}={g.CellCount}   Solid: {m_Flow.SolidCells}\n" +
+                $"   {g.Width}x{g.Height}x{g.Depth}={g.CellCount}" +
+                $"   Solid: {m_Flow.SolidCells} (壁{m_Flow.MeshSolidCells}+縁{m_Flow.BorderSolidCells})\n" +
                 $"View[L-Y]: {preset.Name} ({m_Particles.PresetIndex + 1}/{FlowParticleView.Presets.Length})" +
                 $"   n={m_Particles.DrawnParticles}   size={preset.Size * 100f:F1}cm   t={field.TickCount}\n" +
                 JellyLine();
