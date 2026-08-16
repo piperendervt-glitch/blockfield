@@ -3,6 +3,7 @@
     "references": [
         "BlockField.SimCore",
         "BlockField.Runtime",
+        "BlockField.Aquarium",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"
     ],

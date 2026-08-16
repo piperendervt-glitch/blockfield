@@ -77,6 +77,13 @@ namespace BlockField.Aquarium
         public double MaxSpeed { get; private set; }
         public string Status { get; private set; } = "スキャン待ち";
 
+        /// <summary>
+        /// 格子を部屋の主軸へ合わせるために回したヨー角 (度)。
+        /// **描画側はこの回転を掛けてから格子座標を使うこと**
+        /// （格子はこの回転後の「部屋座標」で持っている）。
+        /// </summary>
+        public float RoomYawDegrees { get; private set; }
+
         float m_TickAccumulator;
         float m_NextLog;
         readonly Stopwatch m_Watch = new Stopwatch();
@@ -164,18 +171,31 @@ namespace BlockField.Aquarium
             var toLocal = AnchorWorldToLocal(scan);
             int vertexCount = scan.Vertices.Length / 3;
             var local = new float[scan.Vertices.Length];
-            float minX = float.MaxValue, minY = float.MaxValue, minZ = float.MaxValue;
-            float maxX = float.MinValue, maxY = float.MinValue, maxZ = float.MinValue;
-
             for (int v = 0; v < vertexCount; v++)
             {
                 int i = v * 3;
                 var p = toLocal.MultiplyPoint3x4(
                     new Vector3(scan.Vertices[i], scan.Vertices[i + 1], scan.Vertices[i + 2]));
                 local[i] = p.x; local[i + 1] = p.y; local[i + 2] = p.z;
-                if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
-                if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
-                if (p.z < minZ) minZ = p.z; if (p.z > maxZ) maxZ = p.z;
+            }
+
+            // 【格子を部屋の主軸に合わせる】アンカーは設置時のヨー角を持つので
+            // （実測 rotY=127°）、アンカーの軸に合わせた箱は部屋が斜めに入って膨らむ。
+            // 実測 3.19x2.07x2.58m の部屋に 3.96x2.08x3.99m の格子ができていた
+            // （水平面積で約1.8倍、増えた分はほぼ部屋の外）。
+            // 水平面の外接箱が最小になるヨー角を探し、そこへ回してから焼く
+            RoomYawDegrees = FindBestYaw(local);
+            RotateAroundY(local, -RoomYawDegrees);
+
+            float minX = float.MaxValue, minY = float.MaxValue, minZ = float.MaxValue;
+            float maxX = float.MinValue, maxY = float.MinValue, maxZ = float.MinValue;
+            for (int v = 0; v < vertexCount; v++)
+            {
+                int i = v * 3;
+                float px = local[i], py = local[i + 1], pz = local[i + 2];
+                if (px < minX) minX = px; if (px > maxX) maxX = px;
+                if (py < minY) minY = py; if (py > maxY) maxY = py;
+                if (pz < minZ) minZ = pz; if (pz > maxZ) maxZ = pz;
             }
 
             // 部屋の外周にも水を置く余地を1セル分足す（壁面を格子の内側に収める）
@@ -201,7 +221,62 @@ namespace BlockField.Aquarium
             Debug.Log($"[Aquarium] 焼き込み完了: セル {cell * 100f:F1}cm / " +
                 $"格子 {grid.Width}x{grid.Height}x{grid.Depth}={grid.CellCount} / " +
                 $"固体 {SolidCells} / 所要 {BakeMs}ms / " +
-                $"バウンズ({maxX - minX:F2}x{maxY - minY:F2}x{maxZ - minZ:F2}m)");
+                $"バウンズ({maxX - minX:F2}x{maxY - minY:F2}x{maxZ - minZ:F2}m) / " +
+                $"主軸ヨー {RoomYawDegrees:F1}°");
+        }
+
+        /// <summary>
+        /// 水平面の外接箱が最小になるヨー角 (度) を探す。
+        ///
+        /// 部屋は直方体に近いので、90° 周期で対称になる。0〜90° を粗く刻んでから
+        /// 最良点の周りを細かく詰める（総当たりで十分速い。頂点16k で数 ms）。
+        /// **観測時に1回だけ走る**ので、リプレイ経路には入らない
+        /// （焼き込み結果と同じ扱い。追記の決定論の議論を参照）。
+        /// </summary>
+        internal static float FindBestYaw(float[] verts)
+        {
+            float best = 0f, bestArea = float.MaxValue;
+            for (float deg = 0f; deg < 90f; deg += 2f)
+            {
+                float a = HorizontalArea(verts, deg);
+                if (a < bestArea) { bestArea = a; best = deg; }
+            }
+            for (float deg = best - 2f; deg <= best + 2f; deg += 0.25f)
+            {
+                float a = HorizontalArea(verts, deg);
+                if (a < bestArea) { bestArea = a; best = deg; }
+            }
+            return best;
+        }
+
+        /// <summary>ヨー角 deg だけ回したときの水平面の外接箱の面積。</summary>
+        internal static float HorizontalArea(float[] verts, float deg)
+        {
+            float rad = deg * Mathf.Deg2Rad;
+            float c = Mathf.Cos(-rad), s = Mathf.Sin(-rad);
+            float minX = float.MaxValue, minZ = float.MaxValue;
+            float maxX = float.MinValue, maxZ = float.MinValue;
+            for (int i = 0; i + 2 < verts.Length; i += 3)
+            {
+                float x = verts[i] * c - verts[i + 2] * s;
+                float z = verts[i] * s + verts[i + 2] * c;
+                if (x < minX) minX = x; if (x > maxX) maxX = x;
+                if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+            }
+            return (maxX - minX) * (maxZ - minZ);
+        }
+
+        /// <summary>頂点群を Y 軸まわりに deg だけ回す（その場で書き換える）。</summary>
+        internal static void RotateAroundY(float[] verts, float deg)
+        {
+            float rad = deg * Mathf.Deg2Rad;
+            float c = Mathf.Cos(rad), s = Mathf.Sin(rad);
+            for (int i = 0; i + 2 < verts.Length; i += 3)
+            {
+                float x = verts[i], z = verts[i + 2];
+                verts[i] = x * c - z * s;
+                verts[i + 2] = x * s + z * c;
+            }
         }
 
         /// <summary>
