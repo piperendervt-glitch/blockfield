@@ -169,6 +169,15 @@ public static class AquariumSceneBootstrap
         // オクルージョン対応シェーダーを使う——粒子で踏み外した轍を踏まない
         var bellMat = GetOrCreateMaterial("JellyfishBell", new Color(0.85f, 0.9f, 1f),
             k_OcclusionShader);
+        // 【両面描画】傘は底の開いた椀なので、下から見ると内側の面を見ることになる。
+        // 既定の裏面カリングだと、真下や中に入った位置から傘が消える。
+        // 実機で「法線が逆では」と指摘された件は巻き方向の誤りが主因だが
+        // （JellyfishView.Build のコメント）、椀を描く以上ここは両面が正しい
+        // GetOrCreateMaterial は既存 .mat を使い回すので、既に作られていた材質にも
+        // 効かせるには明示的に書き戻す（粒子の材質で同じ罠を踏んでいる）
+        bellMat.SetFloat("_Cull", (float)UnityEngine.Rendering.CullMode.Off);
+        EditorUtility.SetDirty(bellMat);
+        AssetDatabase.SaveAssets();
         var jellyViewGo = new GameObject("Jellyfish View");
         var jellyView = jellyViewGo.AddComponent<BlockField.Aquarium.JellyfishView>();
         jellyView.jelly = jelly;
@@ -222,8 +231,7 @@ public static class AquariumSceneBootstrap
 
         Directory.CreateDirectory(Path.GetDirectoryName(ScenePath));
         EditorSceneManager.SaveScene(scene, ScenePath);
-        Debug.Log($"[AquariumSceneBootstrap] {ScenePath} を生成した。" +
-            "クラゲは入れていない（Phase B は流れだけ）");
+        Debug.Log($"[AquariumSceneBootstrap] {ScenePath} を生成した（流れ + クラゲ1体）");
     }
 
     static Material GetOrCreateMaterial(string name, Color color, string shaderName)

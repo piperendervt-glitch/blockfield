@@ -28,10 +28,13 @@ namespace BlockField.Aquarium
         public Transform anchorSpace { get => m_AnchorSpace; set => m_AnchorSpace = value; }
 
         /// <summary>傘の高さ（直径に対する比）。ミズクラゲはやや扁平。</summary>
-        const float k_HeightRatio = 0.55f;
+        internal const float k_HeightRatio = 0.55f;
 
         /// <summary>収縮でリムがどれだけ縮むか（半径に対する比）。</summary>
-        const float k_ContractionDepth = 0.32f;
+        internal const float k_ContractionDepth = 0.32f;
+
+        /// <summary>最大収縮時に傘がどれだけ背高になるか（高さに対する比）。</summary>
+        internal const float k_ApexRise = 0.35f;
 
         Mesh m_Mesh;
         Vector3[] m_Vertices;
@@ -53,26 +56,19 @@ namespace BlockField.Aquarium
                 Build(n);
             }
 
-            float radius = body.BellDiameter * 0.5f;
-            float height = body.BellDiameter * k_HeightRatio;
-
-            // 頂点0 = 頂点（傘のてっぺん）、1..n = リム
-            m_Vertices[0] = new Vector3(0f, height * 0.5f, 0f);
-            for (int i = 0; i < n; i++)
-            {
-                double a = 2.0 * Mathf.PI * i / n;
-                // 収縮したセルほどリムが内側かつ上へ寄る（傘をすぼめる動き）
-                float c = body.Contraction(i);
-                float r = radius * (1f - k_ContractionDepth * c);
-                float y = -height * 0.5f + height * 0.35f * c;
-                m_Vertices[i + 1] = new Vector3(r * (float)Mathf.Cos((float)a), y,
-                                                r * (float)Mathf.Sin((float)a));
-            }
+            BuildBellVertices(body, m_Vertices);
             m_Mesh.SetVertices(m_Vertices);
             m_Mesh.RecalculateNormals();
             m_Mesh.RecalculateBounds();
 
-            // 部屋座標 → アンカー → ワールド（粒子と同じ経路）
+            // 部屋座標 → アンカー → ワールド（粒子と同じ経路。適用は1回ずつ）。
+            //
+            // 【傾きの原因ではない】主軸戻しは **Y軸まわりのヨーだけ**なので、
+            // 二重に掛かっても水平面は水平のままで、傾きは生じない。
+            // 実機セッションでここが疑われたが、傾きは上の
+            // <see cref="BuildBellVertices"/> の写像が原因だった。
+            // アンカー自体の傾きも、焼き込みバウンズの高さ 2.09m が
+            // 実部屋 2.07m とほぼ一致することから 0.4° 未満と分かっている
             var anchor = m_AnchorSpace != null ? m_AnchorSpace.localToWorldMatrix : Matrix4x4.identity;
             var roomToAnchor = Matrix4x4.Rotate(
                 Quaternion.Euler(0f, m_Jelly.flow != null ? m_Jelly.flow.RoomYawDegrees : 0f, 0f));
@@ -82,21 +78,71 @@ namespace BlockField.Aquarium
             Graphics.DrawMesh(m_Mesh, anchor * roomToAnchor * trs, m_Material, 0);
         }
 
+        /// <summary>
+        /// 傘の頂点を作る（頂点0 = てっぺん、1..n = リム）。
+        ///
+        /// 【リムは必ず水平な平面に載る】2026-08-16 の実機セッションで
+        /// 「傘の底面が傾いている」と報告された。原因は**収縮の度合いを
+        /// セルごとにリムの高さへ写していた**ことである。興奮波はリングを
+        /// 1セル/ステップで巡るので、収縮はペースメーカー軸に沿って常に非対称になり、
+        /// リムが平面から外れる。実測で**最大 13.6°、40ステップ周期のうち 21ステップ**
+        /// （拍動の半分以上）にわたって傾いていた。
+        ///
+        /// 直したあとの写像:
+        /// - リムの高さ … **一定**（= 平面かつ水平。傾きは構造的に起こらない）
+        /// - リムの半径 … セルごとの収縮（**進行波はここに出る**。姿に神経が見えることは
+        ///   この段で確かめたいことそのものなので、平均化して消しはしない）
+        /// - てっぺんの高さ … リング**平均**の収縮（縮むと背が高くなる。
+        ///   対称量なので傾きを生まない）
+        /// </summary>
+        internal static void BuildBellVertices(SimCore.Fluid.Jellyfish body, Vector3[] vertices)
+        {
+            int n = body.Ring.CellCount;
+            float radius = body.BellDiameter * 0.5f;
+            float height = body.BellDiameter * k_HeightRatio;
+
+            float meanC = 0f;
+            for (int i = 0; i < n; i++) meanC += body.Contraction(i);
+            meanC /= n;
+
+            vertices[0] = new Vector3(0f, height * (0.5f + k_ApexRise * meanC), 0f);
+            for (int i = 0; i < n; i++)
+            {
+                float a = 2f * Mathf.PI * i / n;
+                float r = radius * (1f - k_ContractionDepth * body.Contraction(i));
+                vertices[i + 1] = new Vector3(r * Mathf.Cos(a), -height * 0.5f, r * Mathf.Sin(a));
+            }
+        }
+
+        /// <summary>
+        /// 頂点からリムへの扇。リムは閉じないので、下から見ると中が見える
+        /// ——これは意図どおりで、クラゲの傘は椀状である。
+        ///
+        /// 【巻き方向】(0, i+1, i) の順。Unity は法線 = Cross(B-A, C-A) なので
+        /// （組み込み Quad で規約を確認済み）、逆順の (0, i, i+1) では法線が
+        /// **内向き・下向き**になり（実測 半径方向 -0.746 / 鉛直 -0.666）、
+        /// 既定の裏面カリングで**外から傘が消える**。
+        /// 2026-08-16 の実機で「法線が逆では」と指摘されたとおりだった。
+        /// 材質は両面描画にもしてあるが、巻き方向自体を正しておく。
+        /// </summary>
+        internal static int[] BuildBellTriangles(int ringCells)
+        {
+            var tris = new int[ringCells * 3];
+            for (int i = 0; i < ringCells; i++)
+            {
+                tris[i * 3] = 0;
+                tris[i * 3 + 1] = 1 + (i + 1) % ringCells;
+                tris[i * 3 + 2] = 1 + i;
+            }
+            return tris;
+        }
+
         void Build(int ringCells)
         {
             if (m_Mesh != null) Destroy(m_Mesh);
             m_RingCells = ringCells;
             m_Vertices = new Vector3[ringCells + 1];
-
-            // 頂点からリムへの扇。リムは閉じないので、下から見ると中が見える
-            // ——これは意図どおりで、クラゲの傘は椀状である
-            var tris = new int[ringCells * 3];
-            for (int i = 0; i < ringCells; i++)
-            {
-                tris[i * 3] = 0;
-                tris[i * 3 + 1] = 1 + i;
-                tris[i * 3 + 2] = 1 + (i + 1) % ringCells;
-            }
+            var tris = BuildBellTriangles(ringCells);
 
             m_Mesh = new Mesh { name = "JellyfishBell" };
             m_Mesh.SetVertices(new Vector3[ringCells + 1]);

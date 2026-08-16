@@ -37,7 +37,7 @@ Material:
     - _AlphaToMask: 0
     - _Blend: 0
     - _BlendOp: 0
-    - _Cull: 2
+    - _Cull: 0
     - _Cutoff: 0.5
     - _DstBlend: 0
     - _DstBlendAlpha: 0

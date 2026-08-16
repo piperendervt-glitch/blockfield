@@ -233,5 +233,99 @@ namespace BlockField.Tests.EditMode
             Assert.Greater(maxSeen, 0.5f, "収縮が浅すぎて拍動が見えない");
             Assert.Less(minSeen, 0.1f, "弛緩しきる瞬間が無い");
         }
+
+        // ================= 傘の姿勢（2026-08-16 の実機で崩れていた） =================
+
+        /// <summary>
+        /// **リムはいつでも水平な平面に載る。**
+        ///
+        /// 収縮をセルごとにリムの高さへ写していたとき、興奮波がリングを巡るせいで
+        /// リムが平面から外れ、実測**最大 13.6°**、40ステップ周期の 21ステップに
+        /// わたって傘が傾いていた（実機報告「傘の底面が傾いている」）。
+        /// 高さは対称量（リング平均）だけに使い、進行波は半径に出す。
+        /// </summary>
+        [Test]
+        public void Bell_RimStaysOnAHorizontalPlane()
+        {
+            var jelly = Spawn(JellyParams.Default);
+            int n = jelly.Ring.CellCount;
+            var verts = new UnityEngine.Vector3[n + 1];
+
+            for (int t = 0; t < 200; t++)
+            {
+                jelly.Step(1f / 40f, 0f, 0f, 0f);
+                BlockField.Aquarium.JellyfishView.BuildBellVertices(jelly, verts);
+
+                float y0 = verts[1].y;
+                for (int i = 1; i <= n; i++)
+                {
+                    Assert.AreEqual(y0, verts[i].y, 1e-6f,
+                        $"t={t} でリムが平面から外れた（セル {i - 1}）");
+                }
+            }
+        }
+
+        /// <summary>
+        /// **拍動でリムの半径と傘の高さが実際に動く。**
+        /// リムを平面に固定した副作用で「動かない傘」になっていないことを見る。
+        /// </summary>
+        [Test]
+        public void Bell_PulseChangesRadiusAndHeight()
+        {
+            var jelly = Spawn(JellyParams.Default);
+            int n = jelly.Ring.CellCount;
+            var verts = new UnityEngine.Vector3[n + 1];
+            float minApex = float.MaxValue, maxApex = float.MinValue;
+            float minR = float.MaxValue, maxR = float.MinValue;
+
+            for (int t = 0; t < 200; t++)
+            {
+                jelly.Step(1f / 40f, 0f, 0f, 0f);
+                BlockField.Aquarium.JellyfishView.BuildBellVertices(jelly, verts);
+
+                float apex = verts[0].y - verts[1].y;
+                minApex = Math.Min(minApex, apex); maxApex = Math.Max(maxApex, apex);
+                for (int i = 1; i <= n; i++)
+                {
+                    float r = (float)Math.Sqrt(verts[i].x * verts[i].x + verts[i].z * verts[i].z);
+                    minR = Math.Min(minR, r); maxR = Math.Max(maxR, r);
+                }
+            }
+
+            Assert.Greater(maxApex / minApex, 1.1f, "拍動で傘の高さが変わっていない");
+            Assert.Greater(maxR / minR, 1.1f, "拍動でリムの半径が変わっていない");
+        }
+
+        /// <summary>
+        /// **扇の法線が外向き・上向きであること。**
+        ///
+        /// Unity は法線 = Cross(B-A, C-A) を使う（組み込み Quad で確認済み）。
+        /// 巻き方向が逆だと法線が内向き・下向きになり、既定の裏面カリングで
+        /// **外から傘が消える**（実機報告「法線が逆では」）。
+        /// </summary>
+        [Test]
+        public void Bell_FanWindingFacesOutward()
+        {
+            var jelly = Spawn(JellyParams.Default);
+            int n = jelly.Ring.CellCount;
+            var verts = new UnityEngine.Vector3[n + 1];
+            BlockField.Aquarium.JellyfishView.BuildBellVertices(jelly, verts);
+
+            var mesh = BlockField.Aquarium.JellyfishView.BuildBellTriangles(n);
+            for (int f = 0; f < n; f++)
+            {
+                var a = verts[mesh[f * 3]];
+                var b = verts[mesh[f * 3 + 1]];
+                var c = verts[mesh[f * 3 + 2]];
+                var normal = UnityEngine.Vector3.Cross(b - a, c - a).normalized;
+
+                var centroid = (a + b + c) / 3f;
+                var radial = new UnityEngine.Vector3(centroid.x, 0f, centroid.z).normalized;
+
+                Assert.Greater(UnityEngine.Vector3.Dot(normal, radial), 0f,
+                    $"面 {f} の法線が内向き（巻き方向が逆）");
+                Assert.Greater(normal.y, 0f, $"面 {f} の法線が下向き（巻き方向が逆）");
+            }
+        }
     }
 }
