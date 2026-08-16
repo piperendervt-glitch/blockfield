@@ -224,11 +224,70 @@ namespace BlockField.Aquarium
             BakeMs = m_Watch.ElapsedMilliseconds;
             Status = "流れ場を構築した";
 
+            float anchorTilt = AnchorTiltDegrees(scan);
             Debug.Log($"[Aquarium] 焼き込み完了: セル {cell * 100f:F1}cm / " +
                 $"格子 {grid.Width}x{grid.Height}x{grid.Depth}={grid.CellCount} / " +
                 $"固体 {SolidCells} / 所要 {BakeMs}ms / " +
                 $"バウンズ({maxX - minX:F2}x{maxY - minY:F2}x{maxZ - minZ:F2}m) / " +
-                $"主軸ヨー {RoomYawDegrees:F1}°");
+                $"主軸ヨー {RoomYawDegrees:F1}° / アンカー傾き {anchorTilt:F2}° / " +
+                $"床={minY:F2}m 天井={maxY:F2}m 格子Y={grid.OriginY:F2}〜" +
+                $"{grid.OriginY + grid.Height * cell:F2}m (アンカー基準)");
+
+            LogHeightProfile(grid, field, minY);
+        }
+
+        /// <summary>
+        /// アンカーの鉛直軸が重力方向からどれだけ傾いているか (度)。
+        ///
+        /// 【なぜ出すか】焼き込みはアンカーローカルで行い、主軸合わせは
+        /// **ヨーしか直さない**。アンカーにピッチ／ロールがあると、格子ごと
+        /// 部屋に対して傾き、その上に載る全部（クラゲの姿勢を含む）が傾く。
+        /// 2026-08-16 のセッションでクラゲの傾きを疑ったとき、この値がログに無くて
+        /// バウンズの高さから間接的に推定するしかなかった（0.4°未満と分かった）。
+        /// </summary>
+        static float AnchorTiltDegrees(RoomScanner.ScanResult scan)
+        {
+            if (!scan.HasOriginPose) return 0f;
+            return Vector3.Angle(scan.OriginPoseAtScan.rotation * Vector3.up, Vector3.up);
+        }
+
+        /// <summary>
+        /// 高さ方向の分布を 25cm 帯ごとに出す。
+        ///
+        /// 【なぜ要るか】2026-08-16 の実機で「部屋の高さ 1.5m 付近までしか水流がない」
+        /// と報告されたが、ログには格子のセル数しか無く、**どの高さで流れが
+        /// 死んでいるのかを事後に確かめる手段が無かった**。
+        /// 固体率（=焼き込みが壁だと判断した割合）と平均流速を並べれば、
+        /// 「境界ランプで消えている」のか「そもそも固体になっている」のかが分かる。
+        /// 焼き込みと同じく観測時に1回だけ走る。
+        /// </summary>
+        static void LogHeightProfile(FlowGrid g, FlowField field, float roomFloorY)
+        {
+            int band = Mathf.Max(1, Mathf.RoundToInt(0.25f / g.CellSize));
+            var sb = new System.Text.StringBuilder();
+            sb.Append("[Aquarium] 高さ分布 (床からの高さ: 固体率 平均流速m/s):");
+
+            for (int y0 = 0; y0 < g.Height; y0 += band)
+            {
+                int y1 = Mathf.Min(g.Height, y0 + band);
+                int cells = 0, solid = 0;
+                double sum = 0.0;
+                for (int y = y0; y < y1; y++)
+                    for (int z = 0; z < g.Depth; z++)
+                        for (int x = 0; x < g.Width; x++)
+                        {
+                            cells++;
+                            if (g.IsSolid(x, y, z)) { solid++; continue; }
+                            field.VelocityAt(x, y, z, out float vx, out float vy, out float vz);
+                            sum += Mathf.Sqrt(vx * vx + vy * vy + vz * vz);
+                        }
+
+                int fluid = cells - solid;
+                float h = g.OriginY + y0 * g.CellSize - roomFloorY;
+                sb.Append($" [{h:F2}m {(solid * 100f / cells):F0}% " +
+                    $"{(fluid > 0 ? sum / fluid : 0.0):F3}]");
+            }
+            Debug.Log(sb.ToString());
         }
 
         /// <summary>
@@ -339,11 +398,13 @@ namespace BlockField.Aquarium
             var body = m_Jelly != null ? m_Jelly.Body : null;
             if (body != null)
             {
-                var fl = m_Jelly.FlowAt;
-                float flowSpeed = fl.magnitude;
+                // 【平均を出す】瞬時値は拍動の位相で 0.19〜0.0004 m/s まで振れ、
+                // 1秒間隔の標本化は拍動周期と一致するので位相が固定される。
+                // 2026-08-16 のログは常に減衰しきった値だけを載せていた
                 Debug.Log($"[Jelly] 傘={body.BellDiameter * 100f:F0}cm 拍動={body.PulseCount} " +
-                    $"遊泳={body.SwimSpeed:F4}m/s 流れ={flowSpeed:F4}m/s " +
-                    $"比={(flowSpeed > 1e-6f ? body.SwimSpeed / flowSpeed : 0f):F2} " +
+                    $"遊泳={m_Jelly.SwimSpeedMean:F4}m/s 流れ={m_Jelly.DriftSpeedMean:F4}m/s " +
+                    $"比={m_Jelly.SwimToFlowRatio:F2} " +
+                    $"(瞬時 遊泳={body.SwimSpeed:F4} 流れ={m_Jelly.FlowAt.magnitude:F4}) " +
                     $"位置=({body.X:F2}, {body.Y:F2}, {body.Z:F2}) step={body.StepCount}");
             }
         }
