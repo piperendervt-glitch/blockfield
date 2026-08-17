@@ -51,6 +51,51 @@ namespace BlockField.SimCore.Fluid
         /// <summary>反発が働く帯の幅（セル数）。壁からこの距離より外では効かない。</summary>
         public float WallBandCells;
 
+        // ================= K2: dV/dt 噴流モデル =================
+
+        /// <summary>
+        /// **dV/dt 噴流モデルを使う**（jelly_2 K2）。false なら jelly_1 の
+        /// 2D リム収縮（水平のみ、姿勢なし）。
+        ///
+        /// 既定は false。Phase C（タグ `aquarium-c.2`）の挙動をそのまま残し、
+        /// 「原因でない修正を同時に入れない」を守る。実機へ出すのは判定の後。
+        /// </summary>
+        public bool JetModel;
+
+        /// <summary>
+        /// 非対称収縮からトルクへの結合係数。**遺伝子**（jelly_2 §4.1）。
+        ///
+        /// 【値は暫定】K1 の打ち切りにより実測から取れない。K2 の実装要件は
+        /// 「経路が存在し、係数が外部から与えられる形になっている」ことのみで、
+        /// 値の探索は K4 に送る（jelly_1 §5.2 と同じ形）。
+        /// 判定 M-K2b は**対照との比**で置いてあるので、この値に依存しない。
+        /// </summary>
+        public float TurnGain;
+
+        /// <summary>
+        /// 姿勢の復元トルク（傘を上向きへ戻す）。**遺伝子**。0 でアブレーション。
+        ///
+        /// 実物のミズクラゲは姿勢を立て直す。入れないと逆さまのまま泳ぎ続け、
+        /// 「生きて見えない」の要因になる。ただし時定数で戻るので、
+        /// 壁から離れる時間は稼げる（K3 の「往復」の予想は生きたまま）。
+        /// </summary>
+        public float RightingGain;
+
+        /// <summary>角速度の減衰（1ステップあたり）。並進の <see cref="Drag"/> の回転版。</summary>
+        public float RotationDrag;
+
+        /// <summary>
+        /// 内蔵ペースメーカーを働かせるか（既定 true）。
+        ///
+        /// 【なぜ切れる形が要るか】ペースメーカーは**1セル**（`PacemakerCell`）を
+        /// 叩くので、それ自体が非対称な発火である。対称／片側／鏡像を比べる判定では
+        /// これが全条件に混ざり、**片側条件が対称になり鏡像条件だけが非対称になる**
+        /// という取り違えが起きた（最初に書いたテストが実際にそうなった）。
+        /// 発火のさせ方を判定側が完全に決められるようにする。
+        /// プロトタイプの `world.pace` と同じ位置づけ。
+        /// </summary>
+        public bool Pacemaker;
+
         /// <summary>興奮性媒質のパラメータ。R₀=14 など jelly_1 の確定値。</summary>
         public ExcitableParams Excitable;
 
@@ -76,6 +121,13 @@ namespace BlockField.SimCore.Fluid
             // 機構は残してあるが、**旋回が入るまでは有効にしない**。
             // 有効にすると「対処済み」に見えてしまう。
             WallRepelSpeed = 0f,
+            // K2 は既定オフ。Phase C の挙動を変えない
+            JetModel = false,
+            Pacemaker = true,
+            // どちらも遺伝子の暫定値。K4 が探索する
+            TurnGain = 1.0f,
+            RightingGain = 0.5f,
+            RotationDrag = 0.1f,
             WallBandCells = 2.5f,
             Excitable = ExcitableParams.Default,
         };

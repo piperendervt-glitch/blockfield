@@ -487,5 +487,219 @@ namespace BlockField.Tests.EditMode
             Assert.AreEqual(plain.X, repel.X, 1e-6f, "壁から遠いのに軌跡が変わった");
             Assert.AreEqual(plain.Z, repel.Z, 1e-6f, "壁から遠いのに軌跡が変わった");
         }
+
+        // ================= K2: dV/dt 噴流モデル（jelly_2 追記7） =================
+
+        static JellyParams JetParams(float turn = 1.0f, float righting = 0.5f)
+        {
+            var p = JellyParams.Default;
+            p.JetModel = true;
+            p.TurnGain = turn;
+            p.RightingGain = righting;
+            // 内蔵ペースメーカーは 1 セルしか叩かないので、それ自体が非対称である。
+            // 発火のさせ方は判定側が完全に決める（JellyParams.Pacemaker のコメント）
+            p.Pacemaker = false;
+            return p;
+        }
+
+        /// <summary>
+        /// 発火のさせ方を差し替えられる走行。対称／片側／鏡像を同じ位相で比べる。
+        /// mode: 0 = 対称（両端）, 1 = セル0 のみ, 2 = 鏡像（セル n/2 のみ）
+        /// </summary>
+        static Jellyfish RunPattern(JellyParams p, int mode, int steps)
+        {
+            var jelly = new Jellyfish(p, 0f, 0f, 0f);
+            int n = p.RingCells;
+            for (int t = 0; t < steps; t++)
+            {
+                if (t % p.PulsePeriodTicks == 0)
+                {
+                    if (mode == 0) { jelly.StimulateCell(0); jelly.StimulateCell(n / 2); }
+                    else if (mode == 1) jelly.StimulateCell(0);
+                    else jelly.StimulateCell(n / 2);
+                }
+                jelly.Step(1f / 40f, 0f, 0f, 0f);
+            }
+            return jelly;
+        }
+
+        /// <summary>
+        /// **後半の平均傾き**（度）。位相に依らない統計量。
+        ///
+        /// 【スナップショットで測ってはいけない】復元トルクと回転抗力は振動子を
+        /// 作るので、「N ステップ時点の傾き」は振動の位相を拾うだけになる。
+        /// 復元係数を掃引すると 18.77 → 0.82 → 2.28 → 0.39 → 0.00 → 1.75 と
+        /// **非単調に振れた**。瞬時の遊泳速度を平均として読んでいた件と同じ系統
+        /// （3例目）。後半 steps/2 の平均で測る（prereg jelly_2 追記8）。
+        /// </summary>
+        static float MeanTilt(JellyParams p, int mode, int steps)
+        {
+            var jelly = new Jellyfish(p, 0f, 0f, 0f);
+            int n = p.RingCells;
+            int half = steps / 2;
+            double sum = 0; int count = 0;
+            for (int t = 0; t < steps; t++)
+            {
+                if (t % p.PulsePeriodTicks == 0)
+                {
+                    if (mode == 0) { jelly.StimulateCell(0); jelly.StimulateCell(n / 2); }
+                    else if (mode == 1) jelly.StimulateCell(0);
+                    else jelly.StimulateCell(n / 2);
+                }
+                jelly.Step(1f / 40f, 0f, 0f, 0f);
+                if (t >= half) { sum += jelly.TiltDegrees; count++; }
+            }
+            return (float)(sum / count);
+        }
+
+        /// <summary>
+        /// **M-K2a 対照: 対称に発火すれば軸は動かない。**
+        ///
+        /// トルクは Σ(amp·r̂) × 軸 なので、対称な発火では Σ(amp·r̂) = 0 になり
+        /// **構造的に**トルクが出ない。復元も軸が真上なら 0。
+        /// </summary>
+        [Test]
+        public void MK2a_SymmetricFiringDoesNotTurn()
+        {
+            float tilt = MeanTilt(JetParams(), 0, 800);
+            Assert.Less(tilt, 0.5f,
+                $"対称発火で軸が平均 {tilt:F4} 度傾いた（構造的に 0 のはず）");
+        }
+
+        /// <summary>**M-K2b 非対称で回頭する。** 絶対閾値ではなく対照との比で判定する。</summary>
+        [Test]
+        public void MK2b_AsymmetricFiringTurnsFarMoreThanTheControl()
+        {
+            float control = MeanTilt(JetParams(), 0, 800);
+            float oneSided = MeanTilt(JetParams(), 1, 800);
+
+            // K1 で「片側 0.963 度 対 両側 0.612 度」という区別のつかない結果に
+            // なった経験から、絶対閾値ではなく対照との比で置く（追記7 A7.3）
+            Assert.Greater(oneSided, Math.Max(control * 10f, 1.0f),
+                $"片側 {oneSided:F3} 度 / 対照 {control:F4} 度。対照の10倍に届かない");
+        }
+
+        /// <summary>**M-K2c 鏡像対称。** 反対側のセルを叩けば逆向きに同じだけ回る。</summary>
+        [Test]
+        public void MK2c_MirroredFiringTurnsTheOppositeWay()
+        {
+            float ma = MeanTilt(JetParams(), 1, 800);
+            float mb = MeanTilt(JetParams(), 2, 800);
+            var a = RunPattern(JetParams(), 1, 800);
+            var b = RunPattern(JetParams(), 2, 800);
+
+            // 傾きの大きさは一致し、傾く向き（軸の水平成分）は反転する
+            Assert.AreEqual(ma, mb, ma * 0.10f,
+                $"鏡像で傾きの大きさが違う（{ma:F3} 対 {mb:F3}）");
+            Assert.Less(a.Posture.AxisX * b.Posture.AxisX + a.Posture.AxisZ * b.Posture.AxisZ, 0f,
+                "鏡像で傾く向きが反転していない");
+        }
+
+        /// <summary>
+        /// **M-K2d 推力が軸に沿う。** 止水での変位の向きが軸の向きと一致すること。
+        /// 「鉛直に何 m 進むか」にしないのは、magic number を置かずに
+        /// 「推力の向きは傘の軸」をそのまま検証できるから（追記7 A7.3）。
+        /// </summary>
+        [Test]
+        public void MK2d_DisplacementFollowsTheAxis()
+        {
+            // 復元を切って軸を傾けたまま保つ。片側発火で傾けてから直進させる
+            var p = JetParams(turn: 1.0f, righting: 0f);
+            var jelly = new Jellyfish(p, 0f, 0f, 0f);
+            int n = p.RingCells;
+
+            for (int t = 0; t < 400; t++)   // 片側で傾ける
+            {
+                if (t % p.PulsePeriodTicks == 0) jelly.StimulateCell(0);
+                jelly.Step(1f / 40f, 0f, 0f, 0f);
+            }
+            Assert.Greater(jelly.TiltDegrees, 5f, "傾きが足りず判定にならない");
+
+            float x0 = jelly.X, y0 = jelly.Y, z0 = jelly.Z;
+            float ax = jelly.Posture.AxisX, ay = jelly.Posture.AxisY, az = jelly.Posture.AxisZ;
+            for (int t = 0; t < 800; t++)   // 対称発火で直進
+            {
+                if (t % p.PulsePeriodTicks == 0) { jelly.StimulateCell(0); jelly.StimulateCell(n / 2); }
+                jelly.Step(1f / 40f, 0f, 0f, 0f);
+            }
+
+            float dx = jelly.X - x0, dy = jelly.Y - y0, dz = jelly.Z - z0;
+            float len = (float)Math.Sqrt(dx * dx + dy * dy + dz * dz);
+            Assert.Greater(len, 1e-4f, "動いていないので向きが判定できない");
+
+            float cos = (dx * ax + dy * ay + dz * az) / len;
+            float angle = (float)(Math.Acos(Math.Max(-1f, Math.Min(1f, cos))) * 180.0 / Math.PI);
+            Assert.Less(angle, 20f, $"変位が軸から {angle:F1} 度ずれている");
+        }
+
+        /// <summary>
+        /// **M-K2e 神経は軸を読まない。** 線引きの核。
+        ///
+        /// 初期姿勢を変えてもリングの状態が一字一句同じなら、神経は姿勢を
+        /// 参照していない。参照できないなら**何かへ向けて操舵することは
+        /// 原理的に不可能**であり、grep より強い保証になる（追記7 A7.3）。
+        /// </summary>
+        [Test]
+        public void MK2e_TheNerveNeverReadsTheAxis()
+        {
+            // 復元を切る。入れると両者が同じ平衡姿勢へ収束してしまい、
+            // 「姿勢が違う状態で神経を回した」ことにならない（空の検証になる）
+            var p = JetParams(righting: 0f);
+            var upright = new Jellyfish(p, 0f, 0f, 0f);
+            var tilted = new Jellyfish(p, 0f, 0f, 0f);
+
+            // 軸を大きく倒す。**積分を通して**倒すので「軸は代入されない」が保たれる
+            for (int k = 0; k < 20; k++) tilted.NudgeForTest(0f, 0f, 2f, 1f / 40f);
+
+            // 走らせる前に、姿勢が実際に違うことを確かめる（空の検証の防止）
+            Assert.Greater(Math.Abs(tilted.TiltDegrees - upright.TiltDegrees), 10f,
+                $"姿勢の差が小さすぎる（{upright.TiltDegrees:F2} 対 {tilted.TiltDegrees:F2}）");
+
+            for (int t = 0; t < 600; t++)
+            {
+                if (t % p.PulsePeriodTicks == 0) { upright.StimulateCell(0); tilted.StimulateCell(0); }
+                upright.Step(1f / 40f, 0f, 0f, 0f);
+                tilted.Step(1f / 40f, 0f, 0f, 0f);
+            }
+
+            // 走らせたあとも姿勢は違うまま（神経が違う姿勢を「見る機会」があった）
+            Assert.Greater(Math.Abs(tilted.TiltDegrees - upright.TiltDegrees), 1f,
+                "走行後に姿勢の差が消えている。神経が姿勢を見る機会がなかった");
+
+            Assert.AreEqual(upright.Ring.ComputeContentHash(), tilted.Ring.ComputeContentHash(),
+                "初期姿勢を変えたらリングの状態が変わった = 神経が軸を読んでいる");
+        }
+
+        /// <summary>**M-K2f 決定論。** 噴流モデルでも同一入力から同一状態へ。</summary>
+        [Test]
+        public void MK2f_JetModelIsDeterministic()
+        {
+            ulong Run(float turn, int steps) => RunPattern(JetParams(turn), 1, steps).ComputeContentHash();
+
+            Assert.AreEqual(Run(1.0f, 400), Run(1.0f, 400), "2回の実行が違う状態になった");
+            Assert.AreNotEqual(Run(1.0f, 400), Run(1.0f, 401), "ステップ数が違うのに同じ状態");
+            Assert.AreNotEqual(Run(1.0f, 400), Run(2.0f, 400), "旋回係数が違うのに同じ状態");
+        }
+
+        /// <summary>
+        /// **M-K2g 復元の有無で M-K2b が変わらない。**
+        ///
+        /// 復元が強すぎると回頭を打ち消し、判定が復元係数依存になる。
+        /// K1 で既定 0.06 が「反発ありと無しで差が出ない」となったのと同じ罠の
+        /// 再発防止（追記7 A7.3）。落ちる係数は探索範囲の上限として記録する。
+        /// </summary>
+        [Test]
+        public void MK2g_TheVerdictDoesNotDependOnTheRightingGain()
+        {
+            // 掃引で M-K2b が合格する範囲は復元 0〜32（追記8）。既定 0.5 の
+            // 上下に十分な幅がある。境界（32〜64）は K4 の探索上限として登録済み
+            foreach (float righting in new[] { 0f, 0.5f, 8f, 32f })
+            {
+                float control = MeanTilt(JetParams(1.0f, righting), 0, 800);
+                float oneSided = MeanTilt(JetParams(1.0f, righting), 1, 800);
+                Assert.Greater(oneSided, Math.Max(control * 10f, 1.0f),
+                    $"復元 {righting:F2} で M-K2b が落ちた（片側 {oneSided:F3} / 対照 {control:F4}）");
+            }
+        }
 }
 }

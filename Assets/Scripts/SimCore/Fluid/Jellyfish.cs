@@ -89,6 +89,44 @@ namespace BlockField.SimCore.Fluid
         /// <summary>モデル速度を m/s へ換算する係数（診断用）。</summary>
         public float SpeedScale => m_SpeedScale;
 
+        // ================= K2: dV/dt 噴流モデル =================
+
+        /// <summary>傘の姿勢。噴流モデルのときだけ動く（<see cref="JellyPosture"/>）。</summary>
+        public JellyPosture Posture => m_Posture;
+        JellyPosture m_Posture = JellyPosture.Upright;
+
+        /// <summary>角速度（部屋座標、rad/s）。トルクの積分だけで変わる。</summary>
+        float m_OmX, m_OmY, m_OmZ;
+
+        /// <summary>噴流モデルの速度（部屋座標、モデル単位）。軸方向に推力が乗る。</summary>
+        float m_JetVx, m_JetVy, m_JetVz;
+
+        /// <summary>前ステップの傘の囲む体積（モデル単位）。dV/dt に使う。</summary>
+        float m_PrevVolume;
+        bool m_HasPrevVolume;
+
+        /// <summary>噴流モデルか。</summary>
+        public bool IsJetModel => m_Params.JetModel;
+
+        /// <summary>軸が真上から傾いている角度（度）。判定とログ用。</summary>
+        public float TiltDegrees => m_Posture.TiltDegrees();
+
+        /// <summary>
+        /// 傘の囲む体積（モデル単位）。収縮でリムが縮むと減る。
+        /// 形は <c>V ∝ r̄² · h</c>（r̄ = リムの平均半径）。dV/dt の元。
+        /// </summary>
+        float BellVolume()
+        {
+            float sum = 0f;
+            for (int i = 0; i < m_Params.RingCells; i++) sum += Contraction(i);
+            float meanC = sum / m_Params.RingCells;
+            float r = 1f - k_RimShrink * meanC;      // 半径（傘径で規格化）
+            return r * r;                             // 高さは一定なので比例定数に畳む
+        }
+
+        /// <summary>収縮でリムがどれだけ縮むか。View の k_ContractionDepth と同じ値。</summary>
+        const float k_RimShrink = 0.32f;
+
         /// <summary>
         /// 水槽の形。渡すと固体セルへ入る移動を受け付けなくなる
         /// （<see cref="JellyBoundary"/>）。null なら境界なし（単体テスト用）。
@@ -172,7 +210,8 @@ namespace BlockField.SimCore.Fluid
         /// <param name="flowVx">その位置の流速 (m/s)。クラゲは流れに書き戻さない。</param>
         public void Step(float dtSeconds, float flowVx, float flowVy, float flowVz)
         {
-            if (StepCount % m_Params.PulsePeriodTicks == 0
+            if (m_Params.Pacemaker
+                && StepCount % m_Params.PulsePeriodTicks == 0
                 && m_Ring.Refractory(m_Params.PacemakerCell) == 0)
             {
                 m_Ring.Stimulate(m_Params.PacemakerCell, m_Params.Excitable);
@@ -193,28 +232,127 @@ namespace BlockField.SimCore.Fluid
             m_ModelVx *= (1f - m_Params.Drag);
             m_ModelVz *= (1f - m_Params.Drag);
 
+            if (m_Params.JetModel)
+            {
+                StepJet(dtSeconds);
+            }
+
             // 壁から離れる向きの速度。壁は環境の情報で、神経が決めた推力は書き換えない
             JellyBoundary.Repulsion(m_Tank, X, Y, Z,
                 m_Params.WallBandCells, m_Params.WallRepelSpeed,
                 out float rx, out float ry, out float rz);
 
-            // 流れが運ぶ。自力遊泳は水平のみ（リング平面が水平に固定されているため）
-            float toX = X + (SwimVx + flowVx + rx) * dtSeconds;
-            float toY = Y + (flowVy + ry) * dtSeconds;
-            float toZ = Z + (SwimVz + flowVz + rz) * dtSeconds;
+            // 噴流モデルなら3方向すべてに自力の速度が出る（jelly_1 の水平限定が外れる）
+            float sx = m_Params.JetModel ? m_JetVx * m_SpeedScale : SwimVx;
+            float sy = m_Params.JetModel ? m_JetVy * m_SpeedScale : 0f;
+            float sz = m_Params.JetModel ? m_JetVz * m_SpeedScale : SwimVz;
+
+            float toX = X + (sx + flowVx + rx) * dtSeconds;
+            float toY = Y + (sy + flowVy + ry) * dtSeconds;
+            float toZ = Z + (sz + flowVz + rz) * dtSeconds;
 
             // 壁の中へは入らせない。壁は環境の情報で、神経が決めた推力は書き換えない
             JellyBoundary.ClampMove(m_Tank, X, Y, Z, ref toX, ref toY, ref toZ);
             X = toX; Y = toY; Z = toZ;
 
             // 診断用の内訳。位置の更新式はそのまま（丸めの経路を変えないため）
-            SwimPathX += SwimVx * dtSeconds;
-            SwimPathZ += SwimVz * dtSeconds;
+            SwimPathX += sx * dtSeconds;
+            SwimPathZ += sz * dtSeconds;
             DriftPathX += flowVx * dtSeconds;
             DriftPathY += flowVy * dtSeconds;
             DriftPathZ += flowVz * dtSeconds;
 
             StepCount++;
+        }
+
+        /// <summary>
+        /// 指定したセルを刺激する。**環境が刺激の位置を決める入口**（jelly_2 K3）。
+        ///
+        /// 逃避の向きは既存の機構（伝播の時間差 + 減衰勾配）から創発するので、
+        /// ここで向きを渡すことはない。渡すのは**どのセルか**だけである。
+        /// テストが対称／片側／鏡像を作るのにも使う。
+        /// </summary>
+        public void StimulateCell(int cell)
+        {
+            if (cell < 0 || cell >= m_Params.RingCells) return;
+            if (m_Ring.Refractory(cell) != 0) return;
+            m_Ring.Stimulate(cell, m_Params.Excitable);
+        }
+
+        /// <summary>
+        /// **テスト専用**: 角速度を1ステップぶん与えて姿勢を動かす。
+        ///
+        /// 軸を直接代入する口はどこにも作らない（「軸は積分されるだけで、
+        /// 代入されない」— 追記7 A7.1）。傾いた初期姿勢が要るテストは、
+        /// **積分を通して**傾ける。
+        /// </summary>
+        public void NudgeForTest(float omX, float omY, float omZ, float dt)
+        {
+            m_Posture.Integrate(omX, omY, omZ, dt);
+        }
+
+        /// <summary>
+        /// dV/dt 噴流モデルの1ステップ（jelly_2 K2）。
+        ///
+        /// - 推力の**大きさ**: 傘の囲む体積の減少から。形は K1 が読んだ
+        ///   <c>∝ dV·(dV/開口)</c>（`jelly_side.html` の `J = c·dA·(dA/ap)`）
+        /// - 推力の**向き**: 傘の軸
+        /// - **旋回**: 収縮の非対称から。各発火セルが自分の位置で軸方向に水を吐くので、
+        ///   トルクは <c>Σ(amp_i · r̂_i) × 軸</c> になる。**対称に発火すれば
+        ///   Σ(amp_i · r̂_i) = 0 なのでトルクは構造的に 0**（M-K2a が構成から従う）
+        ///
+        /// 【方向を計算していない】トルクは局所的な寄与の総和で、既存の推力
+        /// （`m_ModelVx -= amp * m_Cos[i]`）とまったく同じ形である。
+        /// 軸は <see cref="JellyPosture.Integrate"/> でしか変わらない。
+        /// </summary>
+        void StepJet(float dtSeconds)
+        {
+            // --- 推力: 体積の減少 ---
+            float volume = BellVolume();
+            float dV = m_HasPrevVolume ? m_PrevVolume - volume : 0f;
+            m_PrevVolume = volume;
+            m_HasPrevVolume = true;
+
+            if (dV > 0f)
+            {
+                // 開口はリムの面積に比例（体積と同じ規格化）。dV·(dV/開口)
+                float aperture = volume > 1e-6f ? volume : 1e-6f;
+                float thrust = dV * (dV / aperture);
+                m_JetVx += thrust * m_Posture.AxisX;
+                m_JetVy += thrust * m_Posture.AxisY;
+                m_JetVz += thrust * m_Posture.AxisZ;
+            }
+            m_JetVx *= (1f - m_Params.Drag);
+            m_JetVy *= (1f - m_Params.Drag);
+            m_JetVz *= (1f - m_Params.Drag);
+
+            // --- 旋回: 発火の非対称 ---
+            float mx = 0f, my = 0f, mz = 0f;
+            var fired = m_Ring.LastFired;
+            for (int f = 0; f < fired.Count; f++)
+            {
+                int i = fired[f];
+                float amp = (float)m_Ring.Amplitude(i);
+                m_Posture.RadialAt(m_Cos[i], m_Sin[i], out float ux, out float uy, out float uz);
+                mx += amp * ux; my += amp * uy; mz += amp * uz;
+            }
+            // トルク = (Σ amp·r̂) × 軸
+            float g = m_Params.TurnGain;
+            float tx = g * (my * m_Posture.AxisZ - mz * m_Posture.AxisY);
+            float ty = g * (mz * m_Posture.AxisX - mx * m_Posture.AxisZ);
+            float tz = g * (mx * m_Posture.AxisY - my * m_Posture.AxisX);
+
+            // --- 復元: 受動的な物理（行き先の計算ではない）---
+            m_Posture.RightingTorque(m_Params.RightingGain,
+                out float wx, out float wy, out float wz);
+            tx += wx; ty += wy; tz += wz;
+
+            m_OmX = (m_OmX + tx) * (1f - m_Params.RotationDrag);
+            m_OmY = (m_OmY + ty) * (1f - m_Params.RotationDrag);
+            m_OmZ = (m_OmZ + tz) * (1f - m_Params.RotationDrag);
+
+            // 軸はここでしか変わらない
+            m_Posture.Integrate(m_OmX, m_OmY, m_OmZ, dtSeconds);
         }
 
         /// <summary>
