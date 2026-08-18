@@ -701,5 +701,38 @@ namespace BlockField.Tests.EditMode
                     $"復元 {righting:F2} で M-K2b が落ちた（片側 {oneSided:F3} / 対照 {control:F4}）");
             }
         }
+
+        /// <summary>
+        /// **傘の回転が局所軸を姿勢へ写すこと。**
+        ///
+        /// メッシュは局所 +Y が頂点、局所 +X が解剖学的な 0°。
+        /// `Quaternion.LookRotation` の引数の向きは導出だけで決めず、ここで固定する
+        /// （Unity は right = Cross(up, forward) なので forward = -(軸 × 基準)）。
+        /// 間違えると傘が姿勢と別の向きを向き、実機でしか気づけない。
+        /// </summary>
+        [Test]
+        public void MK2h_BellRotationMapsLocalAxesOntoThePosture()
+        {
+            var p = JetParams(righting: 0f);
+            var jelly = new Jellyfish(p, 0f, 0f, 0f);
+
+            // 姿勢を傾ける（積分を通す）。真上のままだと恒等写像で空の検証になる
+            for (int k = 0; k < 15; k++) jelly.NudgeForTest(0.7f, 0.3f, 1.5f, 1f / 40f);
+            Assert.Greater(jelly.TiltDegrees, 10f, "姿勢が傾いていないと判定にならない");
+
+            var rot = BlockField.Aquarium.JellyfishView.PostureRotation(jelly);
+            var post = jelly.Posture;
+
+            var mappedUp = rot * UnityEngine.Vector3.up;
+            var mappedRight = rot * UnityEngine.Vector3.right;
+
+            Assert.AreEqual(post.AxisX, mappedUp.x, 1e-4f, "局所 +Y が軸に写っていない");
+            Assert.AreEqual(post.AxisY, mappedUp.y, 1e-4f, "局所 +Y が軸に写っていない");
+            Assert.AreEqual(post.AxisZ, mappedUp.z, 1e-4f, "局所 +Y が軸に写っていない");
+
+            Assert.AreEqual(post.RefX, mappedRight.x, 1e-4f, "局所 +X が基準に写っていない");
+            Assert.AreEqual(post.RefY, mappedRight.y, 1e-4f, "局所 +X が基準に写っていない");
+            Assert.AreEqual(post.RefZ, mappedRight.z, 1e-4f, "局所 +X が基準に写っていない");
+        }
 }
 }

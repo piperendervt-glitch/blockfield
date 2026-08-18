@@ -161,13 +161,25 @@ namespace BlockField.Aquarium
         }
 
         /// <summary>部屋座標に1つだけ描く（クラゲの傘）。</summary>
-        public bool DrawOne(Mesh mesh, Material material, Vector3 roomPosition)
+        public bool DrawOne(Mesh mesh, Material material, Vector3 roomPosition) =>
+            DrawOne(mesh, material, roomPosition, Quaternion.identity);
+
+        /// <summary>
+        /// 部屋座標に1つだけ、**部屋座標での回転つき**で描く。
+        ///
+        /// 【回転も部屋座標で受け取る】ワールドの量（カメラの姿勢など）を渡されると
+        /// アンカーの姿勢だけ余計に回る。粒子のビルボードで実際に起きた
+        /// （<see cref="TryGetBillboardRotation"/>）。クラゲの姿勢は
+        /// 部屋座標で持っている状態なので、そのまま渡してよい。
+        /// </summary>
+        public bool DrawOne(Mesh mesh, Material material, Vector3 roomPosition,
+            Quaternion roomRotation)
         {
             if (mesh == null || material == null) return false;
             if (!TryGetSpace(out var space)) return false;
 
             Graphics.DrawMesh(mesh,
-                space * Matrix4x4.TRS(roomPosition, Quaternion.identity, Vector3.one),
+                space * Matrix4x4.TRS(roomPosition, roomRotation, Vector3.one),
                 material, 0);
             return true;
         }

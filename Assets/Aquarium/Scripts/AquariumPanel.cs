@@ -47,6 +47,12 @@ namespace BlockField.Aquarium
             // パネルで読んでも比の判定に使えない。直近1拍動の平均を出す
             return $"Jelly[R-B]: {body.BellDiameter * 100f:F0}cm " +
                 $"({m_Jelly.BellIndex + 1}/{AquariumJellyfish.BellDiameterChoices.Length})" +
+                // 【姿勢を装着中に読めるように】K2 で軸が状態になったので、
+                // 傾きが分からないと「上下に泳げているか」を判定できない
+                $"   傾き={m_Jelly.TiltDegrees:F1}°" +
+                $"   復元[R-Trig]={m_Jelly.RightingGain:F1}" +
+                $"({m_Jelly.RightingIndex + 1}/{AquariumJellyfish.RightingChoices.Length})" +
+                $"   刺激[L-Trig]={m_Jelly.StimulusCount}回" +
                 $"   repel[R-Grip]={m_Jelly.WallRepelSpeed:F2}" +
                 $"({m_Jelly.RepelIndex + 1}/{AquariumJellyfish.WallRepelChoices.Length})" +
                 $"   pulse={body.PulseCount}   swim={m_Jelly.SwimSpeedMean:F3}" +

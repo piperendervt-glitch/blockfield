@@ -701,6 +701,8 @@ namespace BlockField.Aquarium
                     $"比={m_Jelly.SwimToFlowRatio:F2} 実移動={m_Jelly.ActualSpeedMean:F4}m/s " +
                     $"(瞬時 遊泳={body.SwimSpeed:F4} 流れ={m_Jelly.FlowAt.magnitude:F4}) " +
                     $"反発={body.WallRepelSpeed:F2}m/s " +
+                    $"傾き={body.TiltDegrees:F1}度 復元={m_Jelly.RightingGain:F2} " +
+                    $"刺激={m_Jelly.StimulusCount}回 噴流={body.IsJetModel} " +
                     $"位置=({body.X:F2}, {body.Y:F2}, {body.Z:F2}){JellyCellState(body)} " +
                     $"世界={JellyWorldPosition(body):F2} step={body.StepCount}");
             }

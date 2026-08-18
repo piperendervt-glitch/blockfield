@@ -35,15 +35,34 @@ namespace BlockField.Aquarium
         /// </summary>
         public static readonly float[] WallRepelChoices = { 0.00f, 0.10f, 0.20f, 0.05f };
 
+        /// <summary>
+        /// 復元トルクの強さ。**既定 ON**、右手トリガーで切れる（jelly_2 追記7 A7.2）。
+        ///
+        /// 逆さまのまま泳ぐクラゲは「生きて見えない」の要因になりうるが、
+        /// 「逆さまが直らない」と「逃避が永続する」のどちらが体験として重いかは
+        /// 実機で見るまで分からない。切り替えて判断する。
+        /// 掃引では M-K2b が復元 32 まで合格する（追記8）。
+        /// </summary>
+        public static readonly float[] RightingChoices = { 0.5f, 0f, 2f };
+
         [SerializeField] AquariumFlow m_Flow;
         [SerializeField] int m_BellIndex = 1;
         [SerializeField] int m_RepelIndex;
+        [SerializeField] int m_RightingIndex;
 
         public AquariumFlow flow { get => m_Flow; set => m_Flow = value; }
 
         public int BellIndex => m_BellIndex;
         public int RepelIndex => m_RepelIndex;
         public float WallRepelSpeed => WallRepelChoices[m_RepelIndex];
+        public int RightingIndex => m_RightingIndex;
+        public float RightingGain => RightingChoices[m_RightingIndex];
+
+        /// <summary>軸が真上から傾いている角度（度）。装着中に姿勢を読むため。</summary>
+        public float TiltDegrees => Body != null ? Body.TiltDegrees : 0f;
+
+        /// <summary>実機で刺激を注入した回数（ログとパネル用）。</summary>
+        public int StimulusCount { get; private set; }
         public float BellDiameter => BellDiameterChoices[m_BellIndex];
 
         /// <summary>クラゲ本体。焼き込みが済むまで null。</summary>
@@ -156,10 +175,7 @@ namespace BlockField.Aquarium
             m_RepelIndex = (m_RepelIndex + 1) % WallRepelChoices.Length;
             if (Body != null)
             {
-                var p = JellyParams.Default;
-                p.BellDiameter = BellDiameter;
-                p.WallRepelSpeed = WallRepelSpeed;
-                var moved = new Jellyfish(p, Body.X, Body.Y, Body.Z, m_Flow.Field.Grid);
+                var moved = new Jellyfish(MakeParams(), Body.X, Body.Y, Body.Z, m_Flow.Field.Grid);
                 Body = moved;
                 m_WindowStep = 0;
                 m_WinSwimX = m_WinSwimZ = 0f;
@@ -178,6 +194,56 @@ namespace BlockField.Aquarium
             Debug.Log($"[Aquarium] 傘径を {BellDiameter * 100f:F0}cm に切り替え");
         }
 
+        /// <summary>
+        /// 実機のパラメータ。**噴流モデルは実機では ON**（jelly_2 K2）。
+        /// `JellyParams.Default` は既定オフのままにしてある（テストと Phase C の
+        /// 挙動を変えないため）。実機側で明示的に有効化する。
+        /// </summary>
+        JellyParams MakeParams()
+        {
+            var p = JellyParams.Default;
+            p.BellDiameter = BellDiameter;
+            p.WallRepelSpeed = WallRepelSpeed;
+            p.JetModel = true;
+            p.RightingGain = RightingGain;
+            return p;
+        }
+
+        /// <summary>
+        /// 復元トルクを切り替える。**位置と姿勢は引き継がない**（湧かせ直す）。
+        /// 姿勢は積分でしか動かせないので、引き継ぐには姿勢を代入する口が要る。
+        /// その口は作らない（「軸は積分されるだけで、代入されない」）。
+        /// </summary>
+        public void CycleRighting()
+        {
+            m_RightingIndex = (m_RightingIndex + 1) % RightingChoices.Length;
+            Body = null;
+            Debug.Log($"[Aquarium] 復元トルクを {RightingGain:F2} に切り替え" +
+                $"（{(RightingGain > 0f ? "ON" : "OFF: アブレーション")}）。湧かせ直す");
+        }
+
+        /// <summary>
+        /// **側方のセルを一発叩く**（M-J3b の実機版）。
+        ///
+        /// 【なぜ要るか】単一ペースメーカーでも回頭は出る（波が対称に伝わっても
+        /// Σ(amp·r̂) はペースメーカー軸に沿って残るため）が、平衡傾斜は約 5 度で
+        /// **目で見るには小さすぎる**。刺激注入は回頭を無から作るのではなく、
+        /// **見える大きさにする**ためのもの。
+        ///
+        /// 叩くのはペースメーカーから 1/4 周ずれたセル（最も非対称になる位置）。
+        /// 向きは渡さない。渡すのは**どのセルか**だけで、逃避の向きは創発する。
+        /// </summary>
+        public void InjectStimulus()
+        {
+            if (Body == null) return;
+            int cell = (JellyParams.Default.PacemakerCell + JellyParams.Default.RingCells / 4)
+                % JellyParams.Default.RingCells;
+            Body.StimulateCell(cell);
+            StimulusCount++;
+            Debug.Log($"[Aquarium] 刺激を注入: セル {cell}（通算 {StimulusCount} 回）" +
+                $" 傾き {TiltDegrees:F1}度");
+        }
+
         void Spawn(FlowField field)
         {
             var g = field.Grid;
@@ -186,10 +252,7 @@ namespace BlockField.Aquarium
             float cy = g.OriginY + g.Height * g.CellSize * 0.55f;
             float cz = g.OriginZ + g.Depth * g.CellSize * 0.5f;
 
-            var p = JellyParams.Default;
-            p.BellDiameter = BellDiameter;
-            p.WallRepelSpeed = WallRepelSpeed;
-            Body = new Jellyfish(p, cx, cy, cz, g);
+            Body = new Jellyfish(MakeParams(), cx, cy, cz, g);
 
             m_WindowStep = 0;
             m_WinSwimX = m_WinSwimZ = 0f;
@@ -198,8 +261,10 @@ namespace BlockField.Aquarium
             if (Body != null) { m_WinPosX = Body.X; m_WinPosY = Body.Y; m_WinPosZ = Body.Z; }
 
             Debug.Log($"[Aquarium] クラゲを投入: 傘 {BellDiameter * 100f:F0}cm / " +
-                $"目標遊泳 {p.SwimSpeed:F3}m/s / 拍動 {p.PulsePeriodTicks / k_NeuralHz:F2}秒 / " +
-                $"換算係数 {Body.SpeedScale:F4} / 位置({cx:F2}, {cy:F2}, {cz:F2})");
+                $"目標遊泳 {JellyParams.Default.SwimSpeed:F3}m/s / " +
+                $"拍動 {JellyParams.Default.PulsePeriodTicks / k_NeuralHz:F2}秒 / " +
+                $"換算係数 {Body.SpeedScale:F4} / 位置({cx:F2}, {cy:F2}, {cz:F2}) / " +
+                $"噴流モデル={Body.IsJetModel} 復元={RightingGain:F2}");
         }
 
         /// <summary>

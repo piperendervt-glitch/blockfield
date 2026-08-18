@@ -64,7 +64,31 @@ namespace BlockField.Aquarium
             // 描画は AnchorSpaceRenderer に集約している。ここで空間行列を組み立てない
             // （粒子・デバッグ表示と同じ組み立てを3回書いて3回間違えた経緯がある）
             if (m_Space != null) m_Space.DrawOne(m_Mesh, m_Material,
-                new Vector3(body.X, body.Y, body.Z));
+                new Vector3(body.X, body.Y, body.Z), PostureRotation(body));
+        }
+
+        /// <summary>
+        /// 傘の姿勢を部屋座標の回転にする（jelly_2 K2）。
+        ///
+        /// メッシュは局所 +Y が頂点、局所 +X が解剖学的な 0° である。
+        /// <see cref="SimCore.Fluid.JellyPosture"/> はその2本を部屋座標で持っている
+        /// ので、局所 +Y → 軸、局所 +X → 基準 に写す回転を作る。
+        ///
+        /// 【LookRotation の向き】Unity は right = Cross(up, forward) なので、
+        /// right を基準に一致させるには forward = -(軸 × 基準) を渡す。
+        /// 符号は導出だけで決めず、テストで固定してある
+        /// （<c>MK2h_BellRotationMapsLocalAxesOntoThePosture</c>）。
+        ///
+        /// 噴流モデルでないときは姿勢が動かないので identity と同じになる。
+        /// </summary>
+        internal static Quaternion PostureRotation(SimCore.Fluid.Jellyfish body)
+        {
+            var p = body.Posture;
+            var axis = new Vector3(p.AxisX, p.AxisY, p.AxisZ);
+            p.Third(out float tx, out float ty, out float tz);
+            var third = new Vector3(tx, ty, tz);
+            if (axis.sqrMagnitude < 1e-8f || third.sqrMagnitude < 1e-8f) return Quaternion.identity;
+            return Quaternion.LookRotation(-third, axis);
         }
 
         /// <summary>

@@ -13,6 +13,10 @@ namespace BlockField.Aquarium
     /// - **右手B: 傘径**（10 → 15 → 25 cm）。実部屋での見え方に直結する
     /// - **右手グリップ: 壁の反発**（0.06 → 0.12 → 0.00 → 0.03 m/s）。
     ///   止水でクラゲが壁に張り付く件の調整。弾かれて見えない強さを探す
+    /// - **右手トリガー: 復元トルク**（0.5 → 0(切) → 2.0）。姿勢が立ち直るかを見る
+    /// - **左手トリガー: 刺激を注入**（側方のセルを一発叩く。M-J3b の実機版）。
+    ///   単一ペースメーカーでも回頭は出るが平衡傾斜が約5度で見えないため、
+    ///   **見える大きさにする**ために使う
     /// - **左手グリップ: デバッグ表示**（なし → 固体セル(遮蔽あり) → 固体セル(遮蔽なし)
     ///   → 水槽の外接箱）。**焼き込んだ壁が現実の壁と重なっているか**を目で確かめる
     ///
@@ -38,6 +42,8 @@ namespace BlockField.Aquarium
         InputAction m_BellAction;
         InputAction m_DebugAction;
         InputAction m_RepelAction;
+        InputAction m_RightingAction;
+        InputAction m_StimulusAction;
 
         void OnEnable()
         {
@@ -71,6 +77,26 @@ namespace BlockField.Aquarium
                 "<XRController>{RightHand}/gripPressed");
             m_RepelAction.performed += OnRepel;
             m_RepelAction.Enable();
+
+            m_RightingAction = new InputAction("AquariumRighting", InputActionType.Button,
+                "<XRController>{RightHand}/triggerPressed");
+            m_RightingAction.performed += OnRighting;
+            m_RightingAction.Enable();
+
+            m_StimulusAction = new InputAction("AquariumStimulus", InputActionType.Button,
+                "<XRController>{LeftHand}/triggerPressed");
+            m_StimulusAction.performed += OnStimulus;
+            m_StimulusAction.Enable();
+        }
+
+        void OnRighting(InputAction.CallbackContext _)
+        {
+            if (m_Jelly != null) m_Jelly.CycleRighting();
+        }
+
+        void OnStimulus(InputAction.CallbackContext _)
+        {
+            if (m_Jelly != null) m_Jelly.InjectStimulus();
         }
 
         void OnRepel(InputAction.CallbackContext _)
@@ -126,6 +152,20 @@ namespace BlockField.Aquarium
                 m_RepelAction.Disable();
                 m_RepelAction.Dispose();
                 m_RepelAction = null;
+            }
+            if (m_RightingAction != null)
+            {
+                m_RightingAction.performed -= OnRighting;
+                m_RightingAction.Disable();
+                m_RightingAction.Dispose();
+                m_RightingAction = null;
+            }
+            if (m_StimulusAction != null)
+            {
+                m_StimulusAction.performed -= OnStimulus;
+                m_StimulusAction.Disable();
+                m_StimulusAction.Dispose();
+                m_StimulusAction = null;
             }
         }
 
