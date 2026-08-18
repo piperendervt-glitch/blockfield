@@ -134,6 +134,13 @@ namespace BlockField.SimCore.Fluid
         readonly FlowGrid m_Tank;
 
         public Jellyfish(JellyParams p, float x, float y, float z, FlowGrid tank = null)
+            : this(p, x, y, z, tank, calibrate: true) { }
+
+        /// <param name="calibrate">
+        /// false なら換算係数を 1 のままにする。**較正そのものが本体を走らせる**ので、
+        /// その内側で再び較正しないための入口（無限再帰の回避）。
+        /// </param>
+        Jellyfish(JellyParams p, float x, float y, float z, FlowGrid tank, bool calibrate)
         {
             m_Params = p;
             m_Tank = tank;
@@ -149,7 +156,52 @@ namespace BlockField.SimCore.Fluid
             }
 
             X = x; Y = y; Z = z;
-            m_SpeedScale = CalibrateSpeedScale(p);
+            m_SpeedScale = !calibrate ? 1f
+                : p.JetModel ? CalibrateJetSpeedScale(p)
+                : CalibrateSpeedScale(p);
+        }
+
+        /// <summary>
+        /// **噴流モデルの換算係数**を実測で出す（jelly_2 K2）。
+        ///
+        /// 【なぜ別に要るか】<see cref="CalibrateSpeedScale"/> は 2D リム収縮の
+        /// モデルを走らせて係数を出す。噴流の速度は推力の形が違うので**桁が違い**、
+        /// 2D 用の係数を掛けると速度が合わない。実機で
+        /// **目標 0.04 m/s に対し 0.001067 m/s（2.7%、1.07mm/s）** になり、
+        /// 「止水でクラゲが移動しない」と報告された（2026-08-16）。
+        ///
+        /// 【なぜテストで捕まらなかったか】M-K2d は変位の**向き**しか見ておらず、
+        /// 大きさの下限は「0 でないこと」を保証する 1e-4 m だけだった。
+        /// **変位が出ることと、視認できる速度で出ることは別**である。
+        /// 速度の大きさを見る判定を M-K2i として足した。
+        ///
+        /// 【経路長で測る】噴流モデルは旋回するので正味変位は曲がったぶん短くなる。
+        /// 「どれだけ速く動くか」は経路長で測るのが正しい。
+        /// </summary>
+        static float CalibrateJetSpeedScale(JellyParams p)
+        {
+            // 【較正は必ずペースメーカーを働かせる】測るのは「この個体が自分の
+            // ペースメーカーでどれだけ速く泳ぐか」であって、判定側が発火を
+            // 制御するために切っているかどうかとは無関係。
+            // 継承すると刺激ゼロ → 速度ゼロ → 係数 0 になり、**全部止まる**
+            var probeParams = p;
+            probeParams.Pacemaker = true;
+            var probe = new Jellyfish(probeParams, 0f, 0f, 0f, null, calibrate: false);
+            const float dt = 1f / 40f;
+
+            for (int t = 0; t < 800; t++) probe.Step(dt, 0f, 0f, 0f);   // 過渡を外す
+
+            float px = probe.X, py = probe.Y, pz = probe.Z;
+            double path = 0;
+            for (int t = 0; t < 800; t++)
+            {
+                probe.Step(dt, 0f, 0f, 0f);
+                double ddx = probe.X - px, ddy = probe.Y - py, ddz = probe.Z - pz;
+                path += Math.Sqrt(ddx * ddx + ddy * ddy + ddz * ddz);
+                px = probe.X; py = probe.Y; pz = probe.Z;
+            }
+            float sustained = (float)(path / (800.0 * dt));
+            return sustained > 1e-9f ? p.SwimSpeed / sustained : 0f;
         }
 
         /// <summary>

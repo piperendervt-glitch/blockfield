@@ -71,3 +71,20 @@ foreach (float g in new[] { 0.1f, 0.25f, 0.5f, 1f, 2f, 4f })
     bool pass = one > Math.Max(ctrl * 10f, 1.0f);
     Console.WriteLine($"  {g,5:F2} | {ctrl,9:F4} | {one,8:F4} | {(pass ? "合格" : "**不合格**")}");
 }
+
+// ---- 止水での実移動速度（実機で「動かない」と報告された件）----
+Console.WriteLine();
+Console.WriteLine("止水での実移動速度（過渡800を捨てて800ステップ、ペースメーカーON）");
+Console.WriteLine("  モデル         | 実移動 m/s | 目標比");
+foreach (bool jet in new[] { false, true })
+{
+    var q = JellyParams.Default;
+    q.JetModel = jet;
+    var j = new Jellyfish(q, 0f, 0f, 0f);
+    for (int t = 0; t < 800; t++) j.Step(1f / 40f, 0f, 0f, 0f);
+    float x0 = j.X, y0 = j.Y, z0 = j.Z;
+    for (int t = 0; t < 800; t++) j.Step(1f / 40f, 0f, 0f, 0f);
+    double d = Math.Sqrt((j.X - x0) * (j.X - x0) + (j.Y - y0) * (j.Y - y0) + (j.Z - z0) * (j.Z - z0));
+    double v = d / (800.0 / 40.0);
+    Console.WriteLine($"  {(jet ? "K2 噴流       " : "Phase C 2Dリム")} | {v,10:F6} | {v / q.SwimSpeed,6:F4}");
+}

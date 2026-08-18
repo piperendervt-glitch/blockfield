@@ -734,5 +734,76 @@ namespace BlockField.Tests.EditMode
             Assert.AreEqual(post.RefY, mappedRight.y, 1e-4f, "局所 +X が基準に写っていない");
             Assert.AreEqual(post.RefZ, mappedRight.z, 1e-4f, "局所 +X が基準に写っていない");
         }
+
+        /// <summary>
+        /// **M-K2i 噴流モデルでも目標速度で泳ぐこと。**
+        ///
+        /// 【なぜ後から足したか】K2 の判定7件は全部通ったのに、実機では
+        /// 「止水でクラゲが移動しない」となった。実測は **0.001067 m/s
+        /// （目標 0.04 の 2.7%、1.07mm/s）** で、目には止まって見える。
+        /// 換算係数を 2D リム収縮のモデルで較正したまま噴流の速度へ掛けており、
+        /// **桁が違うのに正規化していなかった**。
+        ///
+        /// M-K2d は変位の**向き**しか見ておらず、大きさの下限は「0 でないこと」を
+        /// 保証する 1e-4 m だけだった。**変位が出ることと、視認できる速度で
+        /// 出ることは別**である（2026-08-16 の指摘）。大きさを見る判定を置く。
+        /// </summary>
+        [Test]
+        public void MK2i_JetModelSwimsAtTheTargetSpeed()
+        {
+            foreach (float target in new[] { 0.02f, 0.04f, 0.1f })
+            {
+                var p = JellyParams.Default;
+                p.JetModel = true;
+                p.SwimSpeed = target;
+                var jelly = new Jellyfish(p, 0f, 0f, 0f);
+
+                for (int t = 0; t < 800; t++) jelly.Step(1f / 40f, 0f, 0f, 0f);   // 過渡
+
+                float px = jelly.X, py = jelly.Y, pz = jelly.Z;
+                double path = 0;
+                for (int t = 0; t < 800; t++)
+                {
+                    jelly.Step(1f / 40f, 0f, 0f, 0f);
+                    double dx = jelly.X - px, dy = jelly.Y - py, dz = jelly.Z - pz;
+                    path += Math.Sqrt(dx * dx + dy * dy + dz * dz);
+                    px = jelly.X; py = jelly.Y; pz = jelly.Z;
+                }
+                float speed = (float)(path / (800.0 / 40.0));
+
+                Assert.AreEqual(target, speed, target * 0.05f,
+                    $"噴流モデルの遊泳速度が目標 {target} m/s に対し {speed:F6} m/s");
+            }
+        }
+
+        /// <summary>
+        /// **2つのモデルの遊泳速度が一致すること。** 実機で切り替えたときに
+        /// 「速さが変わった」と見えないための担保。
+        /// </summary>
+        [Test]
+        public void MK2i_BothModelsSwimAtTheSameSpeed()
+        {
+            float Measure(bool jet)
+            {
+                var p = JellyParams.Default;
+                p.JetModel = jet;
+                var j = new Jellyfish(p, 0f, 0f, 0f);
+                for (int t = 0; t < 800; t++) j.Step(1f / 40f, 0f, 0f, 0f);
+                float px = j.X, py = j.Y, pz = j.Z;
+                double path = 0;
+                for (int t = 0; t < 800; t++)
+                {
+                    j.Step(1f / 40f, 0f, 0f, 0f);
+                    double dx = j.X - px, dy = j.Y - py, dz = j.Z - pz;
+                    path += Math.Sqrt(dx * dx + dy * dy + dz * dz);
+                    px = j.X; py = j.Y; pz = j.Z;
+                }
+                return (float)(path / (800.0 / 40.0));
+            }
+
+            float a = Measure(false), b = Measure(true);
+            Assert.AreEqual(a, b, a * 0.05f,
+                $"2Dリム {a:F5} m/s に対し噴流 {b:F5} m/s。実機で速さが変わって見える");
+        }
 }
 }
