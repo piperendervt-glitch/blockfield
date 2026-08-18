@@ -157,3 +157,51 @@ foreach (int cells in new[] { 1, 3, 5 })
     Console.WriteLine($"  {cells,6} | {peaks[0],12:F1} | {peaks[1],12:F1} | {peaks[2],12:F1} | " +
         $"{after[1],12:F1} | {after[2],12:F1}");
 }
+
+// ---- 実機で選ばれた設定（沈降1.10 + 復元0.5）の実態 ----
+Console.WriteLine();
+Console.WriteLine("実機で選ばれた設定の実態（噴流+ペースメーカーON、120拍動）");
+Console.WriteLine("  沈降 | 復元 | 平均傾き | 最大傾き | 正味の鉛直 m/s | 拍動停止時の沈降 m/s");
+foreach (var cfg in new[] { (1.10f, 0.5f), (0.90f, 0.5f), (1.10f, 0.0f) })
+{
+    var q = JellyParams.Default;
+    q.JetModel = true; q.SinkRatio = cfg.Item1; q.RightingGain = cfg.Item2;
+    var j = new Jellyfish(q, 0f, 0f, 0f);
+    for (int t = 0; t < 800; t++) j.Step(1f / 40f, 0f, 0f, 0f);
+    float y0 = j.Y; double tsum = 0; float tmax = 0; int n = 0;
+    for (int t = 0; t < 4000; t++)
+    {
+        j.Step(1f / 40f, 0f, 0f, 0f);
+        tsum += j.TiltDegrees; tmax = Math.Max(tmax, j.TiltDegrees); n++;
+    }
+    float net = (j.Y - y0) / 100f;
+
+    var k = new Jellyfish(q, 0f, 0f, 0f);
+    k.PacemakerEnabled = false;
+    for (int t = 0; t < 400; t++) k.Step(1f / 40f, 0f, 0f, 0f);
+    float sy = k.Y;
+    for (int t = 0; t < 400; t++) k.Step(1f / 40f, 0f, 0f, 0f);
+    float stopped = (sy - k.Y) / 10f;
+
+    Console.WriteLine($"  {cfg.Item1,4:F2} | {cfg.Item2,4:F2} | {tsum / n,8:F2} | {tmax,8:F1} | " +
+        $"{net,+14:F4} | {stopped,20:F4}");
+}
+
+// ---- 追記12 A12.3 の閾値の根拠: 比 1.5 が 1/3 の境界か ----
+Console.WriteLine();
+Console.WriteLine("閾値 1/3 の根拠（拍動中の沈降 ÷ 停止時の沈降）");
+foreach (float r in new[] { 0.90f, 1.10f, 1.25f, 1.50f, 1.75f })
+{
+    var q = JellyParams.Default; q.JetModel = true; q.SinkRatio = r;
+    float Rate(bool pulse)
+    {
+        var j = new Jellyfish(q, 0f, 0f, 0f); j.PacemakerEnabled = pulse;
+        for (int t = 0; t < 800; t++) j.Step(1f / 40f, 0f, 0f, 0f);
+        float y0 = j.Y;
+        for (int t = 0; t < 800; t++) j.Step(1f / 40f, 0f, 0f, 0f);
+        return Math.Max(0f, (y0 - j.Y) / 20f);
+    }
+    float st = Rate(false), pu = Rate(true);
+    Console.WriteLine($"  比 {r:F2}: 停止 {st:F4} 拍動 {pu:F4} → {pu / st:P1}" +
+        (pu <= st / 3f ? "  合格" : "  不合格"));
+}

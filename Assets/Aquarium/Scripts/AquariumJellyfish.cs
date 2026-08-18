@@ -52,7 +52,8 @@ namespace BlockField.Aquarium
         /// 0.00 = 重力なし（上昇し続ける）、0.50 = ゆっくり上昇、
         /// 1.10 = 拍動しても沈む。**どこが体験として成立するか**を実機で見る。
         /// </summary>
-        public static readonly float[] SinkChoices = { 0.90f, 0.00f, 0.50f, 1.10f };
+        // 先頭が既定。1.10（拍動しても沈む）を実機の印象から採った（追記12）
+        public static readonly float[] SinkChoices = { 1.10f, 0.00f, 0.50f, 0.90f };
 
         [SerializeField] AquariumFlow m_Flow;
         [SerializeField] int m_BellIndex = 1;

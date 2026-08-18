@@ -854,11 +854,16 @@ namespace BlockField.Tests.EditMode
         }
 
         /// <summary>
-        /// **M-K2k 拍動していれば沈まない。** これが「拍動＝努力」の内容である。
-        /// 拍動中の正味の高さ変化が、同じ時間の沈降だけの場合の 20% 未満。
+        /// **M-K2k 拍動していれば沈まない。**
+        ///
+        /// 【この判定は既定では成立しない】既定の沈降比を 1.10 に変えたので
+        /// （実機の印象から採った。追記12 A12.2）、既定では拍動しても沈む。
+        /// **削除せず「比 &lt; 1.0 の領域でのみ成立する判定」として残す** —
+        /// 結果を見て判定を消したのではないことを、テストの側にも残すため。
+        /// 比 0.90 を明示して測る。「拍動＝努力」の新しい内容は M-K2k′ が持つ。
         /// </summary>
         [Test]
-        public void MK2k_PulsingKeepsItFromSinking()
+        public void MK2k_PulsingKeepsItFromSinking_BelowUnitRatio()
         {
             var p = SinkParams(0.90f);
 
@@ -876,6 +881,42 @@ namespace BlockField.Tests.EditMode
             Assert.Greater(rise, -sinkOnly * 0.20f,
                 $"拍動しても {-rise:F4}m 沈んだ（沈降だけなら {sinkOnly:F4}m）。" +
                 "拍動が沈降に勝てていない");
+        }
+
+        /// <summary>
+        /// **M-K2k′ 拍動は沈降を遅くする。**（追記12。旧 M-K2k を弱めたもの）
+        ///
+        /// 実機で成立していたのは「拍動を止めると沈む」（M-K2j）であって、
+        /// 「拍動していれば沈まない」ではない。抗いきれるかは比の値で決まるが、
+        /// **抗っている事実は速度に現れる** — そこを判定にする。
+        /// 合格条件: 拍動中の沈降速度が、同条件で拍動を止めたときの 1/3 以下。
+        /// </summary>
+        [Test]
+        public void MK2kPrime_PulsingSlowsTheSinking()
+        {
+            var p = SinkParams(1.10f);   // 既定。拍動しても沈む側
+
+            float RateOf(bool pulsing)
+            {
+                var j = new Jellyfish(p, 0f, 0f, 0f);
+                j.PacemakerEnabled = pulsing;
+                for (int t = 0; t < 800; t++) j.Step(1f / 40f, 0f, 0f, 0f);   // 姿勢と拍動の過渡
+                float y0 = j.Y;
+                for (int t = 0; t < 800; t++) j.Step(1f / 40f, 0f, 0f, 0f);
+                // 上昇していれば沈降速度は 0。**向きを取り違えない**（追記11 A11.4）
+                return Math.Max(0f, (y0 - j.Y) / (800f / 40f));
+            }
+
+            float stopped = RateOf(false);
+            float pulsingRate = RateOf(true);
+
+            // 【空の検証を避ける】止めた側が実際に沈んでいなければ比は無意味になる
+            Assert.Greater(stopped, 0.01f,
+                $"拍動を止めた側が沈んでいない（{stopped:F5} m/s）。比較が成立しない");
+
+            Assert.LessOrEqual(pulsingRate, stopped / 3f,
+                $"拍動中 {pulsingRate:F5} m/s / 停止時 {stopped:F5} m/s = " +
+                $"{pulsingRate / stopped:P1}。拍動が沈降を遅くしていない");
         }
 
         /// <summary>
