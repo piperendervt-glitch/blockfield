@@ -185,19 +185,14 @@ namespace BlockField.Aquarium
         /// 壁の反発の強さを切り替える。**位置は引き継ぐ**（湧かせ直さない）。
         /// 張り付いている個体がその場で離れるかを見たいので、作り直すと確認にならない。
         /// </summary>
+        /// <summary>
+        /// 壁の反発を切り替える。**実機のボタンからは外した**（既定 0 で無効、
+        /// 2026-08-18 の実機で 69 回の誤操作を生んでいた）。コードは残す。
+        /// </summary>
         public void CycleWallRepel()
         {
             m_RepelIndex = (m_RepelIndex + 1) % WallRepelChoices.Length;
-            if (Body != null)
-            {
-                var moved = new Jellyfish(MakeParams(), Body.X, Body.Y, Body.Z, m_Flow.Field.Grid);
-                Body = moved;
-                m_WindowStep = 0;
-                m_WinSwimX = m_WinSwimZ = 0f;
-                m_WinDriftX = m_WinDriftY = m_WinDriftZ = 0f;
-                SwimSpeedMean = DriftSpeedMean = ActualSpeedMean = 0f;
-            if (Body != null) { m_WinPosX = Body.X; m_WinPosY = Body.Y; m_WinPosZ = Body.Z; }
-            }
+            RebuildInPlace();
             Debug.Log($"[Aquarium] 壁の反発を {WallRepelSpeed:F2} m/s に切り替え");
         }
 
@@ -233,16 +228,41 @@ namespace BlockField.Aquarium
         public void CycleRighting()
         {
             m_RightingIndex = (m_RightingIndex + 1) % RightingChoices.Length;
-            Body = null;
+            // **作り直さない。** 姿勢が崩れた状態でしか復元の差は見えないので、
+            // 作り直して直立に戻すと比較そのものが成立しない
+            if (Body != null) Body.RightingGain = RightingGain;
             Debug.Log($"[Aquarium] 復元トルクを {RightingGain:F2} に切り替え" +
                 $"（{(RightingGain > 0f ? "ON" : "OFF: アブレーション")}）。湧かせ直す");
         }
 
-        /// <summary>沈降の強さを切り替える。湧かせ直して姿勢も初期化する。</summary>
+        /// <summary>
+        /// パラメータを変えて**その場で**作り直す。位置は引き継ぎ、姿勢は初期化される
+        /// （姿勢を代入する口は作らないため）。
+        ///
+        /// 【なぜ湧かせ直さないか】2026-08-18 の実機では復元の切り替えが毎回
+        /// 湧かせ直しており、**7分で 64 回**クラゲが部屋の中央へ戻っていた。
+        /// 拍動を止めても次の切り替えで再生成されるので、**「停止」が5回記録されて
+        /// 「再開」が0回**という状態になっていた。切り替えの前後を比べるには
+        /// 位置が続いている必要がある。
+        /// </summary>
+        void RebuildInPlace()
+        {
+            if (Body == null || m_Flow == null || m_Flow.Field == null) { Body = null; return; }
+            bool pulsing = Body.PacemakerEnabled;
+            Body = new Jellyfish(MakeParams(), Body.X, Body.Y, Body.Z, m_Flow.Field.Grid)
+            { PacemakerEnabled = pulsing };
+            m_WindowStep = 0;
+            m_WinSwimX = m_WinSwimZ = 0f;
+            m_WinDriftX = m_WinDriftY = m_WinDriftZ = 0f;
+            SwimSpeedMean = DriftSpeedMean = ActualSpeedMean = 0f;
+            m_WinPosX = Body.X; m_WinPosY = Body.Y; m_WinPosZ = Body.Z;
+        }
+
+        /// <summary>沈降の強さを切り替える。**作り直さない**（位置も姿勢も続く）。</summary>
         public void CycleSink()
         {
             m_SinkIndex = (m_SinkIndex + 1) % SinkChoices.Length;
-            Body = null;
+            if (Body != null) Body.SinkRatio = SinkRatio;
             Debug.Log($"[Aquarium] 沈降を遊泳の {SinkRatio:P0} に切り替え" +
                 $"（{SinkRatio * JellyParams.Default.SwimSpeed:F4} m/s）。湧かせ直す");
         }

@@ -1,4 +1,4 @@
-// AR Foundation Samples の Assets/Shaders/Occlusion/OcclusionComputation.hlsl 準拠。
+﻿// AR Foundation Samples の Assets/Shaders/Occlusion/OcclusionComputation.hlsl 準拠。
 // ARShaderOcclusion がセットするグローバル (_EnvironmentDepthTexture /
 // _EnvironmentDepthProjectionMatrices / _IsOcclusionOn / XR_* キーワード) を使い、
 // 環境深度との比較でピクセル可視性を計算する。
@@ -138,6 +138,21 @@ void SetOcclusion_float(const float3 positionWS, float4 color, out float4 result
     }
 
     const float4 environmentDepth = SampleEnvironmentDepthGeneral(uv);
+
+    // 【深度が取れていないときは遮蔽しない】環境深度の取得が失敗すると
+    // (xrAcquireEnvironmentDepthImageMETA が XR_ERROR_LIMIT_REACHED を返す)
+    // テクスチャに有効な値が無く、深度 0 と読める。ハード遮蔽は
+    // 「環境深度 > シーン深度」で可視を決めるので、0 だと**全ピクセルが不可視**になり、
+    // クラゲも粒子もまるごと消える (2026-08-18 の実機で「時々アルファが完全に透明になる」)。
+    // 深度 0 は線形距離ではカメラ位置そのもので、部屋の幾何としてありえない値である。
+    //
+    // これは上の uv 範囲外と同じ扱い ——**データが無いときは遮蔽しない**。
+    // 遮蔽が一瞬効かないほうが、全部消えるより実害が小さい。
+    if (environmentDepth.x <= 0.0f)
+    {
+        return;
+    }
+
     const float sceneDepthNDC = clipSpaceDepthRelativePos.z / clipSpaceDepthRelativePos.w;
     const float linearSceneDepth = LinearizeDepth(sceneDepthNDC);
 

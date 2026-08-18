@@ -128,3 +128,32 @@ foreach (float ratio in new[] { 0f, 0.25f, 0.5f, 0.75f, 0.9f, 1.0f, 1.1f, 1.25f,
     Console.WriteLine($"  {ratio,4:F2} | {q.SwimSpeed * ratio,8:F4} | {net,+8:F4} | " +
         $"{dy,+16:F3}m | {verdict}");
 }
+
+// ---- 刺激の強さと復元の差（実機で「復元の意味が分からない」件）----
+Console.WriteLine();
+Console.WriteLine("刺激セル数ごとの最大傾きと、復元の有無での戻り方");
+Console.WriteLine("  セル数 | 復元0.0 最大 | 復元0.5 最大 | 復元2.0 最大 | 0.5 の10秒後 | 2.0 の10秒後");
+foreach (int cells in new[] { 1, 3, 5 })
+{
+    var peaks = new float[3];
+    var after = new float[3];
+    float[] rg = { 0f, 0.5f, 2f };
+    for (int r = 0; r < 3; r++)
+    {
+        var q = JellyParams.Default;
+        q.JetModel = true;
+        q.RightingGain = rg[r];
+        var j = new Jellyfish(q, 0f, 0f, 0f);
+        for (int t = 0; t < 400; t++) j.Step(1f / 40f, 0f, 0f, 0f);   // 定常へ
+        // 側方に cells 個まとめて刺激
+        int start = (q.PacemakerCell + q.RingCells / 4) % q.RingCells;
+        for (int k = 0; k < cells; k++) j.StimulateCell((start + k) % q.RingCells);
+        float peak = 0f;
+        for (int t = 0; t < 400; t++) { j.Step(1f / 40f, 0f, 0f, 0f); peak = Math.Max(peak, j.TiltDegrees); }
+        peaks[r] = peak;
+        for (int t = 0; t < 400; t++) j.Step(1f / 40f, 0f, 0f, 0f);   // さらに10秒
+        after[r] = j.TiltDegrees;
+    }
+    Console.WriteLine($"  {cells,6} | {peaks[0],12:F1} | {peaks[1],12:F1} | {peaks[2],12:F1} | " +
+        $"{after[1],12:F1} | {after[2],12:F1}");
+}

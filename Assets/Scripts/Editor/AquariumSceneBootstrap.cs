@@ -236,8 +236,9 @@ public static class AquariumSceneBootstrap
         canvasGo.transform.localScale = Vector3.one * 0.0007f;
         var canvas = canvasGo.AddComponent<Canvas>();
         canvas.renderMode = RenderMode.WorldSpace;
-        // 6行ぶん（デバッグ表示の行を足した）
-        canvasGo.GetComponent<RectTransform>().sizeDelta = new Vector2(620f, 270f);
+        // 8行ぶん。**横は広げない** — 視野から見切れるのは幅ではなく1行の長さの
+        // 問題で、広げると余計に端が見えなくなる（2026-08-18 の実機）
+        canvasGo.GetComponent<RectTransform>().sizeDelta = new Vector2(620f, 320f);
 
         var bgGo = new GameObject("Background");
         bgGo.transform.SetParent(canvasGo.transform, false);

@@ -112,7 +112,7 @@ namespace BlockField.SimCore.Fluid
         /// 沈降速度 (m/s、下向き)。世界法則（追記10）。
         /// 較正では無効にするので、較正中は 0 を返す。
         /// </summary>
-        public float SinkSpeed => m_SinkEnabled ? m_Params.SwimSpeed * m_Params.SinkRatio : 0f;
+        public float SinkSpeed => m_SinkEnabled ? m_Params.SwimSpeed * SinkRatio : 0f;
         bool m_SinkEnabled = true;
 
         /// <summary>
@@ -126,6 +126,21 @@ namespace BlockField.SimCore.Fluid
 
         /// <summary>沈降ぶんだけを積分した変位 (m)。自力遊泳とは分けて記録する。</summary>
         public float SinkPathY { get; private set; }
+
+        /// <summary>
+        /// **実行時に変えられる世界法則**（復元の強さ・沈降比）。
+        ///
+        /// 【なぜ実行時に変えるか】作り直すと姿勢が初期化される。姿勢を代入する口は
+        /// 作らない方針なので、作り直し＝直立に戻る、になる。
+        /// ところが**復元の差は姿勢が崩れた状態でしか見えない**
+        /// （切ると 175° まで倒れて戻らない。入れると 14° で止まり 2.3° へ戻る）。
+        /// 2026-08-18 の実機では切り替えのたびに作り直しており、
+        /// **差が現れる状態そのものを毎回消していた**（7分で 64 回）。
+        ///
+        /// これらは値の差し替えであって状態の代入ではないので、実行時に変えてよい。
+        /// </summary>
+        public float RightingGain { get; set; }
+        public float SinkRatio { get; set; }
 
         /// <summary>軸が真上から傾いている角度（度）。判定とログ用。</summary>
         public float TiltDegrees => m_Posture.TiltDegrees();
@@ -175,6 +190,8 @@ namespace BlockField.SimCore.Fluid
             }
 
             X = x; Y = y; Z = z;
+            RightingGain = p.RightingGain;
+            SinkRatio = p.SinkRatio;
             m_SpeedScale = !calibrate ? 1f
                 : p.JetModel ? CalibrateJetSpeedScale(p)
                 : CalibrateSpeedScale(p);
@@ -421,7 +438,7 @@ namespace BlockField.SimCore.Fluid
             float tz = g * (mx * m_Posture.AxisY - my * m_Posture.AxisX);
 
             // --- 復元: 受動的な物理（行き先の計算ではない）---
-            m_Posture.RightingTorque(m_Params.RightingGain,
+            m_Posture.RightingTorque(RightingGain,
                 out float wx, out float wy, out float wz);
             tx += wx; ty += wy; tz += wz;
 

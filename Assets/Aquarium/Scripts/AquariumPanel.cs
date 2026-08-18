@@ -43,28 +43,21 @@ namespace BlockField.Aquarium
             var body = m_Jelly != null ? m_Jelly.Body : null;
             if (body == null) return "Jelly[R-B]: 未投入";
 
-            // 【平均で出す】瞬時値は拍動の位相で 0.19〜0.0004 m/s まで振れるので、
-            // パネルで読んでも比の判定に使えない。直近1拍動の平均を出す
-            return $"Jelly[R-B]: {body.BellDiameter * 100f:F0}cm " +
-                $"({m_Jelly.BellIndex + 1}/{AquariumJellyfish.BellDiameterChoices.Length})" +
-                // 【姿勢を装着中に読めるように】K2 で軸が状態になったので、
-                // 傾きが分からないと「上下に泳げているか」を判定できない
-                $"   傾き={m_Jelly.TiltDegrees:F1}°" +
-                $"   復元[R-Trig]={m_Jelly.RightingGain:F1}" +
-                $"({m_Jelly.RightingIndex + 1}/{AquariumJellyfish.RightingChoices.Length})" +
-                $"   刺激[L-Trig]={m_Jelly.StimulusCount}回" +
-                $"   沈降[R-Trig長]={m_Jelly.SinkRatio:P0}" +
-                $"({m_Jelly.SinkIndex + 1}/{AquariumJellyfish.SinkChoices.Length})" +
-                $"   拍動[L-Trig長]={(m_Jelly.Pulsing ? "ON" : "**停止**")}" +
-                $"   repel[R-Grip]={m_Jelly.WallRepelSpeed:F2}" +
-                $"({m_Jelly.RepelIndex + 1}/{AquariumJellyfish.WallRepelChoices.Length})" +
-                $"   pulse={body.PulseCount}   swim={m_Jelly.SwimSpeedMean:F3}" +
-                $"   flow={m_Jelly.DriftSpeedMean:F3}   実移動={m_Jelly.ActualSpeedMean:F3}"
-                // 止水（流速 0.00）では比が定義できない。0.00 と出すと
-                // 「自力で進んでいない」と読めてしまうので、判定の言葉で出す
-                + (m_Jelly.DriftSpeedMean > 1e-4f
-                    ? $"   swim/flow={m_Jelly.SwimToFlowRatio:F2}"
-                    : "   [止水: 動く分はすべて自力]");
+            // 【1行を短く保つ】項目を足し続けた結果、行が右へ伸びて視野から
+            // 見切れ、**現在値が読めないので比較そのものが成立しなかった**
+            // （2026-08-18 の実機で沈降比の判定が測れなかった）。
+            // 2行に割り、ラベルを詰める。1行 62 文字を上限の目安とする
+            return $"Jelly[R-B]:{body.BellDiameter * 100f:F0}cm({m_Jelly.BellIndex + 1}/3)" +
+                $" 傾き{m_Jelly.TiltDegrees:F0}°" +
+                $" 拍動{(m_Jelly.Pulsing ? "ON" : "**停止**")}" +
+                $" 刺激{m_Jelly.StimulusCount}" +
+                $" p{body.PulseCount}\n" +
+                $"沈降[R-Grip]{m_Jelly.SinkRatio:P0}({m_Jelly.SinkIndex + 1}/{AquariumJellyfish.SinkChoices.Length})" +
+                $" 復元[R-Trig]{m_Jelly.RightingGain:F1}({m_Jelly.RightingIndex + 1}/{AquariumJellyfish.RightingChoices.Length})" +
+                $" 泳{m_Jelly.SwimSpeedMean:F3} 実{m_Jelly.ActualSpeedMean:F3}" +
+                (m_Jelly.DriftSpeedMean > 1e-4f
+                    ? $" 流{m_Jelly.DriftSpeedMean:F3}"
+                    : " [止水]");
         }
 
         /// <summary>

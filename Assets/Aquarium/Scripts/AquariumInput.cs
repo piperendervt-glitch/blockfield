@@ -11,13 +11,11 @@ namespace BlockField.Aquarium
     /// - **左手Y: 粒子プリセット**（微粒子 → 粗い粒 → 速い所が明るい）。水に見えるかを探す
     /// - **右手A: 目標流速**（0.03 → 0.08 → 0.15 m/s）。速さは一発で当たらないので振る
     /// - **右手B: 傘径**（10 → 15 → 25 cm）。実部屋での見え方に直結する
-    /// - **右手グリップ: 壁の反発**（0.06 → 0.12 → 0.00 → 0.03 m/s）。
-    ///   止水でクラゲが壁に張り付く件の調整。弾かれて見えない強さを探す
+    /// - **右手グリップ: 沈降**（0.90 → 0.00 → 0.50 → 1.10）。**本題**
     /// - **右手トリガー: 復元トルク**（0.5 → 0(切) → 2.0）。姿勢が立ち直るかを見る
     /// - **左手トリガー: 刺激を注入**（側方のセルを一発叩く。M-J3b の実機版）。
     ///   単一ペースメーカーでも回頭は出るが平衡傾斜が約5度で見えないため、
     ///   **見える大きさにする**ために使う
-    /// - **右手トリガー長押し: 沈降**（0.90 → 0.00 → 0.50 → 1.10）
     /// - **左手トリガー長押し: 拍動の停止／再開**。
     ///   「拍動＝沈まないための努力」を見せる最も直接的な提示
     /// - **左手グリップ: デバッグ表示**（なし → 固体セル(遮蔽あり) → 固体セル(遮蔽なし)
@@ -44,7 +42,6 @@ namespace BlockField.Aquarium
         InputAction m_SpeedAction;
         InputAction m_BellAction;
         InputAction m_DebugAction;
-        InputAction m_RepelAction;
         InputAction m_RightingAction;
         InputAction m_StimulusAction;
         InputAction m_SinkAction;
@@ -78,22 +75,22 @@ namespace BlockField.Aquarium
             m_DebugAction.performed += OnDebug;
             m_DebugAction.Enable();
 
-            m_RepelAction = new InputAction("AquariumRepel", InputActionType.Button,
+            // 【右手グリップは沈降に振り替えた】壁の反発は既定 0（無効）で、
+            // 旋回が入るまで効かないと分かっている。2026-08-18 の実機では
+            // **69回も押されて**いた一方、本題の沈降は 0 回しか切り替わらなかった。
+            // 使わない機能に一等地を割り当てない
+            m_SinkAction = new InputAction("AquariumSink", InputActionType.Button,
                 "<XRController>{RightHand}/gripPressed");
-            m_RepelAction.performed += OnRepel;
-            m_RepelAction.Enable();
+            m_SinkAction.performed += OnSink;
+            m_SinkAction.Enable();
 
             // 【短押しと長押しで分ける】ボタンとグリップは埋まっている。
             // **左が神経、右が体の物理**という対応で覚えられる形にした
+            // 右手トリガーは復元だけ（長押しの多重割り当てをやめた）
             m_RightingAction = new InputAction("AquariumRighting", InputActionType.Button,
-                "<XRController>{RightHand}/triggerPressed", interactions: "tap");
+                "<XRController>{RightHand}/triggerPressed");
             m_RightingAction.performed += OnRighting;
             m_RightingAction.Enable();
-
-            m_SinkAction = new InputAction("AquariumSink", InputActionType.Button,
-                "<XRController>{RightHand}/triggerPressed", interactions: "hold(duration=0.6)");
-            m_SinkAction.performed += OnSink;
-            m_SinkAction.Enable();
 
             m_StimulusAction = new InputAction("AquariumStimulus", InputActionType.Button,
                 "<XRController>{LeftHand}/triggerPressed", interactions: "tap");
@@ -124,11 +121,6 @@ namespace BlockField.Aquarium
         void OnStimulus(InputAction.CallbackContext _)
         {
             if (m_Jelly != null) m_Jelly.InjectStimulus();
-        }
-
-        void OnRepel(InputAction.CallbackContext _)
-        {
-            if (m_Jelly != null) m_Jelly.CycleWallRepel();
         }
 
         void OnDebug(InputAction.CallbackContext _)
@@ -172,13 +164,6 @@ namespace BlockField.Aquarium
                 m_DebugAction.Disable();
                 m_DebugAction.Dispose();
                 m_DebugAction = null;
-            }
-            if (m_RepelAction != null)
-            {
-                m_RepelAction.performed -= OnRepel;
-                m_RepelAction.Disable();
-                m_RepelAction.Dispose();
-                m_RepelAction = null;
             }
             if (m_RightingAction != null)
             {
