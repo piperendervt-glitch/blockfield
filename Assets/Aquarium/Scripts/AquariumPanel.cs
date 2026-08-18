@@ -53,6 +53,9 @@ namespace BlockField.Aquarium
                 $"   復元[R-Trig]={m_Jelly.RightingGain:F1}" +
                 $"({m_Jelly.RightingIndex + 1}/{AquariumJellyfish.RightingChoices.Length})" +
                 $"   刺激[L-Trig]={m_Jelly.StimulusCount}回" +
+                $"   沈降[R-Trig長]={m_Jelly.SinkRatio:P0}" +
+                $"({m_Jelly.SinkIndex + 1}/{AquariumJellyfish.SinkChoices.Length})" +
+                $"   拍動[L-Trig長]={(m_Jelly.Pulsing ? "ON" : "**停止**")}" +
                 $"   repel[R-Grip]={m_Jelly.WallRepelSpeed:F2}" +
                 $"({m_Jelly.RepelIndex + 1}/{AquariumJellyfish.WallRepelChoices.Length})" +
                 $"   pulse={body.PulseCount}   swim={m_Jelly.SwimSpeedMean:F3}" +

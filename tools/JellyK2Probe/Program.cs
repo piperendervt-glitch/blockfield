@@ -88,3 +88,43 @@ foreach (bool jet in new[] { false, true })
     double v = d / (800.0 / 40.0);
     Console.WriteLine($"  {(jet ? "K2 噴流       " : "Phase C 2Dリム")} | {v,10:F6} | {v / q.SwimSpeed,6:F4}");
 }
+
+// ---- 沈降ONでの姿勢と高さの推移（M-K2k が落ちた理由）----
+Console.WriteLine();
+Console.WriteLine("既定パラメータ（噴流+沈降25%+復元0.5、ペースメーカーON）の推移");
+Console.WriteLine("  拍動 | 傾き度 | 軸Y     | Y 位置  | 高さ変化/拍動");
+{
+    var q = JellyParams.Default;
+    q.JetModel = true;
+    var j = new Jellyfish(q, 0f, 0f, 0f);
+    float prevY = 0f;
+    for (int pulse = 0; pulse < 30; pulse++)
+    {
+        for (int t = 0; t < 40; t++) j.Step(1f / 40f, 0f, 0f, 0f);
+        if (pulse % 3 == 0 || pulse == 29)
+            Console.WriteLine($"  {pulse + 1,4} | {j.TiltDegrees,6:F1} | {j.Posture.AxisY,7:F3} | " +
+                $"{j.Y,7:F3} | {j.Y - prevY,+8:F4}");
+        prevY = j.Y;
+    }
+}
+
+// ---- 沈降比の掃引: 「拍動＝沈まないための努力」が成立する比を探す ----
+Console.WriteLine();
+Console.WriteLine("沈降比の掃引（噴流+復元0.5、拍動ON。20拍動の正味の鉛直速度）");
+Console.WriteLine("   比 | 沈降 m/s | 正味 m/s | 20拍動での高さ変化 | 判定");
+foreach (float ratio in new[] { 0f, 0.25f, 0.5f, 0.75f, 0.9f, 1.0f, 1.1f, 1.25f, 1.5f })
+{
+    var q = JellyParams.Default;
+    q.JetModel = true;
+    q.SinkRatio = ratio;
+    var j = new Jellyfish(q, 0f, 0f, 0f);
+    for (int t = 0; t < 800; t++) j.Step(1f / 40f, 0f, 0f, 0f);   // 過渡
+    float y0 = j.Y;
+    for (int t = 0; t < 800; t++) j.Step(1f / 40f, 0f, 0f, 0f);
+    float dy = j.Y - y0;
+    float net = dy / 20f;
+    string verdict = Math.Abs(net) < 0.005f ? "ほぼ静止（漂う）"
+        : net > 0f ? "上昇" : "沈降";
+    Console.WriteLine($"  {ratio,4:F2} | {q.SwimSpeed * ratio,8:F4} | {net,+8:F4} | " +
+        $"{dy,+16:F3}m | {verdict}");
+}

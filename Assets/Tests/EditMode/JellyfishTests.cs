@@ -25,12 +25,38 @@ namespace BlockField.Tests.EditMode
 
         static Jellyfish Spawn(JellyParams p) => new Jellyfish(p, 1.6f, 1.1f, 1.3f);
 
-        /// <summary>止水（流れゼロ）で N ステップ進めたときの移動距離。</summary>
+        /// <summary>
+        /// **沈降ぶんを除いた高さ**。沈降は世界法則であって自力遊泳ではないので
+        /// （追記10）、「自力で鉛直に動いたか」を見る判定はこちらで測る。
+        /// `SinkPathY` は負に積むので、引くと沈降が消える。
+        /// </summary>
+        static float HeightWithoutSinking(Jellyfish j) => j.Y - j.SinkPathY;
+
+        /// <summary>自力遊泳ぶんの経路長 (m)。沈降を除いて測る。</summary>
+        static float SelfPropelledPath(Jellyfish j, int steps)
+        {
+            float px = j.X, py = HeightWithoutSinking(j), pz = j.Z;
+            double path = 0;
+            for (int t = 0; t < steps; t++)
+            {
+                j.Step(1f / 40f, 0f, 0f, 0f);
+                float cy = HeightWithoutSinking(j);
+                double dx = j.X - px, dy = cy - py, dz = j.Z - pz;
+                path += Math.Sqrt(dx * dx + dy * dy + dz * dz);
+                px = j.X; py = cy; pz = j.Z;
+            }
+            return (float)path;
+        }
+
+        /// <summary>
+        /// 止水（流れゼロ）で N ステップ進めたときの**自力ぶんの**移動距離。
+        /// 沈降は世界法則であって自力遊泳ではないので除く（追記10）。
+        /// </summary>
         static float SwimDistanceInStillWater(Jellyfish jelly, int steps)
         {
-            float x0 = jelly.X, y0 = jelly.Y, z0 = jelly.Z;
+            float x0 = jelly.X, y0 = HeightWithoutSinking(jelly), z0 = jelly.Z;
             for (int i = 0; i < steps; i++) jelly.Step(1f / 40f, 0f, 0f, 0f);
-            float dx = jelly.X - x0, dy = jelly.Y - y0, dz = jelly.Z - z0;
+            float dx = jelly.X - x0, dy = HeightWithoutSinking(jelly) - y0, dz = jelly.Z - z0;
             return (float)Math.Sqrt(dx * dx + dy * dy + dz * dz);
         }
 
@@ -117,9 +143,11 @@ namespace BlockField.Tests.EditMode
                 carried.Step(dt, 0f, 0.05f, 0f);   // 上向きに 0.05 m/s
             }
 
-            // 自力遊泳は水平のみなので、鉛直の差はそのまま流れの寄与
-            Assert.AreEqual(0f, still.Y - 1.1f, 1e-5f, "止水では鉛直に動かないはず");
-            Assert.AreEqual(0.05f * steps * dt, carried.Y - 1.1f, 1e-3f,
+            // 自力遊泳は水平のみなので、鉛直の差はそのまま流れの寄与。
+            // 沈降は世界法則なので除いて見る（追記10）
+            Assert.AreEqual(0f, HeightWithoutSinking(still) - 1.1f, 1e-5f,
+                "止水では自力で鉛直に動かないはず");
+            Assert.AreEqual(0.05f * steps * dt, HeightWithoutSinking(carried) - 1.1f, 1e-3f,
                 "流れに運ばれた距離が合わない");
         }
 
@@ -163,7 +191,12 @@ namespace BlockField.Tests.EditMode
             var jelly = Spawn(JellyParams.Default);
             for (int i = 0; i < 800; i++) jelly.Step(1f / 40f, 0f, 0f, 0f);
 
-            Assert.AreEqual(1.1f, jelly.Y, 1e-6f, "止水で鉛直に動いている");
+            // 沈降は世界法則なので除いて見る（追記10）。除いた高さが動かないことが
+            // 「自力で泳ぐのは水平だけ」の内容である
+            // 許容差 1e-4: 沈降を引き算で除いているので、800ステップぶんの
+            // 浮動小数の累積誤差（実測 1.3e-5）が乗る。主張は変わらない
+            Assert.AreEqual(1.1f, HeightWithoutSinking(jelly), 1e-4f,
+                "止水で自力で鉛直に動いている");
             Assert.Greater(Math.Abs(jelly.X - 1.6f) + Math.Abs(jelly.Z - 1.3f), 0.01f,
                 "水平にも動いていない（そもそも泳げていない）");
         }
@@ -759,17 +792,7 @@ namespace BlockField.Tests.EditMode
                 var jelly = new Jellyfish(p, 0f, 0f, 0f);
 
                 for (int t = 0; t < 800; t++) jelly.Step(1f / 40f, 0f, 0f, 0f);   // 過渡
-
-                float px = jelly.X, py = jelly.Y, pz = jelly.Z;
-                double path = 0;
-                for (int t = 0; t < 800; t++)
-                {
-                    jelly.Step(1f / 40f, 0f, 0f, 0f);
-                    double dx = jelly.X - px, dy = jelly.Y - py, dz = jelly.Z - pz;
-                    path += Math.Sqrt(dx * dx + dy * dy + dz * dz);
-                    px = jelly.X; py = jelly.Y; pz = jelly.Z;
-                }
-                float speed = (float)(path / (800.0 / 40.0));
+                float speed = SelfPropelledPath(jelly, 800) / (800f / 40f);
 
                 Assert.AreEqual(target, speed, target * 0.05f,
                     $"噴流モデルの遊泳速度が目標 {target} m/s に対し {speed:F6} m/s");
@@ -789,21 +812,117 @@ namespace BlockField.Tests.EditMode
                 p.JetModel = jet;
                 var j = new Jellyfish(p, 0f, 0f, 0f);
                 for (int t = 0; t < 800; t++) j.Step(1f / 40f, 0f, 0f, 0f);
-                float px = j.X, py = j.Y, pz = j.Z;
-                double path = 0;
-                for (int t = 0; t < 800; t++)
-                {
-                    j.Step(1f / 40f, 0f, 0f, 0f);
-                    double dx = j.X - px, dy = j.Y - py, dz = j.Z - pz;
-                    path += Math.Sqrt(dx * dx + dy * dy + dz * dz);
-                    px = j.X; py = j.Y; pz = j.Z;
-                }
-                return (float)(path / (800.0 / 40.0));
+                return SelfPropelledPath(j, 800) / (800f / 40f);
             }
 
             float a = Measure(false), b = Measure(true);
             Assert.AreEqual(a, b, a * 0.05f,
                 $"2Dリム {a:F5} m/s に対し噴流 {b:F5} m/s。実機で速さが変わって見える");
+        }
+
+        // ================= 沈降（jelly_2 追記10） =================
+
+        static JellyParams SinkParams(float ratio)
+        {
+            var p = JellyParams.Default;
+            p.JetModel = true;
+            p.SinkRatio = ratio;
+            return p;
+        }
+
+        /// <summary>
+        /// **M-K2j 拍動を止めると沈む。** 沈降速度と一致すること。
+        /// 「拍動＝沈まないための努力」の前提。
+        /// </summary>
+        [Test]
+        public void MK2j_StoppingThePulseMakesItSink()
+        {
+            var p = SinkParams(0.90f);
+            var jelly = new Jellyfish(p, 0f, 0f, 0f);
+            jelly.PacemakerEnabled = false;
+
+            // 残っている推力を抜く
+            for (int t = 0; t < 400; t++) jelly.Step(1f / 40f, 0f, 0f, 0f);
+
+            float y0 = jelly.Y;
+            for (int t = 0; t < 400; t++) jelly.Step(1f / 40f, 0f, 0f, 0f);
+            float rate = (y0 - jelly.Y) / (400f / 40f);
+
+            float expected = p.SwimSpeed * p.SinkRatio;
+            Assert.AreEqual(expected, rate, expected * 0.10f,
+                $"沈降 {rate:F5} m/s が想定 {expected:F5} m/s と違う");
+        }
+
+        /// <summary>
+        /// **M-K2k 拍動していれば沈まない。** これが「拍動＝努力」の内容である。
+        /// 拍動中の正味の高さ変化が、同じ時間の沈降だけの場合の 20% 未満。
+        /// </summary>
+        [Test]
+        public void MK2k_PulsingKeepsItFromSinking()
+        {
+            var p = SinkParams(0.90f);
+
+            var pulsing = new Jellyfish(p, 0f, 0f, 0f);
+            for (int t = 0; t < 800; t++) pulsing.Step(1f / 40f, 0f, 0f, 0f);   // 姿勢の過渡
+            float y0 = pulsing.Y;
+            for (int t = 0; t < 800; t++) pulsing.Step(1f / 40f, 0f, 0f, 0f);
+
+            // 【上昇と沈降を区別する】最初は Math.Abs で「変化＝沈んだ」と
+            // 扱っており、**上昇 0.599m を「沈んだ」と報告して落ちた**。
+            // 主張は「沈まない」であって「動かない」ではない
+            float rise = pulsing.Y - y0;
+            float sinkOnly = p.SwimSpeed * p.SinkRatio * (800f / 40f);
+
+            Assert.Greater(rise, -sinkOnly * 0.20f,
+                $"拍動しても {-rise:F4}m 沈んだ（沈降だけなら {sinkOnly:F4}m）。" +
+                "拍動が沈降に勝てていない");
+        }
+
+        /// <summary>
+        /// **M-K2l 沈降が K2 の判定を壊さない。**
+        /// 新しい世界法則を足したときに既存の判定が静かに壊れていないかを、
+        /// M-K2g と同じ掃引の形で確かめる。
+        /// </summary>
+        [Test]
+        public void MK2l_SinkingDoesNotBreakTheOtherVerdicts()
+        {
+            foreach (float ratio in new[] { 0f, 0.5f, 0.9f, 1.1f })
+            {
+                // M-K2i: 目標速度で泳ぐ（沈降を除いた経路長で）
+                var p = SinkParams(ratio);
+                var jelly = new Jellyfish(p, 0f, 0f, 0f);
+                for (int t = 0; t < 800; t++) jelly.Step(1f / 40f, 0f, 0f, 0f);
+                float speed = SelfPropelledPath(jelly, 800) / (800f / 40f);
+                Assert.AreEqual(p.SwimSpeed, speed, p.SwimSpeed * 0.05f,
+                    $"沈降 {ratio:P0} で遊泳速度が {speed:F5} m/s になった");
+
+                // M-K2d: 変位の向きが軸と一致（沈降を除いて見る）
+                var q = SinkParams(ratio);
+                q.Pacemaker = false;
+                q.RightingGain = 0f;
+                var tilted = new Jellyfish(q, 0f, 0f, 0f);
+                for (int t = 0; t < 400; t++)
+                {
+                    if (t % q.PulsePeriodTicks == 0) tilted.StimulateCell(0);
+                    tilted.Step(1f / 40f, 0f, 0f, 0f);
+                }
+                float x0 = tilted.X, h0 = HeightWithoutSinking(tilted), z0 = tilted.Z;
+                float ax = tilted.Posture.AxisX, ay = tilted.Posture.AxisY, az = tilted.Posture.AxisZ;
+                int n = q.RingCells;
+                for (int t = 0; t < 800; t++)
+                {
+                    if (t % q.PulsePeriodTicks == 0)
+                    { tilted.StimulateCell(0); tilted.StimulateCell(n / 2); }
+                    tilted.Step(1f / 40f, 0f, 0f, 0f);
+                }
+                float dx = tilted.X - x0, dy = HeightWithoutSinking(tilted) - h0, dz = tilted.Z - z0;
+                float len = (float)Math.Sqrt(dx * dx + dy * dy + dz * dz);
+                Assert.Greater(len, 1e-3f, $"沈降 {ratio:P0} で動いていない");
+
+                float cos = (dx * ax + dy * ay + dz * az) / len;
+                float angle = (float)(Math.Acos(Math.Max(-1f, Math.Min(1f, cos))) * 180.0 / Math.PI);
+                Assert.Less(angle, 20f, $"沈降 {ratio:P0} で変位が軸から {angle:F1} 度ずれた");
+            }
         }
 }
 }

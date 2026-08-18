@@ -17,6 +17,9 @@ namespace BlockField.Aquarium
     /// - **左手トリガー: 刺激を注入**（側方のセルを一発叩く。M-J3b の実機版）。
     ///   単一ペースメーカーでも回頭は出るが平衡傾斜が約5度で見えないため、
     ///   **見える大きさにする**ために使う
+    /// - **右手トリガー長押し: 沈降**（0.90 → 0.00 → 0.50 → 1.10）
+    /// - **左手トリガー長押し: 拍動の停止／再開**。
+    ///   「拍動＝沈まないための努力」を見せる最も直接的な提示
     /// - **左手グリップ: デバッグ表示**（なし → 固体セル(遮蔽あり) → 固体セル(遮蔽なし)
     ///   → 水槽の外接箱）。**焼き込んだ壁が現実の壁と重なっているか**を目で確かめる
     ///
@@ -44,6 +47,8 @@ namespace BlockField.Aquarium
         InputAction m_RepelAction;
         InputAction m_RightingAction;
         InputAction m_StimulusAction;
+        InputAction m_SinkAction;
+        InputAction m_PulseAction;
 
         void OnEnable()
         {
@@ -78,15 +83,37 @@ namespace BlockField.Aquarium
             m_RepelAction.performed += OnRepel;
             m_RepelAction.Enable();
 
+            // 【短押しと長押しで分ける】ボタンとグリップは埋まっている。
+            // **左が神経、右が体の物理**という対応で覚えられる形にした
             m_RightingAction = new InputAction("AquariumRighting", InputActionType.Button,
-                "<XRController>{RightHand}/triggerPressed");
+                "<XRController>{RightHand}/triggerPressed", interactions: "tap");
             m_RightingAction.performed += OnRighting;
             m_RightingAction.Enable();
 
+            m_SinkAction = new InputAction("AquariumSink", InputActionType.Button,
+                "<XRController>{RightHand}/triggerPressed", interactions: "hold(duration=0.6)");
+            m_SinkAction.performed += OnSink;
+            m_SinkAction.Enable();
+
             m_StimulusAction = new InputAction("AquariumStimulus", InputActionType.Button,
-                "<XRController>{LeftHand}/triggerPressed");
+                "<XRController>{LeftHand}/triggerPressed", interactions: "tap");
             m_StimulusAction.performed += OnStimulus;
             m_StimulusAction.Enable();
+
+            m_PulseAction = new InputAction("AquariumPulse", InputActionType.Button,
+                "<XRController>{LeftHand}/triggerPressed", interactions: "hold(duration=0.6)");
+            m_PulseAction.performed += OnPulse;
+            m_PulseAction.Enable();
+        }
+
+        void OnSink(InputAction.CallbackContext _)
+        {
+            if (m_Jelly != null) m_Jelly.CycleSink();
+        }
+
+        void OnPulse(InputAction.CallbackContext _)
+        {
+            if (m_Jelly != null) m_Jelly.TogglePulsing();
         }
 
         void OnRighting(InputAction.CallbackContext _)
@@ -166,6 +193,20 @@ namespace BlockField.Aquarium
                 m_StimulusAction.Disable();
                 m_StimulusAction.Dispose();
                 m_StimulusAction = null;
+            }
+            if (m_SinkAction != null)
+            {
+                m_SinkAction.performed -= OnSink;
+                m_SinkAction.Disable();
+                m_SinkAction.Dispose();
+                m_SinkAction = null;
+            }
+            if (m_PulseAction != null)
+            {
+                m_PulseAction.performed -= OnPulse;
+                m_PulseAction.Disable();
+                m_PulseAction.Dispose();
+                m_PulseAction = null;
             }
         }
 

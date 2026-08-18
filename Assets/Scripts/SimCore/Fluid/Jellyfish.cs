@@ -108,6 +108,25 @@ namespace BlockField.SimCore.Fluid
         /// <summary>噴流モデルか。</summary>
         public bool IsJetModel => m_Params.JetModel;
 
+        /// <summary>
+        /// 沈降速度 (m/s、下向き)。世界法則（追記10）。
+        /// 較正では無効にするので、較正中は 0 を返す。
+        /// </summary>
+        public float SinkSpeed => m_SinkEnabled ? m_Params.SwimSpeed * m_Params.SinkRatio : 0f;
+        bool m_SinkEnabled = true;
+
+        /// <summary>
+        /// **ペースメーカーを働かせるか**（実行時の入力。パラメータは変えない）。
+        ///
+        /// 「拍動＝沈まないための努力」を見せるには、止めて沈むところを
+        /// 見せるのが最も直接的である。湧かせ直すと位置が戻って見えないので、
+        /// 実行時のトグルにしてある。
+        /// </summary>
+        public bool PacemakerEnabled { get; set; } = true;
+
+        /// <summary>沈降ぶんだけを積分した変位 (m)。自力遊泳とは分けて記録する。</summary>
+        public float SinkPathY { get; private set; }
+
         /// <summary>軸が真上から傾いている角度（度）。判定とログ用。</summary>
         public float TiltDegrees => m_Posture.TiltDegrees();
 
@@ -187,6 +206,9 @@ namespace BlockField.SimCore.Fluid
             var probeParams = p;
             probeParams.Pacemaker = true;
             var probe = new Jellyfish(probeParams, 0f, 0f, 0f, null, calibrate: false);
+            // 【較正では沈降を切る】沈降ぶんまで正規化すると遊泳速度が目標からずれる。
+            // 測るのは「自力でどれだけ速く動くか」（追記10 A10.2）
+            probe.m_SinkEnabled = false;
             const float dt = 1f / 40f;
 
             for (int t = 0; t < 800; t++) probe.Step(dt, 0f, 0f, 0f);   // 過渡を外す
@@ -262,7 +284,7 @@ namespace BlockField.SimCore.Fluid
         /// <param name="flowVx">その位置の流速 (m/s)。クラゲは流れに書き戻さない。</param>
         public void Step(float dtSeconds, float flowVx, float flowVy, float flowVz)
         {
-            if (m_Params.Pacemaker
+            if (m_Params.Pacemaker && PacemakerEnabled
                 && StepCount % m_Params.PulsePeriodTicks == 0
                 && m_Ring.Refractory(m_Params.PacemakerCell) == 0)
             {
@@ -299,8 +321,11 @@ namespace BlockField.SimCore.Fluid
             float sy = m_Params.JetModel ? m_JetVy * m_SpeedScale : 0f;
             float sz = m_Params.JetModel ? m_JetVz * m_SpeedScale : SwimVz;
 
+            // 沈降は世界法則。自力遊泳でも流れでもないので別の項として足す
+            float sink = SinkSpeed;
+
             float toX = X + (sx + flowVx + rx) * dtSeconds;
-            float toY = Y + (sy + flowVy + ry) * dtSeconds;
+            float toY = Y + (sy + flowVy + ry - sink) * dtSeconds;
             float toZ = Z + (sz + flowVz + rz) * dtSeconds;
 
             // 壁の中へは入らせない。壁は環境の情報で、神経が決めた推力は書き換えない
@@ -310,6 +335,7 @@ namespace BlockField.SimCore.Fluid
             // 診断用の内訳。位置の更新式はそのまま（丸めの経路を変えないため）
             SwimPathX += sx * dtSeconds;
             SwimPathZ += sz * dtSeconds;
+            SinkPathY -= sink * dtSeconds;
             DriftPathX += flowVx * dtSeconds;
             DriftPathY += flowVy * dtSeconds;
             DriftPathZ += flowVz * dtSeconds;

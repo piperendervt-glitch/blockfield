@@ -45,10 +45,20 @@ namespace BlockField.Aquarium
         /// </summary>
         public static readonly float[] RightingChoices = { 0.5f, 0f, 2f };
 
+        /// <summary>
+        /// 沈降速度（遊泳速度に対する比）。世界法則（jelly_2 追記10・11）。
+        ///
+        /// 釣り合いは比 ≈ 1.0（掃引で確認）。既定 0.90 は「わずかに拍動が勝つ」点。
+        /// 0.00 = 重力なし（上昇し続ける）、0.50 = ゆっくり上昇、
+        /// 1.10 = 拍動しても沈む。**どこが体験として成立するか**を実機で見る。
+        /// </summary>
+        public static readonly float[] SinkChoices = { 0.90f, 0.00f, 0.50f, 1.10f };
+
         [SerializeField] AquariumFlow m_Flow;
         [SerializeField] int m_BellIndex = 1;
         [SerializeField] int m_RepelIndex;
         [SerializeField] int m_RightingIndex;
+        [SerializeField] int m_SinkIndex;
 
         public AquariumFlow flow { get => m_Flow; set => m_Flow = value; }
 
@@ -57,6 +67,11 @@ namespace BlockField.Aquarium
         public float WallRepelSpeed => WallRepelChoices[m_RepelIndex];
         public int RightingIndex => m_RightingIndex;
         public float RightingGain => RightingChoices[m_RightingIndex];
+        public int SinkIndex => m_SinkIndex;
+        public float SinkRatio => SinkChoices[m_SinkIndex];
+
+        /// <summary>拍動しているか（左手トリガー長押しで止める）。</summary>
+        public bool Pulsing => Body == null || Body.PacemakerEnabled;
 
         /// <summary>軸が真上から傾いている角度（度）。装着中に姿勢を読むため。</summary>
         public float TiltDegrees => Body != null ? Body.TiltDegrees : 0f;
@@ -206,6 +221,7 @@ namespace BlockField.Aquarium
             p.WallRepelSpeed = WallRepelSpeed;
             p.JetModel = true;
             p.RightingGain = RightingGain;
+            p.SinkRatio = SinkRatio;
             return p;
         }
 
@@ -220,6 +236,27 @@ namespace BlockField.Aquarium
             Body = null;
             Debug.Log($"[Aquarium] 復元トルクを {RightingGain:F2} に切り替え" +
                 $"（{(RightingGain > 0f ? "ON" : "OFF: アブレーション")}）。湧かせ直す");
+        }
+
+        /// <summary>沈降の強さを切り替える。湧かせ直して姿勢も初期化する。</summary>
+        public void CycleSink()
+        {
+            m_SinkIndex = (m_SinkIndex + 1) % SinkChoices.Length;
+            Body = null;
+            Debug.Log($"[Aquarium] 沈降を遊泳の {SinkRatio:P0} に切り替え" +
+                $"（{SinkRatio * JellyParams.Default.SwimSpeed:F4} m/s）。湧かせ直す");
+        }
+
+        /// <summary>
+        /// 拍動の停止／再開。**湧かせ直さない**（位置を保ったまま沈むところを見る）。
+        /// 「拍動＝沈まないための努力」を見せる最も直接的な提示。
+        /// </summary>
+        public void TogglePulsing()
+        {
+            if (Body == null) return;
+            Body.PacemakerEnabled = !Body.PacemakerEnabled;
+            Debug.Log($"[Aquarium] 拍動を{(Body.PacemakerEnabled ? "再開" : "停止")}" +
+                $"（沈降 {SinkRatio * JellyParams.Default.SwimSpeed:F4} m/s）");
         }
 
         /// <summary>

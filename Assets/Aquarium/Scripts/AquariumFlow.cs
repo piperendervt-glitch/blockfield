@@ -703,6 +703,8 @@ namespace BlockField.Aquarium
                     $"反発={body.WallRepelSpeed:F2}m/s " +
                     $"傾き={body.TiltDegrees:F1}度 復元={m_Jelly.RightingGain:F2} " +
                     $"刺激={m_Jelly.StimulusCount}回 噴流={body.IsJetModel} " +
+                    $"沈降={m_Jelly.SinkRatio:P0}({body.SinkSpeed:F4}m/s) " +
+                    $"拍動={(m_Jelly.Pulsing ? "ON" : "停止")} " +
                     $"位置=({body.X:F2}, {body.Y:F2}, {body.Z:F2}){JellyCellState(body)} " +
                     $"世界={JellyWorldPosition(body):F2} step={body.StepCount}");
             }
