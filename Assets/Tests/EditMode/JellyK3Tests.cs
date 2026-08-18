@@ -1,0 +1,393 @@
+using System;
+using System.Collections.Generic;
+using BlockField.SimCore.Fluid;
+using BlockField.SimCore.Rng;
+using NUnit.Framework;
+
+namespace BlockField.Tests.EditMode
+{
+    /// <summary>
+    /// jelly_2 K3: 境界からの侵害受容（prereg §3 + 追記13）。
+    ///
+    /// 【主張】環境が刺激の位置を決め、逃避の向きは依然として創発する。
+    /// 「壁に最も近い1セル」を argmax で選ぶ形は**床に対して破綻する**ので
+    /// （縁の距離差が 0.42 セルしかなく整数チャンファで読めない）、
+    /// **体表の受容器が帯に入っていれば発火する**形に置き換えてある（追記13 A13.1）。
+    /// </summary>
+    public sealed class JellyK3Tests
+    {
+        const float k_Dt = 1f / 40f;
+
+        /// <summary>
+        /// 判定用の部屋。外周1セルを固体にして距離場を焼く。
+        /// セルサイズは実機の既定と同じ 0.08 m。
+        /// </summary>
+        static FlowGrid Room(int w = 26, int h = 26, int d = 26, float cell = 0.08f)
+        {
+            var g = new FlowGrid(w, h, d, cell, 0f, 0f, 0f);
+            for (int x = 0; x < w; x++)
+                for (int y = 0; y < h; y++)
+                    for (int z = 0; z < d; z++)
+                        if (x == 0 || y == 0 || z == 0 || x == w - 1 || y == h - 1 || z == d - 1)
+                            g.SetSolid(x, y, z, true);
+            FlowBoundaryBaker.BakeDistance(g);
+            return g;
+        }
+
+        static JellyParams K3Params(bool nociception, float sinkRatio)
+        {
+            var p = JellyParams.Default;
+            p.JetModel = true;
+            p.Nociception = nociception;
+            p.SinkRatio = sinkRatio;
+            return p;
+        }
+
+        /// <summary>壁面からの距離 (m)。判定 M-K3a 用。</summary>
+        static float WallDistance(FlowGrid g, float x, float y, float z)
+        {
+            int gx = (int)Math.Floor((x - g.OriginX) / g.CellSize);
+            int gy = (int)Math.Floor((y - g.OriginY) / g.CellSize);
+            int gz = (int)Math.Floor((z - g.OriginZ) / g.CellSize);
+            if (!g.InRange(gx, gy, gz)) return 0f;
+            return Math.Max(0f, g.DistanceInCells(g.Index(gx, gy, gz)) - 0.5f) * g.CellSize;
+        }
+
+        /// <summary>
+        /// 1個体を走らせて判定量をまとめて返す。
+        /// **実移動で測る**（推力からの積分ではない）— Phase C で「泳げている」と
+        /// 報告する指標が「止まっている」個体に出ていたため（prereg §3.4）。
+        /// </summary>
+        struct Run
+        {
+            public float MeanWallDistance;   // m
+            public float MeanActualSpeed;    // m/s
+            public int Coverage;             // 訪れた格子セル数
+            public float MeanHeightAboveFloor; // m
+            public long NociceptionCount;
+        }
+
+        static Run Simulate(FlowGrid g, uint seed, bool nociception, float sinkRatio,
+            int steps = 4000, float startAboveFloor = -1f)
+        {
+            var rng = new Mulberry32(seed);
+            var p = K3Params(nociception, sinkRatio);
+
+            // 部屋の内側にランダムな初期位置。壁から傘半径ぶんは離す
+            float margin = g.CellSize * 2f + p.BellDiameter;
+            float sx = g.OriginX + margin + rng.NextFloat01() * (g.Width * g.CellSize - 2f * margin);
+            float sy = startAboveFloor >= 0f
+                ? g.OriginY + g.CellSize + startAboveFloor
+                : g.OriginY + margin + rng.NextFloat01() * (g.Height * g.CellSize - 2f * margin);
+            float sz = g.OriginZ + margin + rng.NextFloat01() * (g.Depth * g.CellSize - 2f * margin);
+
+            var j = new Jellyfish(p, sx, sy, sz, g);
+
+            // 初期姿勢もシードで振る。**積分を通して**傾ける（軸は代入されない）
+            float ox = (rng.NextFloat01() - 0.5f) * 4f, oz = (rng.NextFloat01() - 0.5f) * 4f;
+            for (int k = 0; k < 20; k++) j.NudgeForTest(ox, 0f, oz, k_Dt);
+
+            double wall = 0, height = 0, speed = 0;
+            var visited = new HashSet<int>();
+            float px = j.X, py = j.Y, pz = j.Z;
+            float floorY = g.OriginY + g.CellSize;   // 外周1セルが固体なので床面はここ
+
+            // 【後半だけで測る】t=0 からの累積平均だと、途中で固まった個体でも
+            // 序盤に動いたぶんが残って「動いている」ように見える。
+            // 位相で標本化した傾き（追記8）と同じ族の誤りで、最初これで測っていた
+            int from = steps / 2;
+            int n = 0;
+
+            for (int t = 0; t < steps; t++)
+            {
+                j.Step(k_Dt, 0f, 0f, 0f);
+
+                float dx = j.X - px, dy = j.Y - py, dz = j.Z - pz;
+                float step = (float)Math.Sqrt(dx * dx + dy * dy + dz * dz) / k_Dt;
+                px = j.X; py = j.Y; pz = j.Z;
+
+                int gx = (int)Math.Floor((j.X - g.OriginX) / g.CellSize);
+                int gy = (int)Math.Floor((j.Y - g.OriginY) / g.CellSize);
+                int gz = (int)Math.Floor((j.Z - g.OriginZ) / g.CellSize);
+                if (g.InRange(gx, gy, gz)) visited.Add(g.Index(gx, gy, gz));
+
+                if (t < from) continue;
+                wall += WallDistance(g, j.X, j.Y, j.Z);
+                height += j.Y - floorY;
+                speed += step;
+                n++;
+            }
+
+            return new Run
+            {
+                MeanWallDistance = (float)(wall / n),
+                MeanActualSpeed = (float)(speed / n),
+                Coverage = visited.Count,
+                MeanHeightAboveFloor = (float)(height / n),
+                NociceptionCount = j.NociceptionCount,
+            };
+        }
+
+        // ================= 追記13 A13.1 の根拠を固定する =================
+
+        /// <summary>
+        /// **M-K3f 受容器の位置が刺激の位置を決める。**（追記13 A13.1）
+        ///
+        /// 床の真上・上向きなら**16セルが同時に**接触し、垂直な壁なら
+        /// **一部だけ**が接触する。これが「argmax をやめた」ことの内容である。
+        /// argmax なら床でも必ず1セルしか選ばれず、どれが選ばれるかは
+        /// タイブレークの実装が決めていた。
+        /// </summary>
+        [Test]
+        public void MK3f_TheBodySurfaceDecidesWhichCellsFire()
+        {
+            var g = Room();
+            var p = K3Params(true, 1.10f);
+            int n = p.RingCells;
+            var contact = new bool[n];
+            var posture = JellyPosture.Upright;
+
+            var cos = new float[n];
+            var sin = new float[n];
+            for (int i = 0; i < n; i++)
+            {
+                double a = 2.0 * Math.PI * i / n;
+                cos[i] = (float)Math.Cos(a);
+                sin[i] = (float)Math.Sin(a);
+            }
+            float r = p.BellDiameter * 0.5f;
+            float mid = g.Width * g.CellSize * 0.5f;
+
+            // 床のすぐ上、軸は真上。縁は全周が同じ高さにある
+            int onFloor = JellyBoundary.SurfaceContact(g, mid, g.OriginY + g.CellSize * 1.4f, mid,
+                r, posture, cos, sin, p.NociceptionBandCells, contact);
+            Assert.AreEqual(n, onFloor,
+                $"床の真上で {onFloor}/{n} セルしか発火していない。" +
+                "縁は全周が同じ高さにあるので全部が同時に入るはず");
+
+            // 垂直な壁のすぐ横、軸は真上。壁側の縁だけが入る
+            int atWall = JellyBoundary.SurfaceContact(g, g.OriginX + g.CellSize * 1.4f, mid, mid,
+                r, posture, cos, sin, p.NociceptionBandCells, contact);
+            Assert.Greater(atWall, 0, "垂直な壁で1セルも発火していない");
+            Assert.Less(atWall, n,
+                $"垂直な壁で {atWall}/{n} セルが発火した。壁側だけが入るはず（非対称にならない）");
+
+            // 部屋の中心では発火しない（空の検証の防止）
+            int middle = JellyBoundary.SurfaceContact(g, mid, mid, mid,
+                r, posture, cos, sin, p.NociceptionBandCells, contact);
+            Assert.AreEqual(0, middle, "部屋の中心で発火した。帯の判定が効いていない");
+        }
+
+        /// <summary>
+        /// **追記13 A13.1 の数値を固定する。** 傘の縁の「床までの距離差」が
+        /// セルサイズを大きく下回ることが、argmax をやめた理由そのものである。
+        /// 傾き 13°（実測の最大）でも 0.42 セルしかない。
+        /// </summary>
+        [Test]
+        public void MK3f_TheFloorContrastIsBelowOneCell()
+        {
+            var p = JellyParams.Default;
+            float diameter = p.BellDiameter;   // 0.15 m
+            const float cell = 0.08f;
+
+            foreach (var (tiltDeg, expectedCells) in new[]
+                { (0f, 0.00f), (5.05f, 0.17f), (13.0f, 0.42f) })
+            {
+                float contrast = diameter * (float)Math.Sin(tiltDeg * Math.PI / 180.0);
+                Assert.AreEqual(expectedCells, contrast / cell, 0.01f,
+                    $"傾き {tiltDeg}° の縁の距離差が {contrast / cell:F2} セル");
+                Assert.Less(contrast / cell, 1f,
+                    "距離差が1セルを超えた。整数チャンファなら argmax でも読めることになる");
+            }
+
+            // 対照: 垂直な壁なら傘の直径ぶんの差があり、1セルを超える
+            Assert.Greater(diameter / cell, 1f,
+                "垂直な壁でも1セル未満なら、体表規則でも壁側を区別できない");
+        }
+
+        // ================= M-K3e: 対称発火の推力（対照と位相掃引つき） =================
+
+        /// <summary>
+        /// **M-K3e 対称16セル発火が推力に与える効果。**（追記13 A13.3）
+        ///
+        /// 「底近くを漂う」という予想には**対称発火が推力を増やす**という
+        /// 未検証の前提が埋まっていた。M-K2a が測ったのは「旋回しない」だけである。
+        ///
+        /// **対照 = ペースメーカーのみ**（同じ周期・同じ時間）。これが無いと
+        /// 「増やす／減らす」が言えない（K1 の教訓）。
+        /// **位相は環境が決める**（帯に入った時刻で決まる）ので全点掃引し、
+        /// 範囲を固定する。単一位相での標本化は前科3件と同じ族の誤りである。
+        /// </summary>
+        [Test]
+        public void MK3e_SymmetricFiringChangesTheThrust_AllPhases()
+        {
+            var p = JellyParams.Default;
+            p.JetModel = true;
+            int T = p.PulsePeriodTicks;
+
+            float Speed(int offset)
+            {
+                var j = new Jellyfish(p, 0f, 0f, 0f);
+                void Inject(int t)
+                {
+                    if (offset < 0 || t % T != offset) return;
+                    for (int i = 0; i < p.RingCells; i++) j.StimulateCell(i);
+                }
+                for (int t = 0; t < 800; t++) { Inject(t); j.Step(k_Dt, 0f, 0f, 0f); }
+
+                float px = j.X, py = j.Y - j.SinkPathY, pz = j.Z;
+                double path = 0;
+                for (int t = 0; t < 1600; t++)
+                {
+                    Inject(800 + t);
+                    j.Step(k_Dt, 0f, 0f, 0f);
+                    float cy = j.Y - j.SinkPathY;
+                    double dx = j.X - px, dy = cy - py, dz = j.Z - pz;
+                    path += Math.Sqrt(dx * dx + dy * dy + dz * dz);
+                    px = j.X; py = cy; pz = j.Z;
+                }
+                return (float)(path / (1600.0 / 40.0));
+            }
+
+            float control = Speed(-1);
+            Assert.AreEqual(p.SwimSpeed, control, p.SwimSpeed * 0.05f,
+                $"対照が目標速度で泳いでいない（{control:F5} m/s）。比較が成立しない");
+
+            int dead = 0, gained = 0;
+            float best = 0f;
+            for (int off = 0; off < T; off++)
+            {
+                float ratio = Speed(off) / control - 1f;
+                if (Math.Abs(ratio) < 0.10f) dead++;
+                else if (ratio > 0f) gained++;
+                if (ratio > best) best = ratio;
+            }
+
+            // 【結果は「増える」側】追記13 A13.3 の分岐のうち +10% 以上が多数を占める
+            Assert.AreEqual(8, dead,
+                $"不応期の影に落ちる位相が {dead}/{T} 個。登録時の測定は 8 個");
+            Assert.AreEqual(T - 8, gained,
+                $"推力が増える位相が {gained}/{T} 個。残りは減っていることになる");
+            Assert.Greater(best, 10f,
+                $"最大でも対照の {best:+0%} にしかならない。噴流は dV の2乗なので" +
+                "全周同時収縮は桁で効くはず");
+        }
+
+        // ================= M-K3a〜d =================
+
+        /// <summary>
+        /// **M-K3a 壁への接近が減る。**（沈降 OFF。原登録と比較可能な世界で測る）
+        /// 48シードで符号一貫 ≥ 40/48。
+        /// </summary>
+        [Test]
+        public void MK3a_NociceptionKeepsItAwayFromTheWalls()
+        {
+            var g = Room();
+            int better = 0;
+            double onSum = 0, offSum = 0;
+            for (uint s = 1; s <= 48; s++)
+            {
+                var on = Simulate(g, s, nociception: true, sinkRatio: 0f);
+                var off = Simulate(g, s, nociception: false, sinkRatio: 0f);
+                onSum += on.MeanWallDistance;
+                offSum += off.MeanWallDistance;
+                if (on.MeanWallDistance > off.MeanWallDistance) better++;
+            }
+            Assert.GreaterOrEqual(better, 40,
+                $"侵害受容ONのほうが壁から遠いのは {better}/48 シードだけ。" +
+                $"平均 ON {onSum / 48:F4} m 対 OFF {offSum / 48:F4} m");
+        }
+
+        /// <summary>
+        /// **M-K3b 静止しない。** これが要である。Phase C で「泳げている」と
+        /// 報告する指標（推力からの積分）が「止まっている」個体に出ていたので、
+        /// **実移動で測る**ことを判定に明記してある（prereg §3.4）。
+        /// 沈降 OFF / ON の両方で見る。
+        /// </summary>
+        [Test]
+        public void MK3b_ItDoesNotFreeze()
+        {
+            var g = Room();
+            foreach (float sink in new[] { 0f, 1.10f })
+            {
+                double worst = double.MaxValue;
+                uint worstSeed = 0;
+                for (uint s = 1; s <= 48; s++)
+                {
+                    var r = Simulate(g, s, nociception: true, sinkRatio: sink);
+                    if (r.MeanActualSpeed < worst) { worst = r.MeanActualSpeed; worstSeed = s; }
+                }
+                Assert.GreaterOrEqual(worst, JellyParams.Default.SwimSpeed * 0.5f,
+                    $"沈降 {sink:P0} でシード {worstSeed} の実移動が {worst:F5} m/s。" +
+                    "目標の 50% を下回った（壁反発で一度同じ失敗をしている）");
+            }
+        }
+
+        /// <summary>
+        /// **M-K3c 部屋を使う。**（沈降 OFF）48シードで符号一貫 ≥ 40/48。
+        ///
+        /// prereg §3.5 は**不合格または僅差**と予想している。持続的な進路変更には
+        /// 体の向きが状態として残ることが要り、K3 単独では往復までが上限、
+        /// という理解を先に登録してある。
+        /// </summary>
+        [Test]
+        public void MK3c_ItUsesTheRoom()
+        {
+            var g = Room();
+            int better = 0;
+            double onSum = 0, offSum = 0;
+            for (uint s = 1; s <= 48; s++)
+            {
+                var on = Simulate(g, s, nociception: true, sinkRatio: 0f);
+                var off = Simulate(g, s, nociception: false, sinkRatio: 0f);
+                onSum += on.Coverage;
+                offSum += off.Coverage;
+                if (on.Coverage > off.Coverage) better++;
+            }
+            TestContext.WriteLine(
+                $"M-K3c 被覆: ON {onSum / 48:F1} セル 対 OFF {offSum / 48:F1} セル、符号一貫 {better}/48");
+            Assert.GreaterOrEqual(better, 40,
+                $"被覆が増えたのは {better}/48 シードだけ。" +
+                $"平均 ON {onSum / 48:F1} 対 OFF {offSum / 48:F1}");
+        }
+
+        /// <summary>
+        /// **M-K3d 着底しない。**（沈降 ON = 1.10。追記13 A13.2 の新しい判定）
+        ///
+        /// 沈降 1.10 では拍動しても沈むので、床の侵害受容が無ければ必ず着底する。
+        /// 床からの高さの時間平均が**傘半径以上**を保つこと。
+        /// </summary>
+        [Test]
+        public void MK3d_ItDoesNotSettleOnTheFloor()
+        {
+            var g = Room();
+            float radius = JellyParams.Default.BellDiameter * 0.5f;
+
+            // 【床に届かなければ空の検証になる】沈降 1.10 でも正味は 0.0041 m/s しかなく、
+            // 部屋の高さから始めると 4000 ティックでは 0.16 m しか降りない。
+            // **床の近くから始め、対照が実際に着底することを先に確かめる**
+            const float Start = 0.30f;
+            const int Steps = 8000;
+
+            double worstOn = double.MaxValue, deepestOff = double.MaxValue;
+            uint worstSeed = 0;
+            long noci = 0;
+            for (uint s = 1; s <= 48; s++)
+            {
+                var on = Simulate(g, s, true, 1.10f, Steps, Start);
+                var off = Simulate(g, s, false, 1.10f, Steps, Start);
+                noci += on.NociceptionCount;
+                if (on.MeanHeightAboveFloor < worstOn) { worstOn = on.MeanHeightAboveFloor; worstSeed = s; }
+                if (off.MeanHeightAboveFloor < deepestOff) deepestOff = off.MeanHeightAboveFloor;
+            }
+
+            // 対照が着底していなければ「着底しない」を主張しても意味がない
+            Assert.Less(deepestOff, radius,
+                $"対照（侵害受容OFF）が着底していない（最も低いシードで {deepestOff:F4} m）。判定が成立しない");
+            Assert.Greater(noci, 0, "48シードで侵害受容が一度も発火していない");
+
+            Assert.GreaterOrEqual(worstOn, radius,
+                $"シード {worstSeed} の床からの平均高さが {worstOn:F4} m。傘半径 {radius:F4} m を下回った");
+        }
+    }
+}

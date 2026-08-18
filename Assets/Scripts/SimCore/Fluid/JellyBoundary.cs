@@ -69,6 +69,59 @@ namespace BlockField.SimCore.Fluid
             rz = nz / len * strength;
         }
 
+        /// <summary>
+        /// **体表のどの受容器が壁の帯に入っているか** (jelly_2 K3)。
+        /// <paramref name="contact"/> に真偽を書き、入っているセル数を返す。
+        ///
+        /// 【なぜ「壁に最も近い1セル」ではないのか】当初の登録値は argmax だったが、
+        /// **床に対して破綻する**。傘の縁の各点の床までの距離差は、傾き 13°
+        /// （実測の最大）でも 0.034 m = **0.42 セル**しかなく、整数チャンファの
+        /// 距離場では読めない。16セルが同値を返し、**どれが選ばれるかは
+        /// タイブレークの実装が決める** — それは環境が決めた向きではなく
+        /// こちらが書いた向きで、「環境が刺激の位置を決める」が成立しない。
+        /// 沈降を入れた世界ではこれが定常状態である（prereg 追記13 A13.1）。
+        ///
+        /// 【体表で決める】受容器は体表にあり、**その部位が壁に近ければ発火する**。
+        /// argmax もタイブレークも要らない。垂直な壁では壁側だけが入って非対称に、
+        /// 床の真上では16セルが同時に入って対称になる。対称なら
+        /// <c>Σ(amp_i · r̂_i) = 0</c> でトルクは構造的に 0（M-K2a）なので、
+        /// **旋回せず推力だけが変わる** — 床に対する正しい振る舞いが自動的に出る。
+        ///
+        /// 【向きを計算していない】ここがやっているのは「体表の点が壁の帯に
+        /// 入っているか」の判定だけで、逃避の向きは作らない。向きは伝播の
+        /// 時間差と減衰勾配から創発する（M-J2b）。壁の位置は環境の情報なので
+        /// このファイルは grep の走査対象に入れていない。
+        /// </summary>
+        /// <param name="radius">傘半径 (m)。受容器はリング＝縁にある。</param>
+        /// <param name="bandCells">壁面からこの距離（セル数）以内で発火。</param>
+        public static int SurfaceContact(FlowGrid g, float x, float y, float z,
+            float radius, in JellyPosture posture, float[] cos, float[] sin,
+            float bandCells, bool[] contact)
+        {
+            int n = contact.Length;
+            for (int i = 0; i < n; i++) contact[i] = false;
+            if (g == null || bandCells <= 0f) return 0;
+
+            int hit = 0;
+            for (int i = 0; i < n; i++)
+            {
+                posture.RadialAt(cos[i], sin[i], out float ux, out float uy, out float uz);
+                float px = x + ux * radius, py = y + uy * radius, pz = z + uz * radius;
+
+                int gx = (int)System.Math.Floor((px - g.OriginX) / g.CellSize);
+                int gy = (int)System.Math.Floor((py - g.OriginY) / g.CellSize);
+                int gz = (int)System.Math.Floor((pz - g.OriginZ) / g.CellSize);
+
+                // 格子の外は壁とみなす（Sample と同じ約束）
+                float d = g.InRange(gx, gy, gz)
+                    ? g.DistanceInCells(g.Index(gx, gy, gz)) - 0.5f
+                    : 0f;
+
+                if (d < bandCells) { contact[i] = true; hit++; }
+            }
+            return hit;
+        }
+
         /// <summary>距離場の読み出し（格子の外は壁とみなして 0）。</summary>
         static float Sample(FlowGrid g, int x, int y, int z) =>
             g.InRange(x, y, z) ? g.DistanceInCells(g.Index(x, y, z)) : 0f;

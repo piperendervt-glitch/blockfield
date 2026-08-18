@@ -166,6 +166,8 @@ namespace BlockField.SimCore.Fluid
         /// （<see cref="JellyBoundary"/>）。null なら境界なし（単体テスト用）。
         /// </summary>
         readonly FlowGrid m_Tank;
+        readonly bool[] m_Contact;
+        int m_NociTicks = -1;
 
         public Jellyfish(JellyParams p, float x, float y, float z, FlowGrid tank = null)
             : this(p, x, y, z, tank, calibrate: true) { }
@@ -188,6 +190,9 @@ namespace BlockField.SimCore.Fluid
                 m_Cos[i] = (float)Math.Cos(a);
                 m_Sin[i] = (float)Math.Sin(a);
             }
+
+            // 侵害受容の受け皿。較正の走行では水槽が無いので確保しない
+            m_Contact = tank != null ? new bool[p.RingCells] : null;
 
             X = x; Y = y; Z = z;
             RightingGain = p.RightingGain;
@@ -309,6 +314,8 @@ namespace BlockField.SimCore.Fluid
                 PulseCount++;
             }
 
+            StepNociception();
+
             m_Ring.Step(m_Params.Excitable);
 
             // 収縮したセルは自分の側と逆向きに体を押す（jelly_1 と同じ局所則）
@@ -359,6 +366,48 @@ namespace BlockField.SimCore.Fluid
 
             StepCount++;
         }
+
+        /// <summary>
+        /// 境界からの侵害受容を1ステップぶん（jelly_2 K3）。
+        ///
+        /// **どのセルが発火するかは環境が決める。** ここがやるのは
+        /// <see cref="JellyBoundary.SurfaceContact"/> が真を立てたセルを
+        /// そのまま刺激することだけで、逃避の向きは作らない。強さも通常の刺激と同格
+        /// （別に持つと自由度が増えて創発の主張が弱まる — prereg §3.1）。
+        ///
+        /// 【周期 T ごとに1回】毎ステップ入れると不応期で半分が空振りし、
+        /// T = R₀ の谷（§5.2）と同じ現象が起きる。
+        /// **位相は帯に入った時刻が決める** — つまり環境が決める。こちらでは選べない。
+        /// 帯を出たら数え直す。
+        /// </summary>
+        void StepNociception()
+        {
+            if (!m_Params.Nociception || m_Tank == null || m_Contact == null) return;
+
+            int hit = JellyBoundary.SurfaceContact(m_Tank, X, Y, Z,
+                m_Params.BellDiameter * 0.5f, m_Posture, m_Cos, m_Sin,
+                m_Params.NociceptionBandCells, m_Contact);
+
+            if (hit == 0) { m_NociTicks = -1; NociceptedCells = 0; return; }
+
+            if (m_NociTicks < 0) m_NociTicks = 0;
+            if (m_NociTicks % m_Params.PulsePeriodTicks == 0)
+            {
+                for (int i = 0; i < m_Contact.Length; i++)
+                {
+                    if (m_Contact[i]) StimulateCell(i);
+                }
+                NociceptionCount++;
+            }
+            m_NociTicks++;
+            NociceptedCells = hit;
+        }
+
+        /// <summary>直近のステップで壁の帯に入っていた受容器の数。診断とログ用。</summary>
+        public int NociceptedCells { get; private set; }
+
+        /// <summary>侵害受容が刺激を入れた回数。診断とログ用。</summary>
+        public long NociceptionCount { get; private set; }
 
         /// <summary>
         /// 指定したセルを刺激する。**環境が刺激の位置を決める入口**（jelly_2 K3）。

@@ -51,6 +51,22 @@ namespace BlockField.SimCore.Fluid
         /// <summary>反発が働く帯の幅（セル数）。壁からこの距離より外では効かない。</summary>
         public float WallBandCells;
 
+        // ================= K3: 境界からの侵害受容 =================
+
+        /// <summary>
+        /// **境界からの侵害受容**（jelly_2 K3）。体表の受容器が壁の帯に入ると発火する。
+        /// false でアブレーション（対照）。
+        /// </summary>
+        public bool Nociception;
+
+        /// <summary>
+        /// 受容器が発火する帯の幅（セル数）。
+        ///
+        /// 【なぜ「傘半径 + 1セル」ではなく 1セルか】受容器を縁に置いたので、
+        /// 傘半径ぶんは受容器の位置に入っている（prereg 追記13 A13.1）。
+        /// </summary>
+        public float NociceptionBandCells;
+
         // ================= K2: dV/dt 噴流モデル =================
 
         /// <summary>
@@ -159,6 +175,8 @@ namespace BlockField.SimCore.Fluid
             RightingGain = 0.5f,
             RotationDrag = 0.1f,
             WallBandCells = 2.5f,
+            Nociception = true,
+            NociceptionBandCells = 1.0f,
             Excitable = ExcitableParams.Default,
         };
     }
