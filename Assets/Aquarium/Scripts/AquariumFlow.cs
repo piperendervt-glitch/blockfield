@@ -354,6 +354,12 @@ namespace BlockField.Aquarium
             BakeMs = m_Watch.ElapsedMilliseconds;
             Status = "流れ場を構築した";
 
+            // 【刻印をログにも出す】パネルにしか無い値は装着中のユーザーが読み上げられず、
+            // セッション後に転記もできない（CLAUDE.md）。**どのビルドのセッションか**を
+            // ログ単体で確定できないと、後から結果を突き合わせられない。
+            // 2026-08-19 のセッションで実際に漏れていた（同じ漏れの3例目）
+            Debug.Log($"[Aquarium] ビルド刻印: {BuildStamp.Text}");
+
             float anchorTilt = AnchorTiltDegrees(scan);
             Debug.Log($"[Aquarium] 焼き込み完了: セル {cell * 100f:F1}cm / " +
                 $"格子 {grid.Width}x{grid.Height}x{grid.Depth}={grid.CellCount} / " +

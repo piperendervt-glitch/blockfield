@@ -1,3 +1,4 @@
+using System.Linq;
 using System;
 using BlockField.SimCore.Fluid;
 using System.Collections.Generic;
@@ -717,4 +718,102 @@ Console.WriteLine("追記18: 6配置の4つ組（mask / 床上 / 壁1 / 壁2）�
             for (int j = i + 1; j < keys.Count; j++)
                 if (keys[i] == keys[j]) Console.WriteLine($"    #{i + 1} と #{j + 1}: {keys[i]}");
     }
+}
+
+Console.WriteLine();
+Console.WriteLine("追記19-4: 着底は吸収状態か（6シード×100,000 tick = 2500秒）");
+{
+    const int W = 26; const float C = 0.08f;
+    var g = new FlowGrid(W, W, W, C, 0f, 0f, 0f);
+    for (int x = 0; x < W; x++) for (int y = 0; y < W; y++) for (int z = 0; z < W; z++)
+        if (x == 0 || y == 0 || z == 0 || x == W - 1 || y == W - 1 || z == W - 1)
+            g.SetSolid(x, y, z, true);
+    FlowBoundaryBaker.BakeDistance(g);
+
+    float R = JellyParams.Default.BellDiameter * 0.5f;
+    Console.WriteLine($"  復帰の基準: 床上 > 傘半径 {R:F3} m");
+    foreach (uint s in new uint[] { 4, 30, 36, 41, 43, 48, 1, 2 })
+    {
+        var p = JellyParams.Default; p.JetModel = true; p.Nociception = true; p.SinkRatio = 1.10f;
+        var rng = new Mulberry32(s);
+        float margin = C * 2f + p.BellDiameter; float span = W * C - 2f * margin;
+        float sx = margin + rng.NextFloat01() * span; rng.NextFloat01();
+        float sz = margin + rng.NextFloat01() * span;
+        var j = new Jellyfish(p, sx, C + 0.30f, sz, g);
+        float ox = (rng.NextFloat01() - 0.5f) * 4f, oz = (rng.NextFloat01() - 0.5f) * 4f;
+        for (int k = 0; k < 20; k++) j.NudgeForTest(ox, 0f, oz, 1f / 40f);
+
+        long settleAt = -1, recoveries = 0, aboveTicks = 0, firstRecoveryAt = -1;
+        int cellsBeforeRecovery = -1, prevCells = 0;
+        bool below = false;
+        for (int t = 0; t < 100000; t++)
+        {
+            j.Step(1f / 40f, 0f, 0f, 0f);
+            float h = JellyBoundary.HeightAboveFloor(g, j.X, j.Y, j.Z);
+            bool nowBelow = h <= R;
+            if (settleAt < 0 && nowBelow) { settleAt = t; below = true; }
+            else if (settleAt >= 0)
+            {
+                if (below && !nowBelow)
+                {
+                    recoveries++;
+                    if (firstRecoveryAt < 0) { firstRecoveryAt = t; cellsBeforeRecovery = prevCells; }
+                }
+                below = nowBelow;
+                if (!nowBelow) aboveTicks++;
+            }
+            prevCells = j.NociceptedCells;
+        }
+        string verdict = settleAt < 0 ? "着底せず"
+            : recoveries == 0 ? "**復帰なし = 吸収状態**"
+            : $"復帰 {recoveries} 回、床上>{R:F3} の滞在 {aboveTicks / 40.0:F1} 秒、" +
+              $"初回 t={firstRecoveryAt}（直前の接触 {cellsBeforeRecovery}/16）";
+        Console.WriteLine($"  シード{s,2}: 着底 t={settleAt,6}（{(settleAt < 0 ? 0 : settleAt / 40.0):F0}秒） " +
+            $"最終床上={JellyBoundary.HeightAboveFloor(g, j.X, j.Y, j.Z):F4}m 試行={j.NociceptionCount,4} → {verdict}");
+    }
+}
+
+Console.WriteLine();
+Console.WriteLine("追記19-4b: 48シード全部を 100,000 tick で（M-K3d の窓は 8000 tick）");
+{
+    const int W = 26; const float C = 0.08f;
+    var g = new FlowGrid(W, W, W, C, 0f, 0f, 0f);
+    for (int x = 0; x < W; x++) for (int y = 0; y < W; y++) for (int z = 0; z < W; z++)
+        if (x == 0 || y == 0 || z == 0 || x == W - 1 || y == W - 1 || z == W - 1)
+            g.SetSolid(x, y, z, true);
+    FlowBoundaryBaker.BakeDistance(g);
+    float R = JellyParams.Default.BellDiameter * 0.5f;
+
+    int settled8k = 0, settled100k = 0; var times = new List<double>();
+    double aboveTotal = 0;
+    foreach (uint s in Enumerable.Range(1, 48).Select(i => (uint)i))
+    {
+        var p = JellyParams.Default; p.JetModel = true; p.Nociception = true; p.SinkRatio = 1.10f;
+        var rng = new Mulberry32(s);
+        float margin = C * 2f + p.BellDiameter; float span = W * C - 2f * margin;
+        float sx = margin + rng.NextFloat01() * span; rng.NextFloat01();
+        float sz = margin + rng.NextFloat01() * span;
+        var j = new Jellyfish(p, sx, C + 0.30f, sz, g);
+        float ox = (rng.NextFloat01() - 0.5f) * 4f, oz = (rng.NextFloat01() - 0.5f) * 4f;
+        for (int k = 0; k < 20; k++) j.NudgeForTest(ox, 0f, oz, 1f / 40f);
+
+        long settleAt = -1; long above = 0; double h8k = 0; int n8k = 0;
+        for (int t = 0; t < 100000; t++)
+        {
+            j.Step(1f / 40f, 0f, 0f, 0f);
+            float h = JellyBoundary.HeightAboveFloor(g, j.X, j.Y, j.Z);
+            if (t >= 4000 && t < 8000) { h8k += h; n8k++; }
+            if (settleAt < 0 && h <= R) settleAt = t;
+            if (settleAt >= 0 && h > R) above++;
+        }
+        if (h8k / n8k < R) settled8k++;
+        if (settleAt >= 0) { settled100k++; times.Add(settleAt / 40.0); aboveTotal += above / 40.0; }
+    }
+    times.Sort();
+    Console.WriteLine($"  M-K3d の窓(8000tick)で着底と判定: {settled8k}/48");
+    Console.WriteLine($"  100,000 tick 以内に着底: **{settled100k}/48**");
+    if (times.Count > 0)
+        Console.WriteLine($"  着底までの時間: 最短 {times[0]:F0}秒 / 中央 {times[times.Count / 2]:F0}秒 / 最長 {times[^1]:F0}秒");
+    Console.WriteLine($"  着底後に床上>{R:F3} だった時間の合計: {aboveTotal:F1}秒 / 総計 {settled100k * 2500}秒 " +
+        $"({(settled100k > 0 ? aboveTotal / (settled100k * 2500) * 100 : 0):F3}%)");
 }
