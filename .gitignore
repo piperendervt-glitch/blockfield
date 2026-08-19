@@ -122,3 +122,10 @@ tools/**/obj/
 # Python の生成物（docs/prototypes の参照実装を走らせると出る）
 __pycache__/
 *.pyc
+
+# ビルドが生成する刻印。**追跡しない。**
+# 追跡すると、自分を含むコミットより前に書かれるため
+# **常に1つ前のコミットを指す**（2026-08-19 に発生）。
+# 一致しない刻印は、刻印が無いのより悪い（間違ったものを信じさせる）。
+Assets/Resources/BuildStamp.txt
+Assets/Resources/BuildStamp.txt.meta

@@ -70,12 +70,16 @@ public static class BuildScript
 
     static void Build(string scenePath, Action ensureScene, string OutputPath)
     {
-        WriteBuildStamp(scenePath);
-
         try
         {
             // シーンが無ければコードで生成（GUI手作業に依存しない）
             ensureScene();
+
+            // 【刻印は ensureScene のあと】シーン生成はアセットを作るので、
+            // 先に刻んでしまうと **生成物が未コミットでも clean と称する**。
+            // 実際 2026-08-19 に「099d9e5 clean」と刻みながら、
+            // 未コミットの Watch.unity ごと APK を作っていた
+            WriteBuildStamp(scenePath);
 
             Debug.Log($"[BuildScript] 焼くシーン: {scenePath}");
             Directory.CreateDirectory("Builds");
@@ -127,6 +131,8 @@ public static class BuildScript
         string scene = Path.GetFileNameWithoutExtension(scenePath);
         string branch = Git("rev-parse --abbrev-ref HEAD");
         string head = Git("rev-parse --short HEAD");
+        // **未コミットの変更があれば必ず出す。** APK がどのコミットとも
+        // 一致しないことを、実機の画面とログで見えるようにするため
         string dirty = string.IsNullOrEmpty(Git("status --porcelain")) ? "" : "+dirty";
         string stamp = $"{scene} | {branch}@{head}{dirty} | {DateTime.Now:MM-dd HH:mm}";
 
