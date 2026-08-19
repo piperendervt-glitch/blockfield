@@ -297,15 +297,17 @@ namespace BlockField.Tests.EditMode
         }
 
         /// <summary>
-        /// **M-K3h 6配置は4つ組で一意に分かれるか。**（prereg 追記18 A18.2）
+        /// **M-K3h 6配置は5つ組で一意に分かれるか。**（prereg 追記18 A18.2）
         ///
-        /// 答えは **5/6。`隅+床` と `壁+床` は完全に同一**（`FFFF|0.03|0.03|0.03`）。
-        /// **分離できないことをそのまま固定する。** 分かれる配置を選び直して
-        /// 「分離できた」と書くことはしない。両者が違うのは3番目の面距離だけである
-        /// （0.032 対 0.960）。
+        /// 4つ組（mask/床上/壁1/壁2）では **5/6 しか分かれない** —
+        /// `隅+床` と `壁+床` が `FFFF|0.03|0.03|0.03` で完全に同一だった。
+        /// 3番目の面距離を足すと **6/6** になる。両方を固定する。
+        ///
+        /// **壁3 は記録専用である。** 判定の連鎖のリンク1 は 壁2 ≤ 0.155 m のままで、
+        /// 壁3 では絞らない（追記18 A18.6）。
         /// </summary>
         [Test]
-        public void MK3h_TheFourTupleSeparatesFiveOfSixPlacements()
+        public void MK3h_TheFiveTupleSeparatesAllSixPlacements()
         {
             var g = Room();
             var p = K3Params(true, 1.10f);
@@ -334,6 +336,7 @@ namespace BlockField.Tests.EditMode
                 JellyBoundary.FaceDistances(g, x, y, z, out float d1, out float d2, out float d3);
                 return ($"{m:X4}|{h:F2}|{d1:F2}|{d2:F2}", d2, d3);
             }
+            string Five((string key, float second, float third) a) => $"{a.key}|{a.third:F2}";
 
             var floor = Probe(mid, near, mid);
             var ceiling = Probe(mid, far, mid);
@@ -343,16 +346,20 @@ namespace BlockField.Tests.EditMode
             var wallFloor = Probe(near, near, mid);
 
             var all = new[] { floor, ceiling, wall, corner, cornerFloor, wallFloor };
-            var uniq = new HashSet<string>();
-            foreach (var a in all) uniq.Add(a.key);
-            Assert.AreEqual(5, uniq.Count,
-                $"4つ組で分かれた配置が {uniq.Count}/6。実測は 5/6 のはず");
 
-            // **分離しない組を明示的に固定する**
+            // 4つ組では分かれない組があることを固定する（分かれる配置に選び直さない）
+            var four = new HashSet<string>();
+            foreach (var a in all) four.Add(a.key);
+            Assert.AreEqual(5, four.Count,
+                $"4つ組で分かれた配置が {four.Count}/6。実測は 5/6 のはず");
             Assert.AreEqual(cornerFloor.key, wallFloor.key,
-                "隅+床 と 壁+床 が分離した。実測では同一（FFFF|0.03|0.03|0.03）");
-            Assert.AreNotEqual(cornerFloor.third, wallFloor.third,
-                "3番目の面距離でも分離しない。壁3 を足しても分けられないことになる");
+                "隅+床 と 壁+床 が4つ組で分離した。実測では同一（FFFF|0.03|0.03|0.03）");
+
+            // 壁3 を足すと 6/6 になる
+            var five = new HashSet<string>();
+            foreach (var a in all) five.Add(Five(a));
+            Assert.AreEqual(6, five.Count,
+                $"5つ組で分かれた配置が {five.Count}/6。壁3 を足しても分けきれていない");
 
             // A18.3 の閾値 0.155 m が実測を分けることの確認
             const float CornerThreshold = 0.155f;   // 傘半径 0.075 + 帯幅 0.08
