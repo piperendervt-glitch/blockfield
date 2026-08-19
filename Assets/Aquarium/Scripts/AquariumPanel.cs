@@ -89,7 +89,7 @@ namespace BlockField.Aquarium
 
             if (field == null)
             {
-                m_Text.text = $"{BuildStamp.Text}\nFPS: {fps:F1}\n{(m_Flow != null ? m_Flow.Status : "未配線")}";
+                m_Text.text = $"{BuildStamp.Text}  アンカー={AnchorIdentity()}\nFPS: {fps:F1}\n{(m_Flow != null ? m_Flow.Status : "未配線")}";
                 return;
             }
 
@@ -104,7 +104,7 @@ namespace BlockField.Aquarium
                 // 【何が動いているかを画面に出す】シーンを取り違えたまま実機セッションを
                 // 始めた件の再発防止（2026-08-19）。パッケージ名は共通なので
                 // 実機側には他に判別する手段が無い
-                $"{BuildStamp.Text}\n" +
+                $"{BuildStamp.Text}  アンカー={AnchorIdentity()}\n" +
                 $"FPS: {fps:F1}   Tick: {m_Flow.TickMs:F2}ms   Bake: {m_Flow.BakeMs}ms\n" +
                 $"Speed[R-A]: {m_Flow.TargetSpeed:F3} m/s ({m_Flow.SpeedIndex + 1}/{AquariumFlow.TargetSpeedChoices.Length})" +
                 $"  = {m_Flow.TargetSpeed / 72f * 100f:F2}cm/frame   Max: {m_Flow.MaxSpeed:F3}\n" +
@@ -115,5 +115,21 @@ namespace BlockField.Aquarium
                 $"   n={m_Particles.DrawnParticles}   size={preset.Size * 100f:F1}cm   t={field.TickCount}\n" +
                 JellyLine() + "\n" + DebugLine();
         }
-    }
+    
+        /// <summary>
+        /// **いま基準にしているアンカーの識別子**。刻印（シーン名・ブランチ・HEAD）と
+        /// 並べて出す。将来 外部センサを登録すると登録座標はアンカーに紐づくので、
+        /// 部屋の再走査や Guardian のリセットでアンカーが変わったことに
+        /// **その場で気づける**必要がある。静かにずれるのが一番まずい。
+        /// 同じ値をログにも出している（<see cref="AquariumFlow"/>）。
+        /// </summary>
+        string AnchorIdentity()
+        {
+            var origin = m_Flow != null ? m_Flow.origin : null;
+            if (origin == null) return "(未配線)";
+            if (string.IsNullOrEmpty(origin.AnchorGuid)) return "(未確定)";
+            // 先頭8文字で足りる。長い GUID を出すと行が伸びて見切れる
+            return origin.AnchorGuid.Substring(0, 8);
+        }
+}
 }

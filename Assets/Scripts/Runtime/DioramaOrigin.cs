@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -42,6 +42,16 @@ namespace BlockField
 
         /// <summary>確定・復元済みの原点。未確定なら null。</summary>
         public Transform OriginTransform { get; private set; }
+
+        /// <summary>
+        /// **いま使っているアンカーの識別子**（GUID）。未確定なら null。
+        ///
+        /// 【なぜ外に出すか】将来 外部センサを登録する場合、登録座標は
+        /// **アンカーに紐づく**。部屋の再走査や Guardian のリセットでアンカーが
+        /// 変わると、登録座標が全部ずれる。**静かにずれるのが一番まずい**ので、
+        /// 毎セッションのログとパネルに出して見える形にしておく。
+        /// </summary>
+        public string AnchorGuid { get; private set; }
 
         public enum OriginState
         {
@@ -134,6 +144,7 @@ namespace BlockField
                 return false;
             }
 
+            AnchorGuid = data.anchorGuid;
             Debug.Log($"[DioramaOrigin] 保存済みアンカー {data.anchorGuid} の復元を試行中...");
             var result = await m_AnchorManager.TryLoadAnchorAsync(new SerializableGuid(guid));
             if (!result.status.IsSuccess() || result.value == null)
@@ -278,6 +289,7 @@ namespace BlockField
                 {
                     var data = new SaveData { anchorGuid = saveResult.value.guid.ToString() };
                     File.WriteAllText(SavePath, JsonUtility.ToJson(data));
+                    AnchorGuid = data.anchorGuid;
                     Debug.Log($"[DioramaOrigin] アンカーを永続化した (guid: {data.anchorGuid})。");
                     DebugPanel.Notify("anchor saved");
                 }

@@ -358,7 +358,7 @@ namespace BlockField.Aquarium
             // セッション後に転記もできない（CLAUDE.md）。**どのビルドのセッションか**を
             // ログ単体で確定できないと、後から結果を突き合わせられない。
             // 2026-08-19 のセッションで実際に漏れていた（同じ漏れの3例目）
-            Debug.Log($"[Aquarium] ビルド刻印: {BuildStamp.Text}");
+            Debug.Log($"[Aquarium] ビルド刻印: {BuildStamp.Text}  アンカー={AnchorIdentity()}");
 
             float anchorTilt = AnchorTiltDegrees(scan);
             Debug.Log($"[Aquarium] 焼き込み完了: セル {cell * 100f:F1}cm / " +
@@ -737,6 +737,19 @@ namespace BlockField.Aquarium
             JellyBoundary.FaceDistances(Field?.Grid, body.X, body.Y, body.Z,
                 out float d1, out float d2, out float d3);
             return $"壁1={d1:F3}m 壁2={d2:F3}m 壁3={d3:F3}m ";
+        }
+
+        /// <summary>
+        /// **いま基準にしているアンカーの識別子**。将来 外部センサを登録すると
+        /// 登録座標はこれに紐づくので、部屋の再走査や Guardian のリセットで
+        /// アンカーが変わったことに気づけるようにログへ出す。
+        /// 静かにずれるのが一番まずい。
+        /// </summary>
+        string AnchorIdentity()
+        {
+            var origin = m_Origin;
+            if (origin == null) return "(未配線)";
+            return string.IsNullOrEmpty(origin.AnchorGuid) ? "(未確定)" : origin.AnchorGuid;
         }
 }
 }
