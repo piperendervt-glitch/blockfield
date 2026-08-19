@@ -51,6 +51,7 @@ namespace BlockField.Aquarium
                 $" 傾き{m_Jelly.TiltDegrees:F0}°" +
                 $" 拍動{(m_Jelly.Pulsing ? "ON" : "**停止**")}" +
                 $" 刺激{m_Jelly.StimulusCount}" +
+                $" 侵害{body.NociceptedCells}/16({body.NociceptionCount})" +
                 $" p{body.PulseCount}\n" +
                 $"沈降[R-Grip]{m_Jelly.SinkRatio:P0}({m_Jelly.SinkIndex + 1}/{AquariumJellyfish.SinkChoices.Length})" +
                 $" 復元[R-Trig]{m_Jelly.RightingGain:F1}({m_Jelly.RightingIndex + 1}/{AquariumJellyfish.RightingChoices.Length})" +

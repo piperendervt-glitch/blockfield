@@ -568,3 +568,66 @@ Console.WriteLine("K3 診断6: 発火規則の変更後の天井（沈降OFF、�
             $"侵害{j.NociceptionCount}回 傾き{j.TiltDegrees:F2}° 後半の実移動{sp / n:F5}m/s");
     }
 }
+
+Console.WriteLine();
+Console.WriteLine("追記16-2: 緩めた M-K3d が落ちる条件（対照A 沈降1.50 / 対照B 侵害受容OFF）");
+{
+    const int W = 26; const float C = 0.08f;
+    var g = new FlowGrid(W, W, W, C, 0f, 0f, 0f);
+    for (int x = 0; x < W; x++) for (int y = 0; y < W; y++) for (int z = 0; z < W; z++)
+        if (x == 0 || y == 0 || z == 0 || x == W - 1 || y == W - 1 || z == W - 1)
+            g.SetSolid(x, y, z, true);
+    FlowBoundaryBaker.BakeDistance(g);
+
+    int Hovering(bool noci, float sink)
+    {
+        int ok = 0;
+        for (uint s = 1; s <= 48; s++)
+        {
+            var p = JellyParams.Default; p.JetModel = true; p.Nociception = noci; p.SinkRatio = sink;
+            var rng = new Mulberry32(s);
+            float margin = C * 2f + p.BellDiameter; float span = W * C - 2f * margin;
+            float sx = margin + rng.NextFloat01() * span; rng.NextFloat01();
+            float sz = margin + rng.NextFloat01() * span;
+            var j = new Jellyfish(p, sx, C + 0.30f, sz, g);
+            float ox = (rng.NextFloat01() - 0.5f) * 4f, oz = (rng.NextFloat01() - 0.5f) * 4f;
+            for (int k = 0; k < 20; k++) j.NudgeForTest(ox, 0f, oz, 1f / 40f);
+            double h = 0; int n = 0;
+            for (int t = 0; t < 8000; t++) { j.Step(1f / 40f, 0f, 0f, 0f); if (t >= 4000) { h += j.Y - C; n++; } }
+            if (h / n >= p.BellDiameter * 0.5f) ok++;
+        }
+        return ok;
+    }
+    Console.WriteLine($"  本判定 侵害受容ON  沈降1.10: {Hovering(true, 1.10f)}/48  （閾値 40）");
+    Console.WriteLine($"  対照A  侵害受容ON  沈降1.50: {Hovering(true, 1.50f)}/48");
+    Console.WriteLine($"  対照B  侵害受容OFF 沈降1.10: {Hovering(false, 1.10f)}/48");
+}
+
+Console.WriteLine();
+Console.WriteLine("追記16-3: 天井で ON/OFF が一致するのは発火が届いていないからか");
+{
+    const int W = 26; const float C = 0.08f;
+    var g = new FlowGrid(W, W, W, C, 0f, 0f, 0f);
+    for (int x = 0; x < W; x++) for (int y = 0; y < W; y++) for (int z = 0; z < W; z++)
+        if (x == 0 || y == 0 || z == 0 || x == W - 1 || y == W - 1 || z == W - 1)
+            g.SetSolid(x, y, z, true);
+    FlowBoundaryBaker.BakeDistance(g);
+    ulong[] hash = new ulong[2]; float[] yy = new float[2]; long[] pc = new long[2];
+    for (int k = 0; k < 2; k++)
+    {
+        var p = JellyParams.Default; p.JetModel = true; p.Nociception = k == 0; p.SinkRatio = 0f;
+        var rng = new Mulberry32(40);
+        float margin = C * 2f + p.BellDiameter; float span = W * C - 2f * margin;
+        float sx = margin + rng.NextFloat01() * span;
+        float sy = margin + rng.NextFloat01() * span;
+        float sz = margin + rng.NextFloat01() * span;
+        var j = new Jellyfish(p, sx, sy, sz, g);
+        float ox = (rng.NextFloat01() - 0.5f) * 4f, oz = (rng.NextFloat01() - 0.5f) * 4f;
+        for (int q = 0; q < 20; q++) j.NudgeForTest(ox, 0f, oz, 1f / 40f);
+        for (int t = 0; t < 4000; t++) j.Step(1f / 40f, 0f, 0f, 0f);
+        hash[k] = j.Ring.ComputeContentHash(); yy[k] = j.Y; pc[k] = j.PulseCount;
+    }
+    Console.WriteLine($"  リングの状態ハッシュ: ON {hash[0]:X16} / OFF {hash[1]:X16}  → {(hash[0] != hash[1] ? "異なる（発火は神経に届いている）" : "同一（届いていない）")}");
+    Console.WriteLine($"  拍動回数: ON {pc[0]} / OFF {pc[1]}");
+    Console.WriteLine($"  Y: ON {yy[0]:F6} / OFF {yy[1]:F6}  天井 {(W - 1) * C:F6}");
+}

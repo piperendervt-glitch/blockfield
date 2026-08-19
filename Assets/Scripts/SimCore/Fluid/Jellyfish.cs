@@ -379,6 +379,12 @@ namespace BlockField.SimCore.Fluid
         /// T = R₀ の谷（§5.2）と同じ現象が起きる。周期 T ごとに入れる形も
         /// 撃ちすぎになった（追記14 A14.3）。**再発火の周期は環境が決める** —
         /// 「入る → 撃つ → 出る → 沈む → 入る」で、こちらでは選べない。
+        ///
+        /// 【副作用: 恒久ロックアウト】**接触が解除されない環境（隅・天井）では、
+        /// 再発火の周期が実質的に無限になる。** 解除条件を「退出」以外に持たせるかは
+        /// 実機で見てから決める（追記16 A16.5）。沈降を 1.10 → 1.50 に強めると
+        /// 着底が 6/48 → 3/48 に**減る**のはこの副作用の直接の証拠で、
+        /// 沈降が速いほど帯から速く抜けてロックアウトが解ける。
         /// </summary>
         void StepNociception()
         {
@@ -409,7 +415,12 @@ namespace BlockField.SimCore.Fluid
         /// <summary>直近のステップで壁の帯に入っていた受容器の数。診断とログ用。</summary>
         public int NociceptedCells { get; private set; }
 
-        /// <summary>侵害受容が刺激を入れた回数。診断とログ用。</summary>
+        /// <summary>
+        /// 侵害受容が刺激を入れた**試行**回数。診断とログ用。
+        ///
+        /// 【実際に興奮した数ではない】<see cref="StimulateCell"/> は不応期のセルを
+        /// 弾くので、全セルが不応期なら空振りでもこの値は 1 増える（追記16 A16.4）。
+        /// </summary>
         public long NociceptionCount { get; private set; }
 
         /// <summary>
