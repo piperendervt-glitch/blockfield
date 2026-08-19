@@ -16,6 +16,7 @@ public static class BuildScript
     // 生態系を起動している（ビルドし直しで15分の損失）。名前で分ける
     private const string MainOutputPath = "Builds/blockfield_main.apk";
     private const string AquariumOutputPath = "Builds/blockfield_aquarium.apk";
+    private const string WatchOutputPath = "Builds/blockfield_watch.apk";
 
     [MenuItem("Tools/Project Setup/Build Quest APK")]
     public static void BuildQuest() => Build(SceneBootstrap.ScenePath, EnsureMainScene, MainOutputPath);
@@ -31,6 +32,23 @@ public static class BuildScript
     [MenuItem("Tools/Project Setup/Build Aquarium APK")]
     public static void BuildAquarium() =>
         Build(AquariumSceneBootstrap.ScenePath, EnsureAquariumScene, AquariumOutputPath);
+
+    /// <summary>
+    /// 見守り（L0）シーンをビルドする。
+    /// バッチモード: ... -executeMethod BuildScript.BuildWatch
+    /// </summary>
+    [MenuItem("Tools/Project Setup/Build Watch APK")]
+    public static void BuildWatch() =>
+        Build(WatchSceneBootstrap.ScenePath, EnsureWatchScene, WatchOutputPath);
+
+    static void EnsureWatchScene()
+    {
+        if (!File.Exists(WatchSceneBootstrap.ScenePath))
+        {
+            Debug.Log("[BuildScript] Watch.unity が無いため生成する。");
+            WatchSceneBootstrap.CreateWatchScene();
+        }
+    }
 
     static void EnsureMainScene()
     {

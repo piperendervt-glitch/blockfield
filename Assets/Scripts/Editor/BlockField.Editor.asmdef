@@ -10,7 +10,8 @@
         "Unity.XR.ARSubsystems",
         "Unity.XR.CoreUtils",
         "Unity.InputSystem",
-        "UnityEngine.UI"
+        "UnityEngine.UI",
+        "BlockField.Watch"
     ],
     "includePlatforms": [
         "Editor"

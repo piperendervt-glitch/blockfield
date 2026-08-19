@@ -1,0 +1,13 @@
+{
+    "name": "BlockField.Watch",
+    "references": [
+        "BlockField.SimCore",
+        "BlockField.Runtime",
+        "BlockField.Aquarium",
+        "Unity.XR.ARFoundation",
+        "Unity.XR.ARSubsystems",
+        "Unity.XR.CoreUtils",
+        "Unity.InputSystem",
+        "UnityEngine.UI"
+    ]
+}

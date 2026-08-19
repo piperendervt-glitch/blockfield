@@ -10,18 +10,20 @@
 #
 # 終了コード: 0 = 成功 / 9 = ターゲット未指定 / 10 = Unity Editor が開いている / 11 = Unity.exe 不明 / それ以外 = Unity の終了コード
 [CmdletBinding()]
-param([switch]$Aquarium, [switch]$Main)
+param([switch]$Aquarium, [switch]$Main, [switch]$Watch)
 
 $ErrorActionPreference = "Stop"
 
-if ($Aquarium -and $Main) {
-    Write-Host "-Aquarium と -Main は同時に指定できません。"
+$targets = @($Aquarium, $Main, $Watch) | Where-Object { $_ }
+if ($targets.Count -gt 1) {
+    Write-Host "-Aquarium / -Main / -Watch は同時に指定できません。"
     exit 9
 }
-if (-not $Aquarium -and -not $Main) {
+if ($targets.Count -eq 0) {
     Write-Host "ビルドするシーンを明示してください:"
     Write-Host "  -Aquarium : 系列2 水槽シーン (Assets/Scenes/Aquarium.unity) -> Builds/blockfield_aquarium.apk"
     Write-Host "  -Main     : 系列1 本編シーン (Assets/Scenes/Main.unity)     -> Builds/blockfield_main.apk"
+    Write-Host "  -Watch    : 系列3 見守りシーン (Assets/Scenes/Watch.unity)  -> Builds/blockfield_watch.apk"
     Write-Host ""
     Write-Host "既定を持たせないのは、付け忘れで別シーンを実機へ入れる事故が起きたため（2026-08-19）。"
     exit 9
@@ -44,8 +46,8 @@ if (-not (Test-Path $unity)) {
 
 $logFile = Join-Path $projectRoot "Logs\build.log"
 
-$method = if ($Aquarium) { "BuildScript.BuildAquarium" } else { "BuildScript.BuildQuest" }
-$label = if ($Aquarium) { "水槽シーン (Aquarium.unity) -> blockfield_aquarium.apk" } else { "本編シーン (Main.unity) -> blockfield_main.apk" }
+$method = if ($Aquarium) { "BuildScript.BuildAquarium" } elseif ($Watch) { "BuildScript.BuildWatch" } else { "BuildScript.BuildQuest" }
+$label = if ($Aquarium) { "水槽シーン (Aquarium.unity) -> blockfield_aquarium.apk" } elseif ($Watch) { "見守りシーン (Watch.unity) -> blockfield_watch.apk" } else { "本編シーン (Main.unity) -> blockfield_main.apk" }
 
 $unityArgs = @(
     "-batchmode",
@@ -64,7 +66,7 @@ $code = $proc.ExitCode
 
 # 完了行に出すパスも BuildScript 側と合わせる。ここが古いと
 # 「どちらを焼いたか」の確認にならない
-$apkName = if ($Aquarium) { "blockfield_aquarium.apk" } else { "blockfield_main.apk" }
+$apkName = if ($Aquarium) { "blockfield_aquarium.apk" } elseif ($Watch) { "blockfield_watch.apk" } else { "blockfield_main.apk" }
 $apk = Join-Path $projectRoot "Builds\$apkName"
 if ($code -eq 0 -and (Test-Path $apk)) {
     $sizeMb = [math]::Round((Get-Item $apk).Length / 1MB, 1)

@@ -4,7 +4,7 @@
 # **起動はしない。** capture_session.ps1 でアームしてから restart_app.ps1 で起動すること。
 # 終了コード: 0 = 成功 / 9 = ターゲット未指定 / 12 = adb 不明 / 13 = APK 無し / 14 = デバイス未接続 / それ以外 = adb の終了コード
 [CmdletBinding()]
-param([switch]$Aquarium, [switch]$Main)
+param([switch]$Aquarium, [switch]$Main, [switch]$Watch)
 
 $ErrorActionPreference = "Stop"
 
@@ -27,12 +27,13 @@ Write-Host "adb: $adb"
 
 # 【ターゲットを明示させる】build_quest.ps1 と同じ理由（2026-08-19 のシーン取り違え）。
 # 既定を持たせず、どちらの APK を入れるかを毎回書かせる
-if ($Aquarium -and $Main) { Write-Host "-Aquarium と -Main は同時に指定できません。"; exit 9 }
-if (-not $Aquarium -and -not $Main) {
-    Write-Host "インストールする APK を明示してください: -Aquarium または -Main"
+$targets = @($Aquarium, $Main, $Watch) | Where-Object { $_ }
+if ($targets.Count -gt 1) { Write-Host "-Aquarium / -Main / -Watch は同時に指定できません。"; exit 9 }
+if ($targets.Count -eq 0) {
+    Write-Host "インストールする APK を明示してください: -Aquarium / -Main / -Watch"
     exit 9
 }
-$apkName = if ($Aquarium) { "blockfield_aquarium.apk" } else { "blockfield_main.apk" }
+$apkName = if ($Aquarium) { "blockfield_aquarium.apk" } elseif ($Watch) { "blockfield_watch.apk" } else { "blockfield_main.apk" }
 $apk = Join-Path $projectRoot "Builds\$apkName"
 if (-not (Test-Path $apk)) {
     Write-Host "APK がありません: $apk  （先に scripts\build_quest.ps1 を実行してください）"
