@@ -673,3 +673,48 @@ Console.WriteLine("追記17-2: 接触マスクから面を分類できるか");
     Show("隅(-X,-Z,床)", near, near, near);
     Show("部屋の中心", mid, mid, mid);
 }
+
+Console.WriteLine();
+Console.WriteLine("追記18: 6配置の4つ組（mask / 床上 / 壁1 / 壁2）と3番目の値");
+{
+    const int W = 26; const float C = 0.08f;
+    var g = new FlowGrid(W, W, W, C, 0f, 0f, 0f);
+    for (int x = 0; x < W; x++) for (int y = 0; y < W; y++) for (int z = 0; z < W; z++)
+        if (x == 0 || y == 0 || z == 0 || x == W - 1 || y == W - 1 || z == W - 1)
+            g.SetSolid(x, y, z, true);
+    FlowBoundaryBaker.BakeDistance(g);
+
+    var p = JellyParams.Default; int n = p.RingCells;
+    var cos = new float[n]; var sin = new float[n];
+    for (int i = 0; i < n; i++) { double a = 2.0 * Math.PI * i / n; cos[i] = (float)Math.Cos(a); sin[i] = (float)Math.Sin(a); }
+    var contact = new bool[n]; var post = JellyPosture.Upright;
+    float r = p.BellDiameter * 0.5f, mid = W * C * 0.5f, near = C * 1.4f, far = W * C - C * 1.4f;
+
+    var keys = new List<string>();
+    void Show(string name, float x, float y, float z)
+    {
+        JellyBoundary.SurfaceContact(g, x, y, z, r, post, cos, sin, p.NociceptionBandCells, contact);
+        int m = 0; for (int i = 0; i < n; i++) if (contact[i]) m |= 1 << i;
+        float h = JellyBoundary.HeightAboveFloor(g, x, y, z);
+        JellyBoundary.FaceDistances(g, x, y, z, out float d1, out float d2, out float d3);
+        string key = $"{m:X4}|{h:F2}|{d1:F2}|{d2:F2}";
+        keys.Add(key);
+        Console.WriteLine($"  {name,-14}: mask={m:X4} 床上={h,5:F3} 壁1={d1,5:F3} 壁2={d2,5:F3} | 壁3={d3,5:F3}");
+    }
+    Show("床", mid, near, mid);
+    Show("天井", mid, far, mid);
+    Show("単一の壁", near, mid, mid);
+    Show("隅(2面)", near, mid, near);
+    Show("隅+床", near, near, near);
+    Show("壁+床", near, near, mid);
+
+    var uniq = new HashSet<string>(keys);
+    Console.WriteLine($"  → 4つ組で一意に分かれた配置: {uniq.Count}/6");
+    if (uniq.Count < 6)
+    {
+        Console.WriteLine("  重複した4つ組:");
+        for (int i = 0; i < keys.Count; i++)
+            for (int j = i + 1; j < keys.Count; j++)
+                if (keys[i] == keys[j]) Console.WriteLine($"    #{i + 1} と #{j + 1}: {keys[i]}");
+    }
+}

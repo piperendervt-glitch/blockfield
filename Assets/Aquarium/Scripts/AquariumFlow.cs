@@ -703,6 +703,7 @@ namespace BlockField.Aquarium
                     $"反発={body.WallRepelSpeed:F2}m/s " +
                     $"侵害={body.NociceptedCells}/16(mask={body.ContactMask:X4} {body.NociceptionCount}回) " +
                     $"床上={JellyBoundary.HeightAboveFloor(Field?.Grid, body.X, body.Y, body.Z):F3}m " +
+                    JellyFaceDistances(body) +
                     $"傾き={body.TiltDegrees:F1}度 復元={m_Jelly.RightingGain:F2} " +
                     $"刺激={m_Jelly.StimulusCount}回 噴流={body.IsJetModel} " +
                     $"沈降={m_Jelly.SinkRatio:P0}({body.SinkSpeed:F4}m/s) " +
@@ -711,5 +712,20 @@ namespace BlockField.Aquarium
                     $"世界={JellyWorldPosition(body):F2} step={body.StepCount}");
             }
         }
-    }
+    
+        /// <summary>
+        /// **壁1・壁2**（軸方向6本の面までの距離の1番目・2番目）をログの断片にする。
+        ///
+        /// 【最近傍だけでは隅を同定できない】隅の定義は「2面から同時に接している」なので、
+        /// 最も近い壁までの距離は単一の壁と同じ値になる。2番目が要る（prereg 追記18）。
+        /// 壁3 は出さない — `隅+床` と `壁+床` を分けるには要るが、
+        /// 検証の連鎖（A18.4）は壁2 までしか使わない。
+        /// </summary>
+        string JellyFaceDistances(Jellyfish body)
+        {
+            JellyBoundary.FaceDistances(Field?.Grid, body.X, body.Y, body.Z,
+                out float d1, out float d2, out float _);
+            return $"壁1={d1:F3}m 壁2={d2:F3}m ";
+        }
+}
 }

@@ -5,6 +5,12 @@ $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 
+# 【途中で殺すと UnityLockfile が残る】このスクリプトは待ち切る（内部タイムアウトなし）。
+# 実測 4〜5 分かかるので、**呼ぶ側のタイムアウトは 12 分以上**を取ること。
+# 5 分で殺して残留ロックを作り、次の push が拒否される事故を 3 回起こしている
+# （2026-08-19 のタグ push ほか）。残留を消すのは Unity プロセス 0 件を
+# 確認したあと、手で行う。
+
 # Unity Editor が同プロジェクトを開いているとバッチ実行できない
 if (Test-Path (Join-Path $projectRoot "Temp\UnityLockfile")) {
     Write-Host "Unity Editorを閉じてください"

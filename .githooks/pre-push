@@ -1,12 +1,41 @@
 #!/bin/sh
 # pre-push gate: EditMode テストが全パスしないと push させない。
 # git はフックを repo root を cwd として実行する。
-echo "[pre-push] running EditMode tests..."
+#
+# 【「落ちた」と「回せなかった」を分ける】以前は run_tests.ps1 の終了コードを
+# そのまま「tests failed」と報告していた。exit 10（UnityLockfile あり = テストを
+# **実行していない**）まで「失敗」と表示されるため、**回せなかったのか落ちたのかが
+# 区別できなかった**（2026-08-19、タグ push が拒否された件）。
+#
+# 【ロックファイルは自動で消さない】残留か実際に Editor が開いているかは
+# ここからは判別できない。検出して止めるまでにし、削除は人間の判断に残す。
+echo "[pre-push] running EditMode tests... (実測 4〜5分、最大 12 分待つ)"
+
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts/run_tests.ps1"
 code=$?
-if [ $code -ne 0 ]; then
-    echo "[pre-push] tests failed (exit $code) — push blocked."
-    exit $code
-fi
-echo "[pre-push] tests passed."
-exit 0
+
+case $code in
+    0)
+        echo "[pre-push] tests passed."
+        exit 0
+        ;;
+    10)
+        echo "[pre-push] BLOCKED: テストを実行していない（Temp/UnityLockfile あり）。"
+        echo "  これはテストの失敗ではない。次のどちらかである:"
+        echo "    (a) Unity Editor が本当に開いている  -> 閉じてから push する"
+        echo "    (b) バッチ実行を途中で殺した残留      -> Unity プロセスが 0 件であることを"
+        echo "        確認したうえで手で消す: rm Temp/UnityLockfile"
+        echo "  **フックは自動では消さない。** 実行中の Editor を巻き添えにしないため。"
+        exit 10
+        ;;
+    11)
+        echo "[pre-push] BLOCKED: テストを実行していない（Unity.exe が見つからない）。"
+        echo "  これはテストの失敗ではない。ProjectVersion.txt と Unity Hub の導入を確認する。"
+        exit 11
+        ;;
+    *)
+        echo "[pre-push] FAILED: テストが落ちた (exit $code) — push blocked."
+        echo "  結果: TestResults/EditMode.xml"
+        exit $code
+        ;;
+esac

@@ -296,6 +296,73 @@ namespace BlockField.Tests.EditMode
                 $"天井の真下の床上高さが {hCeiling:F3} m。マスクが同じなので高さで分ける");
         }
 
+        /// <summary>
+        /// **M-K3h 6配置は4つ組で一意に分かれるか。**（prereg 追記18 A18.2）
+        ///
+        /// 答えは **5/6。`隅+床` と `壁+床` は完全に同一**（`FFFF|0.03|0.03|0.03`）。
+        /// **分離できないことをそのまま固定する。** 分かれる配置を選び直して
+        /// 「分離できた」と書くことはしない。両者が違うのは3番目の面距離だけである
+        /// （0.032 対 0.960）。
+        /// </summary>
+        [Test]
+        public void MK3h_TheFourTupleSeparatesFiveOfSixPlacements()
+        {
+            var g = Room();
+            var p = K3Params(true, 1.10f);
+            int n = p.RingCells;
+            var contact = new bool[n];
+            var cos = new float[n];
+            var sin = new float[n];
+            for (int i = 0; i < n; i++)
+            {
+                double a = 2.0 * Math.PI * i / n;
+                cos[i] = (float)Math.Cos(a);
+                sin[i] = (float)Math.Sin(a);
+            }
+            float r = p.BellDiameter * 0.5f;
+            float mid = g.Width * g.CellSize * 0.5f;
+            float near = g.CellSize * 1.4f;
+            float far = g.Height * g.CellSize - g.CellSize * 1.4f;
+
+            (string key, float second, float third) Probe(float x, float y, float z)
+            {
+                JellyBoundary.SurfaceContact(g, x, y, z, r, JellyPosture.Upright,
+                    cos, sin, p.NociceptionBandCells, contact);
+                int m = 0;
+                for (int i = 0; i < n; i++) if (contact[i]) m |= 1 << i;
+                float h = JellyBoundary.HeightAboveFloor(g, x, y, z);
+                JellyBoundary.FaceDistances(g, x, y, z, out float d1, out float d2, out float d3);
+                return ($"{m:X4}|{h:F2}|{d1:F2}|{d2:F2}", d2, d3);
+            }
+
+            var floor = Probe(mid, near, mid);
+            var ceiling = Probe(mid, far, mid);
+            var wall = Probe(near, mid, mid);
+            var corner = Probe(near, mid, near);
+            var cornerFloor = Probe(near, near, near);
+            var wallFloor = Probe(near, near, mid);
+
+            var all = new[] { floor, ceiling, wall, corner, cornerFloor, wallFloor };
+            var uniq = new HashSet<string>();
+            foreach (var a in all) uniq.Add(a.key);
+            Assert.AreEqual(5, uniq.Count,
+                $"4つ組で分かれた配置が {uniq.Count}/6。実測は 5/6 のはず");
+
+            // **分離しない組を明示的に固定する**
+            Assert.AreEqual(cornerFloor.key, wallFloor.key,
+                "隅+床 と 壁+床 が分離した。実測では同一（FFFF|0.03|0.03|0.03）");
+            Assert.AreNotEqual(cornerFloor.third, wallFloor.third,
+                "3番目の面距離でも分離しない。壁3 を足しても分けられないことになる");
+
+            // A18.3 の閾値 0.155 m が実測を分けることの確認
+            const float CornerThreshold = 0.155f;   // 傘半径 0.075 + 帯幅 0.08
+            Assert.Less(corner.second, CornerThreshold, "隅（2面）が閾値の上に来た");
+            Assert.Less(cornerFloor.second, CornerThreshold, "隅+床 が閾値の上に来た");
+            Assert.Greater(wall.second, CornerThreshold, "単一の壁が閾値の下に来た");
+            Assert.Greater(floor.second, CornerThreshold, "床が閾値の下に来た");
+            Assert.Greater(ceiling.second, CornerThreshold, "天井が閾値の下に来た");
+        }
+
         // ================= M-K3e: 対称発火の推力（対照と位相掃引つき） =================
 
         /// <summary>

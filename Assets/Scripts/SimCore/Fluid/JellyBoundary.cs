@@ -147,6 +147,66 @@
             return -1f;
         }
 
+        /// <summary>
+        /// **軸方向6本の面までの距離**を昇順に並べた最初の3つ (m)。到達しなければ大きな値。
+        ///
+        /// 【なぜ「最も近い壁」だけでは足りないか】隅の定義は「**2面から同時に**接している」
+        /// ことなので、最近傍の距離だけでは**原理的に**単一の壁と分離できない
+        /// （どちらも最近傍は同じ値になる）。2番目の値が小さければ2面、
+        /// 大きければ1面である（prereg 追記18）。
+        ///
+        /// 3番目まで返すのは、`隅+床` と `壁+床` が 1番目・2番目だけでは
+        /// 分離しないことが実測で分かっているため（追記18 A18.2）。
+        ///
+        /// 距離場（チャンファ）ではなく軸ごとの走査にするのは、距離場が
+        /// **最近傍しか持たない**からである。
+        /// </summary>
+        public static void FaceDistances(FlowGrid g, float x, float y, float z,
+            out float first, out float second, out float third)
+        {
+            first = second = third = k_FarDistance;
+            if (g == null) return;
+
+            int gx = (int)System.Math.Floor((x - g.OriginX) / g.CellSize);
+            int gy = (int)System.Math.Floor((y - g.OriginY) / g.CellSize);
+            int gz = (int)System.Math.Floor((z - g.OriginZ) / g.CellSize);
+            if (!g.InRange(gx, gy, gz)) return;
+
+            var d = new float[6];
+            d[0] = RayDistance(g, gx, gy, gz, -1, 0, 0, x, y, z);
+            d[1] = RayDistance(g, gx, gy, gz, 1, 0, 0, x, y, z);
+            d[2] = RayDistance(g, gx, gy, gz, 0, -1, 0, x, y, z);
+            d[3] = RayDistance(g, gx, gy, gz, 0, 1, 0, x, y, z);
+            d[4] = RayDistance(g, gx, gy, gz, 0, 0, -1, x, y, z);
+            d[5] = RayDistance(g, gx, gy, gz, 0, 0, 1, x, y, z);
+            System.Array.Sort(d);
+            first = d[0]; second = d[1]; third = d[2];
+        }
+
+        /// <summary>到達しなかった向きに入れる値 (m)。部屋より十分大きい。</summary>
+        const float k_FarDistance = 99f;
+
+        /// <summary>その向きへ走査して最初の固体セルの手前の面までの距離 (m)。</summary>
+        static float RayDistance(FlowGrid g, int gx, int gy, int gz,
+            int dx, int dy, int dz, float x, float y, float z)
+        {
+            for (int s = 1; s < 512; s++)
+            {
+                int cx = gx + dx * s, cy = gy + dy * s, cz = gz + dz * s;
+                if (!g.InRange(cx, cy, cz)) return k_FarDistance;
+                if (!g.IsSolid(cx, cy, cz)) continue;
+
+                // 固体セルの手前の面
+                if (dx != 0) return dx > 0 ? (g.OriginX + cx * g.CellSize) - x
+                                           : x - (g.OriginX + (cx + 1) * g.CellSize);
+                if (dy != 0) return dy > 0 ? (g.OriginY + cy * g.CellSize) - y
+                                           : y - (g.OriginY + (cy + 1) * g.CellSize);
+                return dz > 0 ? (g.OriginZ + cz * g.CellSize) - z
+                              : z - (g.OriginZ + (cz + 1) * g.CellSize);
+            }
+            return k_FarDistance;
+        }
+
         /// <summary>距離場の読み出し（格子の外は壁とみなして 0）。</summary>
         static float Sample(FlowGrid g, int x, int y, int z) =>
             g.InRange(x, y, z) ? g.DistanceInCells(g.Index(x, y, z)) : 0f;
