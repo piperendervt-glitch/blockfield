@@ -311,15 +311,18 @@ namespace BlockField.Tests.EditMode
                 $"沈降OFFなのに天井へ達していない（床から {on.MeanHeightAboveFloor:F3} m）。" +
                 "噴流は上向きなので必ず上がりきるはず");
 
-            // 機構: 対称発火はトルクを作らないので、傾きが固定されて逃げられない
-            Assert.Less(on.FinalTilt, 0.1f,
-                $"侵害受容ONの傾きが {on.FinalTilt:F2}°。対称発火はトルク 0 なので固定されるはず");
+            // 【証拠を訂正した】旧規則（周期Tごとに撃ち続ける）では傾きが 0.0° に
+            // 固定され「侵害受容が事態を悪化させる」と読めたが、それは規則の性質だった。
+            // 新規則（侵入時に1回）では接触が続くとロックアウトされるので、
+            // **天井では侵害受容は不活性**になる（追記15 A15.5）。
+            // 結論（対称発火は軸方向のパワーストローク、軸側の面からは逃げられない）は保持
+            Assert.AreEqual(off.FinalTilt, on.FinalTilt, 0.01f,
+                $"天井で ON {on.FinalTilt:F2}° と OFF {off.FinalTilt:F2}° に差が出た。" +
+                "新規則では侵害受容はロックアウトされて不活性なはず");
+            Assert.AreEqual(off.MeanActualSpeed, on.MeanActualSpeed, 1e-5f,
+                $"天井で ON {on.MeanActualSpeed:F5} m/s と OFF {off.MeanActualSpeed:F5} m/s に差が出た");
             Assert.Greater(off.FinalTilt, 1f,
-                $"対照の傾きが {off.FinalTilt:F2}°。振れていなければ「固定される」ことの対照にならない");
-
-            // 結果として完全に止まる
-            Assert.Less(on.MeanActualSpeed, 0.001f,
-                $"侵害受容ONの実移動が {on.MeanActualSpeed:F5} m/s。天井で止まるはず");
+                $"対照の傾きが {off.FinalTilt:F2}°。振れていなければ比較の意味がない");
         }
 
         /// <summary>
