@@ -449,3 +449,20 @@ Console.WriteLine("K3 診断4: 48シードのうち何個が着底するか（�
     Console.WriteLine($"  着底したシード: {settled}/48");
     foreach (var b in bad) Console.WriteLine(b);
 }
+
+// ---- 止水での実移動速度（実機で「動かない」と報告された件）----
+Console.WriteLine();
+Console.WriteLine("止水での実移動速度（800ステップ = 20拍動、ペースメーカーON）");
+Console.WriteLine("  モデル          | 実移動 m/s | 目標比");
+foreach (bool jet in new[] { false, true })
+{
+    var p = JellyParams.Default;
+    p.JetModel = jet;
+    var j = new Jellyfish(p, 0f, 0f, 0f);
+    for (int t = 0; t < 800; t++) j.Step(1f / 40f, 0f, 0f, 0f);
+    float x0 = j.X, y0 = j.Y, z0 = j.Z;
+    for (int t = 0; t < 800; t++) j.Step(1f / 40f, 0f, 0f, 0f);
+    double d = Math.Sqrt((j.X - x0) * (j.X - x0) + (j.Y - y0) * (j.Y - y0) + (j.Z - z0) * (j.Z - z0));
+    double v = d / (800.0 / 40.0);
+    Console.WriteLine($"  {(jet ? "K2 噴流       " : "Phase C 2Dリム")} | {v,10:F6} | {v / p.SwimSpeed,6:F4}");
+}
