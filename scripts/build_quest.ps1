@@ -62,7 +62,10 @@ Write-Host "  初回は IL2CPP で10分以上かかることがある"
 $proc = Start-Process -FilePath $unity -ArgumentList $unityArgs -Wait -PassThru
 $code = $proc.ExitCode
 
-$apk = Join-Path $projectRoot "Builds\blockfield.apk"
+# 完了行に出すパスも BuildScript 側と合わせる。ここが古いと
+# 「どちらを焼いたか」の確認にならない
+$apkName = if ($Aquarium) { "blockfield_aquarium.apk" } else { "blockfield_main.apk" }
+$apk = Join-Path $projectRoot "Builds\$apkName"
 if ($code -eq 0 -and (Test-Path $apk)) {
     $sizeMb = [math]::Round((Get-Item $apk).Length / 1MB, 1)
     Write-Host "APK: $apk ($sizeMb MB)"
