@@ -631,3 +631,45 @@ Console.WriteLine("追記16-3: 天井で ON/OFF が一致するのは発火が�
     Console.WriteLine($"  拍動回数: ON {pc[0]} / OFF {pc[1]}");
     Console.WriteLine($"  Y: ON {yy[0]:F6} / OFF {yy[1]:F6}  天井 {(W - 1) * C:F6}");
 }
+
+Console.WriteLine();
+Console.WriteLine("追記17-2: 接触マスクから面を分類できるか");
+{
+    const int W = 26; const float C = 0.08f;
+    var g = new FlowGrid(W, W, W, C, 0f, 0f, 0f);
+    for (int x = 0; x < W; x++) for (int y = 0; y < W; y++) for (int z = 0; z < W; z++)
+        if (x == 0 || y == 0 || z == 0 || x == W - 1 || y == W - 1 || z == W - 1)
+            g.SetSolid(x, y, z, true);
+    FlowBoundaryBaker.BakeDistance(g);
+
+    var p = JellyParams.Default; int n = p.RingCells;
+    var cos = new float[n]; var sin = new float[n];
+    for (int i = 0; i < n; i++) { double a = 2.0 * Math.PI * i / n; cos[i] = (float)Math.Cos(a); sin[i] = (float)Math.Sin(a); }
+    var contact = new bool[n]; var post = JellyPosture.Upright;
+    float r = p.BellDiameter * 0.5f, mid = W * C * 0.5f, near = C * 1.4f, far = W * C - C * 1.4f;
+
+    int Arcs(int mask)
+    {
+        if (mask == 0) return 0;
+        if (mask == (1 << n) - 1) return 1;      // 全周
+        int a = 0;
+        for (int i = 0; i < n; i++)
+        {
+            bool cur = (mask & (1 << i)) != 0, prev = (mask & (1 << ((i + n - 1) % n))) != 0;
+            if (cur && !prev) a++;
+        }
+        return a;
+    }
+    void Show(string name, float x, float y, float z)
+    {
+        int hit = JellyBoundary.SurfaceContact(g, x, y, z, r, post, cos, sin, p.NociceptionBandCells, contact);
+        int m = 0; for (int i = 0; i < n; i++) if (contact[i]) m |= 1 << i;
+        Console.WriteLine($"  {name,-16}: {hit,2}/16 mask={m:X4} 弧={Arcs(m)}  床上={JellyBoundary.HeightAboveFloor(g, x, y, z):F3}m");
+    }
+    Show("床", mid, near, mid);
+    Show("天井", mid, far, mid);
+    Show("単一の壁(-X)", near, mid, mid);
+    Show("隅(-X,-Z)", near, mid, near);
+    Show("隅(-X,-Z,床)", near, near, near);
+    Show("部屋の中心", mid, mid, mid);
+}

@@ -1,6 +1,11 @@
 ﻿# ビルド済み APK を Quest 3 へインストールして起動する。
-# 使い方: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\deploy.ps1
-# 終了コード: 0 = 成功 / 12 = adb 不明 / 13 = APK 無し / 14 = デバイス未接続 / それ以外 = adb の終了コード
+# 使い方: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\deploy.ps1 -Aquarium
+#         powershell -NoProfile -ExecutionPolicy Bypass -File scripts\deploy.ps1 -Main
+# **起動はしない。** capture_session.ps1 でアームしてから restart_app.ps1 で起動すること。
+# 終了コード: 0 = 成功 / 9 = ターゲット未指定 / 12 = adb 不明 / 13 = APK 無し / 14 = デバイス未接続 / それ以外 = adb の終了コード
+[CmdletBinding()]
+param([switch]$Aquarium, [switch]$Main)
+
 $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
@@ -20,7 +25,15 @@ if (-not (Test-Path $adb)) {
 }
 Write-Host "adb: $adb"
 
-$apk = Join-Path $projectRoot "Builds\blockfield.apk"
+# 【ターゲットを明示させる】build_quest.ps1 と同じ理由（2026-08-19 のシーン取り違え）。
+# 既定を持たせず、どちらの APK を入れるかを毎回書かせる
+if ($Aquarium -and $Main) { Write-Host "-Aquarium と -Main は同時に指定できません。"; exit 9 }
+if (-not $Aquarium -and -not $Main) {
+    Write-Host "インストールする APK を明示してください: -Aquarium または -Main"
+    exit 9
+}
+$apkName = if ($Aquarium) { "blockfield_aquarium.apk" } else { "blockfield_main.apk" }
+$apk = Join-Path $projectRoot "Builds\$apkName"
 if (-not (Test-Path $apk)) {
     Write-Host "APK がありません: $apk  （先に scripts\build_quest.ps1 を実行してください）"
     exit 13
@@ -47,12 +60,8 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-Write-Host "Launching $packageName ..."
-& $adb shell monkey -p $packageName 1
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "起動失敗 (exit $LASTEXITCODE)"
-    exit $LASTEXITCODE
-}
-
-Write-Host "Deploy 完了"
+# 【ここで起動しない】以前は monkey で起動していたが、**キャプチャをアームする前に
+# アプリが立ち上がる**ため、セッション冒頭のログを取り落とす（2026-08-19 に発生）。
+# monkey 自体もブロックして戻らないことがあった。起動は restart_app.ps1 に任せる
+Write-Host "Deploy 完了（起動していない。capture_session.ps1 -> restart_app.ps1 の順で）"
 exit 0

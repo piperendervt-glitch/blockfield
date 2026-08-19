@@ -8,11 +8,24 @@
 # 最後にビルドしたほうだけ。どちらを焼いたかは Logs\build.log の
 # 「[BuildScript] 焼くシーン:」の行で確認できる。
 #
-# 終了コード: 0 = 成功 / 10 = Unity Editor が開いている / 11 = Unity.exe 不明 / それ以外 = Unity の終了コード
+# 終了コード: 0 = 成功 / 9 = ターゲット未指定 / 10 = Unity Editor が開いている / 11 = Unity.exe 不明 / それ以外 = Unity の終了コード
 [CmdletBinding()]
-param([switch]$Aquarium)
+param([switch]$Aquarium, [switch]$Main)
 
 $ErrorActionPreference = "Stop"
+
+if ($Aquarium -and $Main) {
+    Write-Host "-Aquarium と -Main は同時に指定できません。"
+    exit 9
+}
+if (-not $Aquarium -and -not $Main) {
+    Write-Host "ビルドするシーンを明示してください:"
+    Write-Host "  -Aquarium : 系列2 水槽シーン (Assets/Scenes/Aquarium.unity) -> Builds/blockfield_aquarium.apk"
+    Write-Host "  -Main     : 系列1 本編シーン (Assets/Scenes/Main.unity)     -> Builds/blockfield_main.apk"
+    Write-Host ""
+    Write-Host "既定を持たせないのは、付け忘れで別シーンを実機へ入れる事故が起きたため（2026-08-19）。"
+    exit 9
+}
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 
@@ -32,7 +45,7 @@ if (-not (Test-Path $unity)) {
 $logFile = Join-Path $projectRoot "Logs\build.log"
 
 $method = if ($Aquarium) { "BuildScript.BuildAquarium" } else { "BuildScript.BuildQuest" }
-$label = if ($Aquarium) { "水槽シーン (Aquarium.unity)" } else { "本編シーン (Main.unity)" }
+$label = if ($Aquarium) { "水槽シーン (Aquarium.unity) -> blockfield_aquarium.apk" } else { "本編シーン (Main.unity) -> blockfield_main.apk" }
 
 $unityArgs = @(
     "-batchmode",

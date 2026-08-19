@@ -207,6 +207,95 @@ namespace BlockField.Tests.EditMode
                 "垂直な壁でも1セル未満なら、体表規則でも壁側を区別できない");
         }
 
+        /// <summary>
+        /// **M-K3g 接触マスクから面を分類できるか。**（prereg 追記17 A17.3）
+        ///
+        /// 実機ログが接触セル「数」しか出しておらず、隅と単一壁を分離できなかった。
+        /// マスクを出すことにしたが、**マスク単独でも分離できない**ことを実測で固定する:
+        /// 隅は「2弧」にはならず、**幅の広い1弧**になる。床・天井・隅+床はどれも FFFF。
+        /// 分類には**マスク + 床上の高さ + 壁までの距離**の3つが要る。
+        /// </summary>
+        [Test]
+        public void MK3g_TheMaskAloneCannotSeparateACornerFromAWall()
+        {
+            var g = Room();
+            var p = K3Params(true, 1.10f);
+            int n = p.RingCells;
+            var contact = new bool[n];
+            var cos = new float[n];
+            var sin = new float[n];
+            for (int i = 0; i < n; i++)
+            {
+                double a = 2.0 * Math.PI * i / n;
+                cos[i] = (float)Math.Cos(a);
+                sin[i] = (float)Math.Sin(a);
+            }
+            float r = p.BellDiameter * 0.5f;
+            float mid = g.Width * g.CellSize * 0.5f;
+            float near = g.CellSize * 1.4f;
+            float far = g.Height * g.CellSize - g.CellSize * 1.4f;
+
+            int Mask(float x, float y, float z)
+            {
+                JellyBoundary.SurfaceContact(g, x, y, z, r, JellyPosture.Upright,
+                    cos, sin, p.NociceptionBandCells, contact);
+                int m = 0;
+                for (int i = 0; i < n; i++) if (contact[i]) m |= 1 << i;
+                return m;
+            }
+            // 円環上の連続した弧の数（全周は 1 とみなす）
+            int Arcs(int mask)
+            {
+                if (mask == 0) return 0;
+                if (mask == (1 << n) - 1) return 1;
+                int a = 0;
+                for (int i = 0; i < n; i++)
+                {
+                    bool cur = (mask & (1 << i)) != 0;
+                    bool prev = (mask & (1 << ((i + n - 1) % n))) != 0;
+                    if (cur && !prev) a++;
+                }
+                return a;
+            }
+            int Bits(int mask)
+            {
+                int c = 0;
+                for (int i = 0; i < n; i++) if ((mask & (1 << i)) != 0) c++;
+                return c;
+            }
+
+            int floor = Mask(mid, near, mid);
+            int ceiling = Mask(mid, far, mid);
+            int wall = Mask(near, mid, mid);
+            int corner = Mask(near, mid, near);
+            int cornerFloor = Mask(near, near, near);
+            int centre = Mask(mid, mid, mid);
+
+            Assert.AreEqual(0xFFFF, floor, "床の真上で全周が入らなかった");
+            Assert.AreEqual(0xFFFF, ceiling, "天井の真下で全周が入らなかった");
+            Assert.AreEqual(0xFFFF, cornerFloor, "隅+床が全周にならなかった");
+            Assert.AreEqual(0, centre, "部屋の中心で接触した");
+
+            // **隅は2弧ではない。** ここが取り違えやすい点なので明示的に落とす
+            Assert.AreEqual(1, Arcs(wall), $"単一の壁が {Arcs(wall)} 弧になった");
+            Assert.AreEqual(1, Arcs(corner),
+                $"隅が {Arcs(corner)} 弧になった。**隅=2弧という読み方はできない**");
+
+            // 分離できるのは弧の数ではなく**幅**
+            Assert.Less(Bits(wall), Bits(corner),
+                $"単一の壁 {Bits(wall)}bit と隅 {Bits(corner)}bit の幅が分離しない");
+            Assert.AreEqual(11, Bits(wall), "単一の壁の幅が実測（11bit）と違う");
+            Assert.AreEqual(15, Bits(corner), "隅の幅が実測（15bit）と違う");
+
+            // FFFF は床・天井・隅+床のいずれでも出る。床上の高さで初めて分かれる
+            float hFloor = JellyBoundary.HeightAboveFloor(g, mid, near, mid);
+            float hCeiling = JellyBoundary.HeightAboveFloor(g, mid, far, mid);
+            Assert.Less(hFloor, r,
+                $"床の真上の床上高さが {hFloor:F3} m。傘半径 {r:F3} m を下回るはず");
+            Assert.Greater(hCeiling, 1f,
+                $"天井の真下の床上高さが {hCeiling:F3} m。マスクが同じなので高さで分ける");
+        }
+
         // ================= M-K3e: 対称発火の推力（対照と位相掃引つき） =================
 
         /// <summary>

@@ -1,4 +1,4 @@
-namespace BlockField.SimCore.Fluid
+﻿namespace BlockField.SimCore.Fluid
 {
     /// <summary>
     /// クラゲと水槽の境界の扱い (系列2 Phase C)。
@@ -120,6 +120,31 @@ namespace BlockField.SimCore.Fluid
                 if (d < bandCells) { contact[i] = true; hit++; }
             }
             return hit;
+        }
+
+        /// <summary>
+        /// **床からの高さ** (m)。真下を走査して最初の固体セルの上面までの距離を返す。
+        /// 下に固体が無ければ -1。
+        ///
+        /// 【なぜ格子原点からの高さではないのか】M-K3d は「床からの高さの時間平均」で
+        /// 判定する。実部屋の床は焼き込んだメッシュのセルであって格子の下端とは限らない。
+        /// **判定と同じ量を実機ログにも出す**ため、下向きの走査で測る（prereg 追記17）。
+        /// </summary>
+        public static float HeightAboveFloor(FlowGrid g, float x, float y, float z)
+        {
+            if (g == null) return -1f;
+            int gx = (int)System.Math.Floor((x - g.OriginX) / g.CellSize);
+            int gy = (int)System.Math.Floor((y - g.OriginY) / g.CellSize);
+            int gz = (int)System.Math.Floor((z - g.OriginZ) / g.CellSize);
+            if (!g.InRange(gx, gy, gz)) return -1f;
+
+            for (int k = gy; k >= 0; k--)
+            {
+                if (!g.IsSolid(gx, k, gz)) continue;
+                float top = g.OriginY + (k + 1) * g.CellSize;
+                return y - top;
+            }
+            return -1f;
         }
 
         /// <summary>距離場の読み出し（格子の外は壁とみなして 0）。</summary>

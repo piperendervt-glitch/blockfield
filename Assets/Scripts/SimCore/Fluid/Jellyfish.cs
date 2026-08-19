@@ -395,6 +395,9 @@ namespace BlockField.SimCore.Fluid
                 m_Params.NociceptionBandCells, m_Contact);
 
             NociceptedCells = hit;
+            int mask = 0;
+            for (int i = 0; i < m_Contact.Length; i++) if (m_Contact[i]) mask |= 1 << i;
+            ContactMask = mask;
             if (hit == 0) { m_InContact = false; return; }
 
             // 【侵入時に1回だけ】以前は帯を出入りするたびに数え直しており、
@@ -414,6 +417,20 @@ namespace BlockField.SimCore.Fluid
 
         /// <summary>直近のステップで壁の帯に入っていた受容器の数。診断とログ用。</summary>
         public int NociceptedCells { get; private set; }
+
+        /// <summary>
+        /// 帯に入っていた受容器の**分布**（bit i = セル i）。
+        ///
+        /// 【数だけでは足りない】2026-08-19 の実機ログは接触セル数しか出しておらず、
+        /// **隅と単一壁を分離できなかった**。
+        ///
+        /// 【マスク単独でも分離できない — 実測】隅は「2弧」にはならない。
+        /// 単一の壁 11/16 (3FF8)、2面の隅 15/16 (BFFF) で**どちらも連続した1弧**であり、
+        /// 違うのは**弧の幅**である。床・天井・隅+床はいずれも FFFF になる。
+        /// したがって分類には**マスク + 床上の高さ + 壁までの距離**の3つが要る
+        /// （prereg 追記17 A17.3）。ログはこの3つを同じ行に出す。
+        /// </summary>
+        public int ContactMask { get; private set; }
 
         /// <summary>
         /// 侵害受容が刺激を入れた**試行**回数。診断とログ用。

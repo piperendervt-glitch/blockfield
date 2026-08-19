@@ -51,7 +51,7 @@ namespace BlockField.Aquarium
                 $" 傾き{m_Jelly.TiltDegrees:F0}°" +
                 $" 拍動{(m_Jelly.Pulsing ? "ON" : "**停止**")}" +
                 $" 刺激{m_Jelly.StimulusCount}" +
-                $" 侵害{body.NociceptedCells}/16({body.NociceptionCount})" +
+                $" 侵害{body.NociceptedCells}/16({body.ContactMask:X4})" +
                 $" p{body.PulseCount}\n" +
                 $"沈降[R-Grip]{m_Jelly.SinkRatio:P0}({m_Jelly.SinkIndex + 1}/{AquariumJellyfish.SinkChoices.Length})" +
                 $" 復元[R-Trig]{m_Jelly.RightingGain:F1}({m_Jelly.RightingIndex + 1}/{AquariumJellyfish.RightingChoices.Length})" +
@@ -89,7 +89,7 @@ namespace BlockField.Aquarium
 
             if (field == null)
             {
-                m_Text.text = $"FPS: {fps:F1}\n{(m_Flow != null ? m_Flow.Status : "未配線")}";
+                m_Text.text = $"{BuildStamp.Text}\nFPS: {fps:F1}\n{(m_Flow != null ? m_Flow.Status : "未配線")}";
                 return;
             }
 
@@ -101,6 +101,10 @@ namespace BlockField.Aquarium
             // 分からないまま比較する**ことになった。ボタン名も実物と食い違っていた
             // （表示は B、実際は Y）。段階は「今/全体」の形で出す
             m_Text.text =
+                // 【何が動いているかを画面に出す】シーンを取り違えたまま実機セッションを
+                // 始めた件の再発防止（2026-08-19）。パッケージ名は共通なので
+                // 実機側には他に判別する手段が無い
+                $"{BuildStamp.Text}\n" +
                 $"FPS: {fps:F1}   Tick: {m_Flow.TickMs:F2}ms   Bake: {m_Flow.BakeMs}ms\n" +
                 $"Speed[R-A]: {m_Flow.TargetSpeed:F3} m/s ({m_Flow.SpeedIndex + 1}/{AquariumFlow.TargetSpeedChoices.Length})" +
                 $"  = {m_Flow.TargetSpeed / 72f * 100f:F2}cm/frame   Max: {m_Flow.MaxSpeed:F3}\n" +
