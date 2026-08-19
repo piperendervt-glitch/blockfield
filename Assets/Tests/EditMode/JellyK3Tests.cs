@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using BlockField.SimCore.Fluid;
 using BlockField.SimCore.Rng;
@@ -65,6 +65,7 @@ namespace BlockField.Tests.EditMode
             public int Coverage;             // 訪れた格子セル数
             public float MeanHeightAboveFloor; // m
             public long NociceptionCount;
+            public float FinalTilt;          // 度
         }
 
         static Run Simulate(FlowGrid g, uint seed, bool nociception, float sinkRatio,
@@ -125,6 +126,7 @@ namespace BlockField.Tests.EditMode
                 Coverage = visited.Count,
                 MeanHeightAboveFloor = (float)(height / n),
                 NociceptionCount = j.NociceptionCount,
+                FinalTilt = j.TiltDegrees,
             };
         }
 
@@ -276,26 +278,48 @@ namespace BlockField.Tests.EditMode
         // ================= M-K3a〜d =================
 
         /// <summary>
-        /// **M-K3a 壁への接近が減る。**（沈降 OFF。原登録と比較可能な世界で測る）
-        /// 48シードで符号一貫 ≥ 40/48。
+        /// **M-K3a・M-K3c は取り下げ。**（追記14 A14.2）代わりに**取り下げの理由**を固定する。
+        ///
+        /// 【なぜ取り下げたか】§3.4 の M-K3a/c は噴流モデルと沈降が入る前の登録である。
+        /// 噴流モデルで沈降を切ると全個体が上昇し続けて天井に達するので、
+        /// M-K3a は「**天井に貼り付いた個体同士**」を比べていた。
+        /// 実測 M-K3a 0/48（ON 0.0400 m = OFF 0.0400 m）、M-K3c 29/48（被覆 18.4 対 14.8）。
+        ///
+        /// 【判定を消さずに機構を残す】K3 の結論は
+        /// **「対称発火は逃避ではなく軸方向のパワーストロークであり、
+        /// 逃避は復元トルクとの合作としてしか成立しない」**である。
+        /// 天井では推力が面へ押し込む向きになり、しかも対称発火は
+        /// M-K2a より構造的にトルク 0 なので、**逃げるための非対称を永久に作れない**。
+        /// これを塞がず、測定結果として残す（方針B）。
         /// </summary>
         [Test]
-        public void MK3a_NociceptionKeepsItAwayFromTheWalls()
+        public void MK3a_Withdrawn_SymmetricFiringIsAnAxialPowerStrokeNotAnEscape()
         {
             var g = Room();
-            int better = 0;
-            double onSum = 0, offSum = 0;
-            for (uint s = 1; s <= 48; s++)
-            {
-                var on = Simulate(g, s, nociception: true, sinkRatio: 0f);
-                var off = Simulate(g, s, nociception: false, sinkRatio: 0f);
-                onSum += on.MeanWallDistance;
-                offSum += off.MeanWallDistance;
-                if (on.MeanWallDistance > off.MeanWallDistance) better++;
-            }
-            Assert.GreaterOrEqual(better, 40,
-                $"侵害受容ONのほうが壁から遠いのは {better}/48 シードだけ。" +
-                $"平均 ON {onSum / 48:F4} m 対 OFF {offSum / 48:F4} m");
+            float ceiling = (g.Height - 1) * g.CellSize;   // 外周1セルが固体
+
+            var on = Simulate(g, 40, nociception: true, sinkRatio: 0f);
+            var off = Simulate(g, 40, nociception: false, sinkRatio: 0f);
+
+            // 検定台が退化していること自体を固定する: 侵害受容の有無によらず天井に達する
+            Assert.AreEqual(off.MeanWallDistance, on.MeanWallDistance, 1e-4f,
+                $"沈降OFFで ON {on.MeanWallDistance:F4} m と OFF {off.MeanWallDistance:F4} m に差が出た。" +
+                "取り下げの理由（両者とも天井に貼り付く）が成り立っていない");
+            Assert.Less(on.MeanHeightAboveFloor, ceiling,
+                "天井より上にいることになっている");
+            Assert.Greater(on.MeanHeightAboveFloor, ceiling - 3f * g.CellSize,
+                $"沈降OFFなのに天井へ達していない（床から {on.MeanHeightAboveFloor:F3} m）。" +
+                "噴流は上向きなので必ず上がりきるはず");
+
+            // 機構: 対称発火はトルクを作らないので、傾きが固定されて逃げられない
+            Assert.Less(on.FinalTilt, 0.1f,
+                $"侵害受容ONの傾きが {on.FinalTilt:F2}°。対称発火はトルク 0 なので固定されるはず");
+            Assert.Greater(off.FinalTilt, 1f,
+                $"対照の傾きが {off.FinalTilt:F2}°。振れていなければ「固定される」ことの対照にならない");
+
+            // 結果として完全に止まる
+            Assert.Less(on.MeanActualSpeed, 0.001f,
+                $"侵害受容ONの実移動が {on.MeanActualSpeed:F5} m/s。天井で止まるはず");
         }
 
         /// <summary>
@@ -308,7 +332,8 @@ namespace BlockField.Tests.EditMode
         public void MK3b_ItDoesNotFreeze()
         {
             var g = Room();
-            foreach (float sink in new[] { 0f, 1.10f })
+            // 【沈降OFFは取り下げ】その世界は天井に貼り付く個体しか作らない（A14.2）
+            foreach (float sink in new[] { 1.10f })
             {
                 double worst = double.MaxValue;
                 uint worstSeed = 0;
@@ -321,34 +346,6 @@ namespace BlockField.Tests.EditMode
                     $"沈降 {sink:P0} でシード {worstSeed} の実移動が {worst:F5} m/s。" +
                     "目標の 50% を下回った（壁反発で一度同じ失敗をしている）");
             }
-        }
-
-        /// <summary>
-        /// **M-K3c 部屋を使う。**（沈降 OFF）48シードで符号一貫 ≥ 40/48。
-        ///
-        /// prereg §3.5 は**不合格または僅差**と予想している。持続的な進路変更には
-        /// 体の向きが状態として残ることが要り、K3 単独では往復までが上限、
-        /// という理解を先に登録してある。
-        /// </summary>
-        [Test]
-        public void MK3c_ItUsesTheRoom()
-        {
-            var g = Room();
-            int better = 0;
-            double onSum = 0, offSum = 0;
-            for (uint s = 1; s <= 48; s++)
-            {
-                var on = Simulate(g, s, nociception: true, sinkRatio: 0f);
-                var off = Simulate(g, s, nociception: false, sinkRatio: 0f);
-                onSum += on.Coverage;
-                offSum += off.Coverage;
-                if (on.Coverage > off.Coverage) better++;
-            }
-            TestContext.WriteLine(
-                $"M-K3c 被覆: ON {onSum / 48:F1} セル 対 OFF {offSum / 48:F1} セル、符号一貫 {better}/48");
-            Assert.GreaterOrEqual(better, 40,
-                $"被覆が増えたのは {better}/48 シードだけ。" +
-                $"平均 ON {onSum / 48:F1} 対 OFF {offSum / 48:F1}");
         }
 
         /// <summary>

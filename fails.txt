@@ -1,0 +1,9 @@
+### MK3a_Withdrawn_SymmetricFiringIsAnAxialPowerStrokeNotAnEscape
+侵害受容ONの傾きが 2.28°。対称発火はトルク 0 なので固定されるはず
+  Expected: less than 0.100000001f
+  But was:  2.27546287f
+
+### MK3d_ItDoesNotSettleOnTheFloor
+シード 36 の床からの平均高さが 0.0082 m。傘半径 0.0750 m を下回った
+  Expected: greater than or equal to 0.075000002980232239d
+  But was:  0.0081751607358455658d

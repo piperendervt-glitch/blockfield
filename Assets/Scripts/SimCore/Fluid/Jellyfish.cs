@@ -167,7 +167,7 @@ namespace BlockField.SimCore.Fluid
         /// </summary>
         readonly FlowGrid m_Tank;
         readonly bool[] m_Contact;
-        int m_NociTicks = -1;
+        bool m_InContact;
 
         public Jellyfish(JellyParams p, float x, float y, float z, FlowGrid tank = null)
             : this(p, x, y, z, tank, calibrate: true) { }
@@ -375,10 +375,10 @@ namespace BlockField.SimCore.Fluid
         /// そのまま刺激することだけで、逃避の向きは作らない。強さも通常の刺激と同格
         /// （別に持つと自由度が増えて創発の主張が弱まる — prereg §3.1）。
         ///
-        /// 【周期 T ごとに1回】毎ステップ入れると不応期で半分が空振りし、
-        /// T = R₀ の谷（§5.2）と同じ現象が起きる。
-        /// **位相は帯に入った時刻が決める** — つまり環境が決める。こちらでは選べない。
-        /// 帯を出たら数え直す。
+        /// 【侵入時に1回だけ】毎ステップ入れると不応期で半分が空振りし、
+        /// T = R₀ の谷（§5.2）と同じ現象が起きる。周期 T ごとに入れる形も
+        /// 撃ちすぎになった（追記14 A14.3）。**再発火の周期は環境が決める** —
+        /// 「入る → 撃つ → 出る → 沈む → 入る」で、こちらでは選べない。
         /// </summary>
         void StepNociception()
         {
@@ -388,19 +388,22 @@ namespace BlockField.SimCore.Fluid
                 m_Params.BellDiameter * 0.5f, m_Posture, m_Cos, m_Sin,
                 m_Params.NociceptionBandCells, m_Contact);
 
-            if (hit == 0) { m_NociTicks = -1; NociceptedCells = 0; return; }
-
-            if (m_NociTicks < 0) m_NociTicks = 0;
-            if (m_NociTicks % m_Params.PulsePeriodTicks == 0)
-            {
-                for (int i = 0; i < m_Contact.Length; i++)
-                {
-                    if (m_Contact[i]) StimulateCell(i);
-                }
-                NociceptionCount++;
-            }
-            m_NociTicks++;
             NociceptedCells = hit;
+            if (hit == 0) { m_InContact = false; return; }
+
+            // 【侵入時に1回だけ】以前は帯を出入りするたびに数え直しており、
+            // 壁と床に同時に接する状況で撃ちすぎになった。不応期が飽和して
+            // ペースメーカーの進行波を潰し、**48シード中6個体が着底した**
+            // （発火 67〜162回。漂えた個体は 16回。prereg 追記14 A14.3）。
+            // 出入りの周期は環境が決めるので、こちらでは選べない
+            if (m_InContact) return;
+            m_InContact = true;
+
+            for (int i = 0; i < m_Contact.Length; i++)
+            {
+                if (m_Contact[i]) StimulateCell(i);
+            }
+            NociceptionCount++;
         }
 
         /// <summary>直近のステップで壁の帯に入っていた受容器の数。診断とログ用。</summary>

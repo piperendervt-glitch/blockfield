@@ -466,3 +466,105 @@ foreach (bool jet in new[] { false, true })
     double v = d / (800.0 / 40.0);
     Console.WriteLine($"  {(jet ? "K2 噴流       " : "Phase C 2Dリム")} | {v,10:F6} | {v / p.SwimSpeed,6:F4}");
 }
+
+Console.WriteLine();
+Console.WriteLine("K3 診断5: 着底と侵入位相の関係（48シード）");
+{
+    const int W = 26; const float C = 0.08f;
+    var g = new FlowGrid(W, W, W, C, 0f, 0f, 0f);
+    for (int x = 0; x < W; x++) for (int y = 0; y < W; y++) for (int z = 0; z < W; z++)
+        if (x == 0 || y == 0 || z == 0 || x == W - 1 || y == W - 1 || z == W - 1)
+            g.SetSolid(x, y, z, true);
+    FlowBoundaryBaker.BakeDistance(g);
+
+    // M-K3e の掃引（位相 → 対照比）を再現して、侵入位相の「強さ」を引く
+    var p0 = JellyParams.Default; p0.JetModel = true;
+    int T = p0.PulsePeriodTicks;
+    var boost = new float[T];
+    {
+        float Sp(int off)
+        {
+            var j = new Jellyfish(p0, 0f, 0f, 0f);
+            for (int t = 0; t < 800; t++)
+            { if (off >= 0 && t % T == off) for (int i = 0; i < p0.RingCells; i++) j.StimulateCell(i); j.Step(1f / 40f, 0f, 0f, 0f); }
+            float px = j.X, py = j.Y - j.SinkPathY, pz = j.Z; double path = 0;
+            for (int t = 0; t < 1600; t++)
+            {
+                if (off >= 0 && (800 + t) % T == off) for (int i = 0; i < p0.RingCells; i++) j.StimulateCell(i);
+                j.Step(1f / 40f, 0f, 0f, 0f);
+                float cy = j.Y - j.SinkPathY;
+                double dx = j.X - px, dy = cy - py, dz = j.Z - pz;
+                path += Math.Sqrt(dx * dx + dy * dy + dz * dz); px = j.X; py = cy; pz = j.Z;
+            }
+            return (float)(path / 40.0);
+        }
+        float c = Sp(-1);
+        for (int o = 0; o < T; o++) boost[o] = Sp(o) / c - 1f;
+    }
+
+    var okPhase = new List<int>(); var badPhase = new List<int>();
+    var okWall = new List<float>(); var badWall = new List<float>();
+    for (uint s = 1; s <= 48; s++)
+    {
+        var p = JellyParams.Default; p.JetModel = true; p.Nociception = true; p.SinkRatio = 1.10f;
+        var rng = new Mulberry32(s);
+        float margin = C * 2f + p.BellDiameter; float span = W * C - 2f * margin;
+        float sx = margin + rng.NextFloat01() * span; rng.NextFloat01();
+        float sz = margin + rng.NextFloat01() * span;
+        var j = new Jellyfish(p, sx, C + 0.30f, sz, g);
+        float ox = (rng.NextFloat01() - 0.5f) * 4f, oz = (rng.NextFloat01() - 0.5f) * 4f;
+        for (int k = 0; k < 20; k++) j.NudgeForTest(ox, 0f, oz, 1f / 40f);
+        long entry = -1; double h = 0; int n = 0;
+        for (int t = 0; t < 8000; t++)
+        {
+            j.Step(1f / 40f, 0f, 0f, 0f);
+            if (entry < 0 && j.NociceptedCells > 0) entry = t;
+            if (t >= 4000) { h += j.Y - C; n++; }
+        }
+        int ph = entry < 0 ? -1 : (int)(entry % T);
+        // 水平方向で最も近い壁までの距離
+        float wd = Math.Min(Math.Min(sx - C, W * C - C - sx), Math.Min(sz - C, W * C - C - sz));
+        if (h / n < p.BellDiameter * 0.5f) { badPhase.Add(ph); badWall.Add(wd); }
+        else { okPhase.Add(ph); okWall.Add(wd); }
+    }
+    Console.Write("  着底した侵入位相: "); foreach (var q in badPhase) Console.Write($"{q}({boost[q]:+0%}) "); Console.WriteLine();
+    Console.Write("  漂えた侵入位相  : "); foreach (var q in okPhase) Console.Write($"{q} "); Console.WriteLine();
+    double ba = 0; foreach (var q in badPhase) ba += boost[q];
+    double oa = 0; foreach (var q in okPhase) oa += boost[q];
+    Console.WriteLine($"  侵入位相の推力ブースト平均: 着底 {ba / badPhase.Count:+0%} 対 漂えた {oa / okPhase.Count:+0%}");
+    double bw = 0; foreach (var q in badWall) bw += q;
+    double ow = 0; foreach (var q in okWall) ow += q;
+    Console.WriteLine($"  水平方向の壁までの距離平均: 着底 {bw / badWall.Count:F3}m 対 漂えた {ow / okWall.Count:F3}m");
+}
+
+Console.WriteLine();
+Console.WriteLine("K3 診断6: 発火規則の変更後の天井（沈降OFF、シード40）");
+{
+    const int W = 26; const float C = 0.08f;
+    var g = new FlowGrid(W, W, W, C, 0f, 0f, 0f);
+    for (int x = 0; x < W; x++) for (int y = 0; y < W; y++) for (int z = 0; z < W; z++)
+        if (x == 0 || y == 0 || z == 0 || x == W - 1 || y == W - 1 || z == W - 1)
+            g.SetSolid(x, y, z, true);
+    FlowBoundaryBaker.BakeDistance(g);
+    foreach (bool noci in new[] { true, false })
+    {
+        var p = JellyParams.Default; p.JetModel = true; p.Nociception = noci; p.SinkRatio = 0f;
+        var rng = new Mulberry32(40);
+        float margin = C * 2f + p.BellDiameter; float span = W * C - 2f * margin;
+        float sx = margin + rng.NextFloat01() * span;
+        float sy = margin + rng.NextFloat01() * span;
+        float sz = margin + rng.NextFloat01() * span;
+        var j = new Jellyfish(p, sx, sy, sz, g);
+        float ox = (rng.NextFloat01() - 0.5f) * 4f, oz = (rng.NextFloat01() - 0.5f) * 4f;
+        for (int k = 0; k < 20; k++) j.NudgeForTest(ox, 0f, oz, 1f / 40f);
+        float px = j.X, py = j.Y, pz = j.Z; double sp = 0; int n = 0;
+        for (int t = 0; t < 4000; t++)
+        {
+            j.Step(1f / 40f, 0f, 0f, 0f);
+            if (t >= 2000) { float dx = j.X - px, dy = j.Y - py, dz = j.Z - pz; sp += Math.Sqrt(dx * dx + dy * dy + dz * dz) * 40.0; n++; }
+            px = j.X; py = j.Y; pz = j.Z;
+        }
+        Console.WriteLine($"  侵害受容 {(noci ? "ON " : "OFF")}: 高さ{j.Y:F3}m(天井{(W - 1) * C:F2}) 接触{j.NociceptedCells}/16 " +
+            $"侵害{j.NociceptionCount}回 傾き{j.TiltDegrees:F2}° 後半の実移動{sp / n:F5}m/s");
+    }
+}
