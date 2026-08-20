@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
 using System.Text.RegularExpressions;
 using NUnit.Framework;
@@ -93,6 +93,48 @@ namespace BlockField.Tests.EditMode
             CollectionAssert.IsEmpty(violations,
                 "描画とカメラ参照は WatchSpaceRenderer だけに閉じること:\n" +
                 string.Join("\n", violations));
+        }
+
+        /// <summary>
+        /// **描画の上限で黙って切り捨てない。**
+        ///
+        /// 段2 と段3 が同じに見えた原因は、固定長 1023 のバッファで
+        /// **両段とも先頭 1023 セルだけ**を描いていたことだった（2026-08-19）。
+        /// **全体を見せていない表示は、見えているものから全体を推論できない。**
+        ///
+        /// 固定長を持たず床セル数で確保していること、切り捨ての旗を持つこと、
+        /// それをパネルとログに出していることを固定する。
+        /// </summary>
+        [Test]
+        public void TheViewDoesNotSilentlyTruncate()
+        {
+            string view = File.ReadAllText(Path.Combine(Dir, "WatchView.cs"));
+            string panel = File.ReadAllText(Path.Combine(Dir, "WatchPanel.cs"));
+            string log = File.ReadAllText(Path.Combine(Dir, "WatchField.cs"));
+
+            Assert.IsTrue(Regex.IsMatch(view, @"new Vector3\[cells\]"),
+                "描画バッファを床セル数で確保していない。固定長だと黙って切り捨てる");
+            Assert.IsFalse(Regex.IsMatch(view, @"new Vector3\[\s*1023\s*\]"),
+                "固定長 1023 のバッファが残っている");
+            Assert.IsTrue(view.Contains("Truncated"), "切り捨ての旗が無い");
+            Assert.IsTrue(view.Contains("WantedCells"), "描くつもりだった数を持っていない");
+
+            Assert.IsTrue(panel.Contains("Truncated"), "パネルに切り捨てを出していない");
+            Assert.IsTrue(panel.Contains("WantedCells"), "パネルに描くつもりだった数を出していない");
+            Assert.IsTrue(log.Contains("Truncated"), "ログに切り捨てを出していない");
+            Assert.IsTrue(log.Contains("WantedCells"), "ログに描くつもりだった数を出していない");
+        }
+
+        /// <summary>段は2つだけ（3段は追跡中に同じ集合になり区別できなかった）。</summary>
+        [Test]
+        public void ThereAreExactlyTwoModes()
+        {
+            string view = File.ReadAllText(Path.Combine(Dir, "WatchView.cs"));
+            var m = Regex.Match(view, @"ModeNames\s*=\s*\{([^}]*)\}");
+            Assert.IsTrue(m.Success, "ModeNames が見つからない");
+            int modes = m.Groups[1].Value.Split(',').Length;
+            Assert.AreEqual(2, modes,
+                "段の数が2つでない。追跡中は走査境界とカバレッジ全体が同じ集合になる");
         }
 
         [Test]

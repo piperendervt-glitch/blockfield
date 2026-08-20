@@ -72,13 +72,20 @@ namespace BlockField.Watch
             return true;
         }
 
-        /// <summary>部屋座標の点群をまとめて描く（インスタンシング）。</summary>
-        public int DrawCubes(Mesh mesh, Material material,
-            Vector3[] roomPositions, int count, float size, Matrix4x4[] scratch)
+        /// <summary>
+        /// 部屋座標の点群をまとめて描く（インスタンシング）。**描いた数を返す。**
+        ///
+        /// 【上限で黙って切り捨てない】`Graphics.DrawMeshInstanced` の 1023 は
+        /// **1回の呼び出しの上限**であって、描ける総数の上限ではない。
+        /// 分割して全部描き、返した数を呼び出し側が「描くつもりだった数」と
+        /// 突き合わせられるようにする。
+        /// </summary>
+        /// <param name="scale">1セルの大きさ。床は薄い板にするので軸ごとに違う。</param>
+        public int DrawBatched(Mesh mesh, Material material,
+            Vector3[] roomPositions, int count, Vector3 scale, Matrix4x4[] scratch)
         {
             if (!TryGetSpace(out var space)) return 0;
             int drawn = 0;
-            var scale = Vector3.one * size;
             for (int i = 0; i < count; i += scratch.Length)
             {
                 int n = Mathf.Min(scratch.Length, count - i);

@@ -1,4 +1,4 @@
-using BlockField.Aquarium;
+﻿using BlockField.Aquarium;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -72,9 +72,11 @@ namespace BlockField.Watch
                 $"頭: ({pos.x:F2}, {pos.y:F2}, {pos.z:F2})   状態: {m_Head?.LastLabel}\n" +
                 $"カバレッジ: {f.CoveredCells}   欠測: {f.MissingCells}   走査済: {f.ScannedCells}" +
                 $" / 全 {f.CellCount}\n" +
-                $"View[L-Grip]: {(m_View != null ? m_View.CurrentName : "未配線")}" +
-                $"   描画 n={(m_View != null ? m_View.DrawnCells : 0)}" +
-                $"   {(m_Field.Replaying ? $"**再生中** {m_Field.ReplayCursor}/{m_Field.ReplayCount}" : "実時間")}";
+                $"段[L-Grip]: {(m_View != null ? m_View.CurrentName : "未配線")}" +
+                $"   描画 n={(m_View != null ? m_View.DrawnCells : 0)}/{(m_View != null ? m_View.WantedCells : 0)}" +
+                (m_View != null && m_View.Truncated ? "  **切り捨て**" : "") +
+                $"   {(m_Field.Replaying ? $"**再生中** {m_Field.ReplayCursor}/{m_Field.ReplayCount}" : "実時間")}" +
+                $"   再生元={m_Field.ReplaySource}";
         }
     }
 }

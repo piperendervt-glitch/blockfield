@@ -1,4 +1,5 @@
-using System;
+﻿using System;
+using BlockField.SimCore.Fluid;
 using BlockField.SimCore.Watch;
 using NUnit.Framework;
 
@@ -11,7 +12,7 @@ namespace BlockField.Tests.EditMode
     /// </summary>
     public sealed class WatchL0Tests
     {
-        const int W = 10, H = 6, D = 10;
+        const int W = 10, D = 10;
         const float Cell = 0.25f;
 
         /// <summary>
@@ -20,12 +21,12 @@ namespace BlockField.Tests.EditMode
         /// </summary>
         static PresenceField Room()
         {
-            var scanned = new bool[W * H * D];
+            var scanned = new bool[W * D];
+            var floorY = new float[W * D];
             for (int z = 0; z < D; z++)
-                for (int y = 0; y < H; y++)
-                    for (int x = 0; x < W; x++)
-                        scanned[(z * H + y) * W + x] = x < 6;
-            return new PresenceField(W, H, D, Cell, 0f, 0f, 0f, scanned);
+                for (int x = 0; x < W; x++)
+                    scanned[z * W + x] = x < 6;
+            return new PresenceField(W, D, Cell, 0f, 0f, scanned, floorY);
         }
 
         static L0Sample Tracked(int tick, float x, float y, float z, float value = 1f) =>
@@ -50,12 +51,12 @@ namespace BlockField.Tests.EditMode
             Assert.AreEqual(f.ScannedCells, f.CoveredCells,
                 "カバレッジ内セル数が走査済みセル数と違う");
 
-            Assert.IsTrue(f.TryCellOf(0.3f, 0.3f, 0.3f, out int head));
+            Assert.IsTrue(f.TryCellOf(0.3f, 0.3f, out int head));
             Assert.AreEqual(1f, f.Value(head), 1e-6f, "頭のセルの値が 1 でない");
             Assert.AreEqual(head, f.OccupiedIndex);
 
             // 走査済みだが頭が居ないセル: **測定された 0**（欠測ではない）
-            int elsewhere = f.Index(3, 2, 5);
+            int elsewhere = f.Index(3, 5);
             Assert.IsTrue(f.IsScanned(elsewhere));
             Assert.AreEqual(0f, f.Value(elsewhere), 1e-6f, "居ないセルの値が 0 でない");
             Assert.AreEqual(10, f.LastVerified(elsewhere),
@@ -76,7 +77,7 @@ namespace BlockField.Tests.EditMode
                 "カバレッジが格子全体になっている。カバレッジが無いのと同じ");
             Assert.Greater(f.MissingCells, 0, "欠測セルが 1 つも無い");
 
-            int outside = f.Index(8, 2, 5);
+            int outside = f.Index(8, 5);
             Assert.IsFalse(f.IsScanned(outside), "テストの部屋の作りが壊れている");
             Assert.AreEqual(PresenceField.NeverVerified, f.LastVerified(outside),
                 "走査外セルが検証された。走査外は常に欠測のはず");
@@ -102,7 +103,7 @@ namespace BlockField.Tests.EditMode
             Assert.AreEqual(-1, f.OccupiedIndex, "喪失中なのに値 1 のセルがある");
 
             // **最終検証ティックは進まない**（古くなるだけ）
-            int cell = f.Index(3, 2, 5);
+            int cell = f.Index(3, 5);
             Assert.AreEqual(5, f.LastVerified(cell),
                 "喪失中に最終検証ティックが更新された。欠測を測定として記録している");
             Assert.AreEqual(1, f.StalenessAt(cell), "経過ティックが合わない");
@@ -125,7 +126,7 @@ namespace BlockField.Tests.EditMode
                 Assert.AreEqual(0, f.CoveredCells, $"t={t} でカバレッジが空でない");
             }
 
-            int cell = f.Index(3, 2, 5);
+            int cell = f.Index(3, 5);
             Assert.AreEqual(4, f.LastVerified(cell), "区間中に検証が起きている");
             Assert.AreEqual(35, f.StalenessAt(cell), "経過ティックが積み上がっていない");
         }
@@ -148,15 +149,14 @@ namespace BlockField.Tests.EditMode
             }
 
             for (int z = 0; z < D; z++)
-                for (int y = 0; y < H; y++)
-                    for (int x = 6; x < W; x++)
-                    {
-                        int i = f.Index(x, y, z);
-                        Assert.AreEqual(PresenceField.NeverVerified, f.LastVerified(i),
-                            $"走査外セル ({x},{y},{z}) が検証された");
-                        Assert.AreEqual(int.MaxValue, f.StalenessAt(i),
-                            "走査外セルの経過が有限になっている");
-                    }
+                for (int x = 6; x < W; x++)
+                {
+                    int i = f.Index(x, z);
+                    Assert.AreEqual(PresenceField.NeverVerified, f.LastVerified(i),
+                        $"走査外セル ({x},{z}) が検証された");
+                    Assert.AreEqual(int.MaxValue, f.StalenessAt(i),
+                        "走査外セルの経過が有限になっている");
+                }
         }
 
         /// <summary>頭が走査外へ出たら、値 1 のセルは無くなる（0 を書かない）。</summary>
@@ -168,6 +168,110 @@ namespace BlockField.Tests.EditMode
             Assert.AreEqual(-1, f.OccupiedIndex, "走査外に値 1 が立った");
             Assert.AreEqual(L0Coverage.ScannedRoom, f.Coverage,
                 "トラッキングは生きているのでカバレッジは空にならない");
+        }
+
+        /// <summary>
+        /// **高さは軸ではなく属性である。** 同じ床セルの上で高さだけ変えても
+        /// セルは変わらず、属性だけが変わる（座っている・倒れているを将来ここで表す）。
+        /// </summary>
+        [Test]
+        public void HeightIsAnAttributeOfTheCellNotAnAxis()
+        {
+            var f = Room();
+
+            f.Ingest(Tracked(1, 0.3f, 1.60f, 0.3f));
+            int standing = f.OccupiedIndex;
+            Assert.GreaterOrEqual(standing, 0, "足元のセルが立っていない");
+            Assert.AreEqual(1.60f, f.HeightAt(standing), 1e-4f, "立位の高さが属性に入っていない");
+
+            f.Ingest(Tracked(2, 0.3f, 0.85f, 0.3f));
+            Assert.AreEqual(standing, f.OccupiedIndex,
+                "高さを変えたらセルが変わった。高さが軸になっている");
+            Assert.AreEqual(0.85f, f.HeightAt(standing), 1e-4f, "座位の高さに更新されていない");
+
+            // 一度も居ていないセルの高さは NaN（0 ではない）
+            int never = f.Index(4, 4);
+            Assert.IsTrue(float.IsNaN(f.HeightAt(never)),
+                "居たことのないセルの高さが 0 になっている。欠測と 0 を混ぜている");
+        }
+
+        /// <summary>床の高さを引いた値が属性になること（机の上と床では基準が違う）。</summary>
+        [Test]
+        public void TheHeightAttributeIsMeasuredFromThatCellsFloor()
+        {
+            var scanned = new bool[W * D];
+            var floorY = new float[W * D];
+            for (int i = 0; i < scanned.Length; i++) scanned[i] = true;
+            floorY[Index2(2, 2)] = 0.70f;      // 机の上（セル 2,2 だけ床が高い）
+            var f = new PresenceField(W, D, Cell, 0f, 0f, scanned, floorY);
+
+            // セル (1,1) は床（floorY=0）
+            f.Ingest(Tracked(1, 0.3f, 1.60f, 0.3f));
+            Assert.AreEqual(Index2(1, 1), f.OccupiedIndex, "テストのセル計算が合っていない");
+            Assert.AreEqual(1.60f, f.HeightAt(f.OccupiedIndex), 1e-4f);
+
+            // セル (2,2) は机の上（floorY=0.70）。**同じ頭の高さでも属性は変わる**
+            f.Ingest(Tracked(2, 0.6f, 1.60f, 0.6f));
+            Assert.AreEqual(Index2(2, 2), f.OccupiedIndex, "テストのセル計算が合っていない");
+            Assert.AreEqual(1.60f - 0.70f, f.HeightAt(f.OccupiedIndex), 1e-4f,
+                "床の高さを引いていない");
+        }
+
+        static int Index2(int x, int z) => z * W + x;
+
+        // ================= 走査済みの定義 =================
+
+        /// <summary>
+        /// **部屋の中央が走査済みであること。**
+        ///
+        /// 「走査外の最終検証ティックが更新されない」判定と**対**になる。
+        /// 片方だけだと、**全域が走査外でも通ってしまう**（空の検証と同型）。
+        ///
+        /// 以前の定義「メッシュから 6 セル以内」では、部屋の中央が
+        /// 表面から離れるため走査外になり、実機で足元の印が出なかった（2026-08-19）。
+        /// </summary>
+        [Test]
+        public void TheMiddleOfTheRoomIsScanned()
+        {
+            // 12x6x12 の格子に、x,z ∈ [2,9] の床だけを置く（部屋の内側）
+            var g = new FlowGrid(12, 6, 12, 0.08f, 0f, 0f, 0f);
+            for (int z = 2; z <= 9; z++)
+                for (int x = 2; x <= 9; x++)
+                    g.SetSolid(x, 0, z, true);
+
+            int n = FloorMask.Fold(g, out var scanned, out var floorY);
+
+            Assert.AreEqual(8 * 8, n, "走査済みの床セル数が床の広さと違う");
+
+            // **中央**（部屋のどの面からも離れている）
+            Assert.IsTrue(scanned[5 * 12 + 5], "部屋の中央が走査外になっている");
+            Assert.IsTrue(scanned[6 * 12 + 6], "部屋の中央が走査外になっている");
+            Assert.AreEqual(0.08f, floorY[5 * 12 + 5], 1e-6f, "床の高さが固体セルの上面でない");
+
+            // 床の外（隣室・扉の向こうに相当）は走査外
+            Assert.IsFalse(scanned[0], "床の無い列が走査済みになっている");
+            Assert.IsFalse(scanned[11 * 12 + 11], "床の無い列が走査済みになっている");
+        }
+
+        /// <summary>
+        /// **縁を封じた格子を渡すと全列が走査済みになる。** これを踏むと
+        /// カバレッジが実質存在しなくなるので、踏んだことが分かる形で残す。
+        /// </summary>
+        [Test]
+        public void SealedBordersWouldMakeEverythingScanned()
+        {
+            var g = new FlowGrid(12, 6, 12, 0.08f, 0f, 0f, 0f);
+            for (int z = 2; z <= 9; z++)
+                for (int x = 2; x <= 9; x++)
+                    g.SetSolid(x, 0, z, true);
+            FlowBoundaryBaker.SealBorders(g);          // 流れ場の格子と同じ状態
+
+            int n = FloorMask.Fold(g, out var scanned, out _);
+
+            Assert.AreEqual(scanned.Length, n,
+                "縁を封じても全列が走査済みにならなかった。前提の理解が違う");
+            Assert.IsTrue(scanned[0],
+                "縁の封じが床として拾われていない。WatchField はメッシュだけを焼くこと");
         }
 
         // ================= 固定ティック =================
