@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -77,6 +77,8 @@ public static class WatchSceneBootstrap
         var watchField = fieldGo.AddComponent<BlockField.Watch.WatchField>();
         watchField.room = flow;
         watchField.head = headProducer;
+        // 床の境界ポリゴンの出どころ。近似をやめて Scene の面を直接使う
+        watchField.planes = Object.FindFirstObjectByType<UnityEngine.XR.ARFoundation.ARPlaneManager>();
 
         // --- 表示 ---
         var viewGo = new GameObject("Watch View");

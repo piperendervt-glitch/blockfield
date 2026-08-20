@@ -137,6 +137,21 @@ namespace BlockField.Tests.EditMode
                 "段の数が2つでない。追跡中は走査境界とカバレッジ全体が同じ集合になる");
         }
 
+        /// <summary>
+        /// **凡例を出す。** 塗り分けても、どの色がどちらかを伝える部分が無ければ
+        /// 装着中に確認しようがない（2026-08-20 の実機で判定不能だった）。
+        /// </summary>
+        [Test]
+        public void ThePanelExplainsTheColours()
+        {
+            string panel = File.ReadAllText(Path.Combine(Dir, "WatchPanel.cs"));
+            Assert.IsTrue(panel.Contains("凡例"), "パネルに凡例が無い");
+            foreach (string word in new[] { "足元", "測れている床", "測れていない床", "部屋の外" })
+            {
+                Assert.IsTrue(panel.Contains(word), $"凡例に「{word}」が無い");
+            }
+        }
+
         [Test]
         public void EveryExclusionHasAReason()
         {

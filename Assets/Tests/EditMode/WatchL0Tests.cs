@@ -274,6 +274,69 @@ namespace BlockField.Tests.EditMode
                 "縁の封じが床として拾われていない。WatchField はメッシュだけを焼くこと");
         }
 
+        // ================= 床の境界ポリゴン =================
+
+        /// <summary>
+        /// **走査済み = 床の境界ポリゴンの内側。**
+        ///
+        /// 「部屋の内側」を近似で作ろうとして2回外している
+        /// （1回目は狭すぎて中央が走査外、2回目は広すぎて壁の外まで含んだ）。
+        /// 判定は3つ揃って初めて意味を持つ:
+        /// **中央が走査済み** / **壁の外側が走査外** / 走査外は検証されない。
+        /// 片方だけだと、全域が走査済みでも全域が走査外でも通ってしまう。
+        /// </summary>
+        [Test]
+        public void OnlyTheInsideOfTheFloorPolygonIsScanned()
+        {
+            // 2.0 x 2.0 m の正方形の部屋（部屋座標 0.5〜2.5）
+            var poly = new[] { 0.5f, 0.5f, 2.5f, 0.5f, 2.5f, 2.5f, 0.5f, 2.5f };
+            const int W2 = 24, D2 = 24;
+            const float C2 = 0.125f;      // 24 * 0.125 = 3.0 m 四方の格子
+
+            int n = PolygonMask.Build(poly, W2, D2, C2, 0f, 0f, -0.8f,
+                out var scanned, out var floorY);
+
+            // 面積が合うこと（2.0 x 2.0 = 4.0 m²、セル 0.015625 m²）
+            Assert.AreEqual(4.0f, n * C2 * C2, 0.05f,
+                $"走査済みの面積が {n * C2 * C2:F2} m²。ポリゴンは 4.00 m²");
+
+            // **中央は走査済み**
+            int mid = (12) * W2 + 12;     // (1.5625, 1.5625) m
+            Assert.IsTrue(scanned[mid], "部屋の中央が走査外になっている");
+            Assert.AreEqual(-0.8f, floorY[mid], 1e-6f, "床の高さが入っていない");
+
+            // **壁の外側は走査外**（ここが2回目の失敗で抜けていた）
+            Assert.IsFalse(scanned[2 * W2 + 2], "壁の外側（手前）が走査済みになっている");
+            Assert.IsFalse(scanned[22 * W2 + 22], "壁の外側（奥）が走査済みになっている");
+            Assert.IsFalse(scanned[12 * W2 + 22], "壁の外側（横）が走査済みになっている");
+        }
+
+        /// <summary>L 字の部屋でも凹んだ側が走査外になること（偶奇規則の確認）。</summary>
+        [Test]
+        public void AnLShapedRoomExcludesTheNotch()
+        {
+            // L 字: (0,0)-(2,0)-(2,1)-(1,1)-(1,2)-(0,2)
+            var poly = new[] { 0f, 0f, 2f, 0f, 2f, 1f, 1f, 1f, 1f, 2f, 0f, 2f };
+
+            Assert.IsTrue(PolygonMask.Contains(poly, 0.5f, 0.5f), "L 字の内側が外と判定された");
+            Assert.IsTrue(PolygonMask.Contains(poly, 1.5f, 0.5f), "L 字の内側が外と判定された");
+            Assert.IsTrue(PolygonMask.Contains(poly, 0.5f, 1.5f), "L 字の内側が外と判定された");
+
+            // 切り欠き（右上）は外側
+            Assert.IsFalse(PolygonMask.Contains(poly, 1.5f, 1.5f),
+                "L 字の切り欠きが内側と判定された");
+            Assert.IsFalse(PolygonMask.Contains(poly, 2.5f, 0.5f), "ポリゴンの外が内側と判定された");
+        }
+
+        /// <summary>ポリゴンが無ければ走査済みは 0（**近似で埋めない**）。</summary>
+        [Test]
+        public void WithoutAPolygonNothingIsScanned()
+        {
+            int n = PolygonMask.Build(null, 10, 10, 0.1f, 0f, 0f, 0f, out var scanned, out _);
+            Assert.AreEqual(0, n, "ポリゴンが無いのに走査済みセルがある");
+            foreach (bool b in scanned) Assert.IsFalse(b);
+        }
+
         // ================= 固定ティック =================
 
         /// <summary>**20Hz 固定。フレーム駆動にしない。**</summary>

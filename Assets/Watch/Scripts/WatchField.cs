@@ -1,9 +1,10 @@
 ﻿using System.Collections.Generic;
 using System.IO;
 using BlockField.Aquarium;
-using BlockField.SimCore.Fluid;
 using BlockField.SimCore.Watch;
 using UnityEngine;
+using UnityEngine.XR.ARFoundation;
+using UnityEngine.XR.ARSubsystems;
 
 namespace BlockField.Watch
 {
@@ -18,22 +19,19 @@ namespace BlockField.Watch
     /// 目の位置に描かれて見えない（2026-08-19 の実機で足元の印が視認できなかった）。
     /// 高さは <see cref="PresenceField.HeightAt"/> の属性として持つ。
     ///
-    /// 【走査済みの定義】**その床の列にシーンメッシュ由来の固体があるか。**
-    /// 部屋の内側として確定している領域**全体**であり、**部屋の中央を含む**。
-    /// 走査外になるのは、メッシュが得られていない領域（隣室・扉の向こう）だけである。
+    /// 【走査済みの定義】**Quest の Scene が持つ床の境界ポリゴンの内側。**
+    /// `ARPlane.classifications` が `Floor` の面の `boundary` をそのまま使う。
     ///
-    /// 【以前の定義は誤りだった】「シーンメッシュから 6 セル（48cm）以内」としていた。
-    /// この 6 という値は**距離場の飽和値ではなく、こちらが置いた定数**である
-    /// （飽和は 7.97 セル = 64cm）。結果として**部屋の中央が走査外**になり、
-    /// 実機で足元の印が出ず（n=0）、境界も部屋の形ではなく
-    /// **表面から 48cm の殻**を描いていた（2026-08-19）。
+    /// 【近似を2回外している】「部屋の内側」を自前で作ろうとして2回とも外した。
+    /// 1回目「メッシュ表面から 6 セル（48cm）以内」— **狭すぎて部屋の中央が走査外**。
+    /// この 6 は距離場の飽和値ですらなく、こちらが置いた定数だった（飽和は 7.97 セル）。
+    /// 2回目「その床の列にメッシュ由来の固体があるか」— **広すぎて壁の外側まで含んだ**
+    /// （天井のメッシュが外へ伸びるため。実測で外接箱のほぼ全域 8.19/9.14 m²）。
+    /// **3回目の近似は置かない。**
     ///
-    /// 【縁を混ぜない】流れ場の格子は外周が封じてある（<c>SealBorders</c>）ので、
-    /// その固体をそのまま使うと**全列が走査済み**になってしまう。
-    /// メッシュだけを別の格子へ焼いて使う。焼き込みの入口は
-    /// <see cref="FlowBoundaryBaker.BakeSolid"/> の1本のままで、
-    /// 元データも <see cref="AquariumFlow.ScanRoomVertices"/> を使う
-    /// （同じ組み立てを2か所に書かない）。
+    /// 【取れなければ埋めない】床のポリゴンが得られないときは
+    /// **場を作らない**。近似へ落ちない（静かに壊れる形を禁じる）。
+    /// 理由は <see cref="Status"/> に出す。
     /// </summary>
     public sealed class WatchField : MonoBehaviour
     {
@@ -43,11 +41,13 @@ namespace BlockField.Watch
         [SerializeField] AquariumFlow m_Room;
         [SerializeField] HeadPoseProducer m_Head;
         [SerializeField] WatchView m_View;
+        [SerializeField] ARPlaneManager m_Planes;
         [SerializeField] bool m_Replay;
 
         public AquariumFlow room { get => m_Room; set => m_Room = value; }
         public HeadPoseProducer head { get => m_Head; set => m_Head = value; }
         public WatchView view { get => m_View; set => m_View = value; }
+        public ARPlaneManager planes { get => m_Planes; set => m_Planes = value; }
 
         /// <summary>
         /// **実時間と再生を切り替える。** 再生元が無ければ切り替えても実時間のまま。
@@ -99,30 +99,89 @@ namespace BlockField.Watch
             var grid = m_Room != null && m_Room.Field != null ? m_Room.Field.Grid : null;
             if (grid == null) { Status = "部屋の焼き込み待ち"; return false; }
 
-            var verts = m_Room.ScanRoomVertices;
-            var tris = m_Room.ScanTriangles;
-            if (verts == null || tris == null || verts.Length < 9)
+            if (!TryGetFloorPolygon(out var polygon, out float floorHeight, out string why))
             {
-                Status = "メッシュ待ち";
+                Status = why;
                 return false;
             }
 
-            // **メッシュだけを焼く。** 縁の封じを混ぜると全列が走査済みになる
-            var meshOnly = new FlowGrid(grid.Width, grid.Height, grid.Depth, grid.CellSize,
-                grid.OriginX, grid.OriginY, grid.OriginZ);
-            int meshCells = FlowBoundaryBaker.BakeSolid(meshOnly, verts, tris);
-
-            // 床面へ畳む。判定できるよう SimCore に置いてある（FloorMask）
             int w = grid.Width, d = grid.Depth;
-            int n = FloorMask.Fold(meshOnly, out var scanned, out var floorY);
+            int n = PolygonMask.Build(polygon, w, d, grid.CellSize,
+                grid.OriginX, grid.OriginZ, floorHeight, out var scanned, out var floorY);
+
+            if (n == 0)
+            {
+                Status = "床ポリゴンが格子と重ならない";
+                return false;
+            }
 
             Field = new PresenceField(w, d, grid.CellSize, grid.OriginX, grid.OriginZ,
                 scanned, floorY);
-            Status = $"走査済み {n} / 全 {w * d} 床セル（メッシュ {meshCells} セル）";
+            FloorArea = n * grid.CellSize * grid.CellSize;
+            Status = $"床 {n} セル = {FloorArea:F2} m²（格子 {w}x{d}）";
 
             LoadReplay();       // 再生元は**前回**の記録。上書きする前に読む
             OpenRecorder();
-            Debug.Log($"[Watch] 場を作った: {Status}  再生元={ReplaySource}");
+            Debug.Log($"[Watch] 場を作った: {Status}  床高={floorHeight:F2}m  再生元={ReplaySource}");
+            return true;
+        }
+
+        /// <summary>走査済み領域の面積 (m²)。実部屋の広さと突き合わせるために出す。</summary>
+        public float FloorArea { get; private set; }
+
+        /// <summary>
+        /// 床の境界ポリゴンを**部屋座標の XZ** で取る。
+        ///
+        /// 【見つからないときは近似しない】理由を返して場を作らせない。
+        /// どの面が見えているかをログに出すので、次のセッションで何が取れるか分かる。
+        /// </summary>
+        bool TryGetFloorPolygon(out float[] polygonXZ, out float floorHeight, out string why)
+        {
+            polygonXZ = null;
+            floorHeight = 0f;
+
+            if (m_Planes == null) { why = "ARPlaneManager が未配線"; return false; }
+            var originT = m_Head != null && m_Head.space != null && m_Head.space.origin != null
+                ? m_Head.space.origin.OriginTransform : null;
+            if (originT == null) { why = "アンカー未確定"; return false; }
+
+            ARPlane floor = null;
+            int seen = 0;
+            var labels = new List<string>();
+            foreach (var plane in m_Planes.trackables)
+            {
+                seen++;
+                if (labels.Count < 12) labels.Add(plane.classifications.ToString());
+                if ((plane.classifications & PlaneClassifications.Floor) == 0) continue;
+                if (floor == null || plane.size.x * plane.size.y > floor.size.x * floor.size.y)
+                    floor = plane;
+            }
+
+            if (floor == null)
+            {
+                why = $"床の面が未取得（面 {seen} 件）";
+                if (Time.frameCount % 120 == 0)
+                    Debug.Log($"[Watch] 床ポリゴン待ち: 面 {seen} 件 分類=[{string.Join(", ", labels)}]");
+                return false;
+            }
+
+            var boundary = floor.boundary;
+            if (boundary.Length < 3) { why = $"床の境界が {boundary.Length} 点"; return false; }
+
+            polygonXZ = new float[boundary.Length * 2];
+            double sumY = 0;
+            for (int i = 0; i < boundary.Length; i++)
+            {
+                // 境界は面のローカル 2D。面 → ワールド → 部屋座標へ移す
+                var local = new Vector3(boundary[i].x, 0f, boundary[i].y);
+                var room = originT.InverseTransformPoint(floor.transform.TransformPoint(local));
+                polygonXZ[i * 2] = room.x;
+                polygonXZ[i * 2 + 1] = room.z;
+                sumY += room.y;
+            }
+            floorHeight = (float)(sumY / boundary.Length);
+            why = null;
+            Debug.Log($"[Watch] 床ポリゴン: {boundary.Length} 点 床高={floorHeight:F2}m 分類={floor.classifications}");
             return true;
         }
 
@@ -229,7 +288,7 @@ namespace BlockField.Watch
                 $"落し={Ticker.DroppedTicks} 歩進={Ticker.StepsLastFrame} " +
                 $"頭=({pos.x:F2},{pos.y:F2},{pos.z:F2}) 状態={m_Head?.LastLabel} " +
                 $"カバレッジ={f.CoveredCells} 欠測={f.MissingCells} " +
-                $"走査済={f.ScannedCells}/{f.CellCount} " +
+                $"床={f.ScannedCells}セル({FloorArea:F2}m2) " +
                 $"段={(m_View != null ? m_View.CurrentName : "未配線")} " +
                 $"n={(m_View != null ? m_View.DrawnCells : 0)}/{(m_View != null ? m_View.WantedCells : 0)}" +
                 $"{(m_View != null && m_View.Truncated ? " **切り捨て**" : "")} " +

@@ -1,4 +1,5 @@
 ﻿using BlockField.Aquarium;
+using BlockField.SimCore.Watch;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -56,27 +57,37 @@ namespace BlockField.Watch
 
             if (f == null || ticker == null)
             {
-                m_Text.text = $"{stamp}\nFPS: {fps:F1}\n{(m_Field != null ? m_Field.Status : "未配線")}";
+                m_Text.text = $"{stamp}\nFPS {fps:F1}\n" +
+                    $"{(m_Field != null ? m_Field.Status : "未配線")}";
                 return;
             }
 
             var pos = m_Head != null ? m_Head.LastRoomPosition : Vector3.zero;
 
-            // 【遅延は数値で出す】層を分割するかどうかは体感でなく遅延で決める。
-            // Backlog が 1 ティック(50ms)に近づく／DroppedTicks が増えるなら
-            // 20Hz を維持できていない
+            // 【初めて見た人が意味を取れるか】前回のセッションで
+            // 「描画 n=実際/つもり」「喪失で何を見るか」が伝わらなかった。
+            // 凡例を出し、食い違ったときだけ印を出す
+            string draw = m_View == null ? "未配線"
+                : m_View.Truncated
+                    ? $"{m_View.DrawnCells}/{m_View.WantedCells} セル  **切り捨て**"
+                    : $"{m_View.DrawnCells} セル";
+
+            string tracking = f.Coverage == L0Coverage.None
+                ? $"**測れていない**（{m_Head?.LastLabel}）床が灰になる"
+                : $"測れている（{m_Head?.LastLabel}）";
+
             m_Text.text =
                 $"{stamp}\n" +
-                $"FPS: {fps:F1}   Tick: {ticker.Tick}   遅延: {ticker.Backlog * 1000f:F1}ms" +
-                $"   落し: {ticker.DroppedTicks}   歩進/frame: {ticker.StepsLastFrame}\n" +
-                $"頭: ({pos.x:F2}, {pos.y:F2}, {pos.z:F2})   状態: {m_Head?.LastLabel}\n" +
-                $"カバレッジ: {f.CoveredCells}   欠測: {f.MissingCells}   走査済: {f.ScannedCells}" +
-                $" / 全 {f.CellCount}\n" +
-                $"段[L-Grip]: {(m_View != null ? m_View.CurrentName : "未配線")}" +
-                $"   描画 n={(m_View != null ? m_View.DrawnCells : 0)}/{(m_View != null ? m_View.WantedCells : 0)}" +
-                (m_View != null && m_View.Truncated ? "  **切り捨て**" : "") +
-                $"   {(m_Field.Replaying ? $"**再生中** {m_Field.ReplayCursor}/{m_Field.ReplayCount}" : "実時間")}" +
-                $"   再生元={m_Field.ReplaySource}";
+                $"FPS {fps:F1}   ティック {ticker.Tick}   遅延 {ticker.Backlog * 1000f:F0}ms" +
+                $"   未装着で止まった分 {ticker.DroppedTicks}\n" +
+                $"いま: {tracking}\n" +
+                $"頭の位置 ({pos.x:F2}, {pos.y:F2}, {pos.z:F2}) m\n" +
+                $"測れている床 {f.CoveredCells} セル / 部屋の床 {f.ScannedCells} セル" +
+                $" = {m_Field.FloorArea:F1} m2\n" +
+                $"段[左グリップ] {m_View?.CurrentName}   描画 {draw}\n" +
+                $"凡例 黄=足元 / 青=測れている床 / 灰=測れていない床 / 何も無い=部屋の外\n" +
+                $"{(m_Field.Replaying ? $"**再生中** {m_Field.ReplayCursor}/{m_Field.ReplayCount}" : "実時間")}" +
+                $"  [右A で切替]  再生元 {m_Field.ReplaySource}";
         }
     }
 }
