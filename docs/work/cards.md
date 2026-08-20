@@ -181,3 +181,27 @@ C-012 の範囲とは重ならないと判断している。重なると判断�
 **Room Setup の状態次第で取れない可能性がある。**
 取れなければパネルに「床の面が未取得（面 N 件）」と出て場を作らない。
 そのとき何の面が見えているかをログに出すので、次の判断材料になる。
+
+### C-017 で追加で見つかった不具合（記録が1件も書けていなかった）
+
+端末の再生元ファイルが**私が push したまま更新されていなかった**ことから発覚。
+
+```
+UnauthorizedAccessException: Access to the path
+"/storage/emulated/0/Android/data/com.piperender.blockfield/files/l0_session.log" is denied.
+```
+
+**原因は2つ重なっている。**
+
+1. **`adb push` で置いたファイルは `shell` 所有の `rw-r--r--`** で、
+   アプリ（別 uid）から**書けない**。再生元を用意した私の操作が、記録を壊した
+2. **`catch (IOException)` では足りなかった。** 権限で飛ぶのは
+   `UnauthorizedAccessException` で `IOException` ではないため素通りし、
+   **記録できない事実がどこにも出ていなかった**
+
+2 のほうが本体である。**書けていないことを黙らせない**形に直した:
+`catch (Exception)` で受け、`RecordState` をパネルとログに出す。
+併せて 1 秒ごとに `Flush` する（アプリは force-stop で落とされるので
+`OnDestroy` を当てにするとバッファごと失う）。
+
+**目視5「再生 OK」は読み取りだけが成立していた。** 記録は動いていなかった。

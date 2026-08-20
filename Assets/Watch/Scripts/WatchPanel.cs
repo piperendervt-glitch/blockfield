@@ -87,7 +87,7 @@ namespace BlockField.Watch
                 $"段[左グリップ] {m_View?.CurrentName}   描画 {draw}\n" +
                 $"凡例 黄=足元 / 青=測れている床 / 灰=測れていない床 / 何も無い=部屋の外\n" +
                 $"{(m_Field.Replaying ? $"**再生中** {m_Field.ReplayCursor}/{m_Field.ReplayCount}" : "実時間")}" +
-                $"  [右A で切替]  再生元 {m_Field.ReplaySource}";
+                $"  [右A で切替]  再生元 {m_Field.ReplaySource}  記録 {m_Field.RecordState}";
         }
     }
 }

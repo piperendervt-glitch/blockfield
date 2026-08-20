@@ -206,18 +206,35 @@ namespace BlockField.Watch
             if (!Replaying && m_Recorder != null) m_Recorder.WriteLine(L0LogFormat.Format(sample));
 
             // 【パネルの値はログにも出す】1秒に1回
-            if (Ticker.Tick % L0Ticker.HzDefault == 0) LogStatus();
+            if (Ticker.Tick % L0Ticker.HzDefault == 0)
+            {
+                LogStatus();
+                // 【定期的に流す】アプリは force-stop で落とされるので、
+                // OnDestroy を当てにするとバッファごと失う
+                m_Recorder?.Flush();
+            }
         }
+
+        /// <summary>記録の状態。**書けていないことを黙らせない**（パネルとログに出す）。</summary>
+        public string RecordState { get; private set; } = "(未開始)";
 
         void OpenRecorder()
         {
+            // 【IOException だけ捕まえるのでは足りない】権限が無いときに飛ぶのは
+            // UnauthorizedAccessException で、IOException ではない。
+            // 2026-08-20 のセッションはこれが素通りして**1件も記録できていなかった**
+            // （`adb push` で置いた再生元が shell 所有の rw-r--r-- だったため）。
+            // **記録できない事実がどこにも出ていなかった**のが問題の本体である
             try
             {
                 m_Recorder = new StreamWriter(RecordPath, false) { AutoFlush = false };
+                RecordState = "記録中";
             }
-            catch (IOException e)
+            catch (System.Exception e)
             {
-                Debug.LogWarning($"[Watch] 記録を開けない: {e.Message}");
+                m_Recorder = null;
+                RecordState = $"**記録できない**（{e.GetType().Name}）";
+                Debug.LogWarning($"[Watch] 記録を開けない: {e.GetType().Name}: {e.Message}");
             }
         }
 
@@ -293,7 +310,7 @@ namespace BlockField.Watch
                 $"n={(m_View != null ? m_View.DrawnCells : 0)}/{(m_View != null ? m_View.WantedCells : 0)}" +
                 $"{(m_View != null && m_View.Truncated ? " **切り捨て**" : "")} " +
                 $"{(Replaying ? $"再生 {ReplayCursor}/{ReplayCount}" : "実時間")} " +
-                $"再生元={ReplaySource} " +
+                $"再生元={ReplaySource} 記録={RecordState} " +
                 $"刻印={BuildStamp.Text} アンカー={AnchorIdentity()}");
         }
 
