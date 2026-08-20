@@ -1,9 +1,16 @@
-using System;
+﻿using System;
 
 namespace BlockField.SimCore.Watch
 {
     /// <summary>
-    /// 滞在の場（L1 の最小形）。**床面の 2D 格子**である。
+    /// 滞在の場（**L1**）。**床面の 2D 格子**である。
+    ///
+    /// 【ラスタライズは L1 の仕事】L0 はカバレッジを**領域**（床の境界ポリゴン）で出す。
+    /// 格子へ落とすのはここ。L0 で格子化すると、**セルサイズを変えたときに
+    /// 生の記録が使えなくなる**（roadmap v14.1）。
+    ///
+    /// 【最終検証ティックはここが持つ】L0 ではなく L1 に置く。**L2 の基層**である。
+    /// 段1a ではタグの導出はしない（保持先を移すだけ）。
     ///
     /// 【この場が主張すること】**この場は「この人（装着者）の滞在」を主張する。**
     /// 「誰かの滞在」ではない。プロデューサが Quest 3 の頭位置1つだけであり、
@@ -63,6 +70,24 @@ namespace BlockField.SimCore.Watch
 
         /// <summary>直近のティックで値 1 が立ったセルの添字。無ければ -1。</summary>
         public int OccupiedIndex { get; private set; } = -1;
+
+        /// <summary>
+        /// **L0 の領域から作る**（ラスタライズはここで行う）。
+        /// 格子は <see cref="RoomGridSpec"/> で与える（アンカー GUID に紐づいた固定値）。
+        /// </summary>
+        public PresenceField(in RoomGridSpec grid, L0Region region)
+            : this(grid.Width, grid.Depth, grid.CellSize, grid.OriginX, grid.OriginZ,
+                Rasterize(grid, region, out var fy), fy)
+        {
+        }
+
+        static bool[] Rasterize(in RoomGridSpec grid, L0Region region, out float[] floorY)
+        {
+            PolygonMask.Build(region?.PolygonXZ, grid.Width, grid.Depth, grid.CellSize,
+                grid.OriginX, grid.OriginZ, region?.FloorHeight ?? 0f,
+                out var scanned, out floorY);
+            return scanned;
+        }
 
         /// <param name="scanned">その床セルが走査済みか（床のメッシュがあるか）。長さ w*d。</param>
         /// <param name="floorY">その床セルの床面の高さ (m、部屋座標)。長さ w*d。</param>

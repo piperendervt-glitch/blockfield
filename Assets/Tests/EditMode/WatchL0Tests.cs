@@ -337,6 +337,124 @@ namespace BlockField.Tests.EditMode
             foreach (bool b in scanned) Assert.IsFalse(b);
         }
 
+        // ================= 格子の固定 =================
+
+        /// <summary>
+        /// **同じ GUID で 2回初期化して、格子の寸法と原点が一致すること。**
+        ///
+        /// 部屋の焼き込みを毎回やり直すと**同じ部屋でも起動ごとに格子が変わる**
+        /// （実測 34×43 → 34×42）。場はセルに溜まるので、
+        /// **格子が変わった瞬間に場の対応が崩れる。**
+        /// </summary>
+        [Test]
+        public void TheGridIsStableAcrossRestartsForTheSameAnchor()
+        {
+            string dir = System.IO.Path.Combine(
+                System.IO.Path.GetTempPath(), "blockfield_grid_" + System.Guid.NewGuid());
+            const string guid = "eb09cbb8-969d-1c50-0c9a-9ebb44b8c1e6";
+            try
+            {
+                // 1回目: 保存値が無いので新規作成して保存
+                Assert.IsFalse(RoomGridStore.TryLoad(dir, guid, out _),
+                    "まだ保存していないのに読めた");
+                var first = new RoomGridSpec(-1.36f, -1.72f, 34, 43, 0.08f);
+                RoomGridStore.Save(dir, guid, first);
+
+                // 2回目: 焼き込みが 34x42 を返しても、保存値を使う
+                Assert.IsTrue(RoomGridStore.TryLoad(dir, guid, out var second),
+                    "保存した格子を読めない");
+                Assert.AreEqual(first.Width, second.Width, "幅が変わった");
+                Assert.AreEqual(first.Depth, second.Depth, "奥行きが変わった");
+                Assert.AreEqual(first.OriginX, second.OriginX, 1e-4f, "原点 X が変わった");
+                Assert.AreEqual(first.OriginZ, second.OriginZ, 1e-4f, "原点 Z が変わった");
+                Assert.AreEqual(first.CellSize, second.CellSize, 1e-6f, "セルサイズが変わった");
+
+                // **別の GUID は別の格子。** 黙って引き継がない
+                Assert.IsFalse(RoomGridStore.TryLoad(dir, "00000000-0000-0000-0000-000000000000", out _),
+                    "別のアンカーの格子を読んでしまった");
+            }
+            finally
+            {
+                if (System.IO.Directory.Exists(dir)) System.IO.Directory.Delete(dir, true);
+            }
+        }
+
+        // ================= L0a / L0b / L0c =================
+
+        /// <summary>
+        /// **L0b の確からしさが閾値を割ったら、L0c はカバレッジを空集合にする。**
+        /// 古い変換に静かに落とさない。機体ではこれが「止まる」という挙動になる。
+        /// </summary>
+        [Test]
+        public void LowConfidenceEmptiesTheCoverage()
+        {
+            var trusted = L0Localization.Identity(1, 1f);
+            var lost = L0Localization.Identity(1, 0f);
+
+            Assert.IsTrue(trusted.IsTrustworthy, "確からしさ 1 が信用されていない");
+            Assert.IsFalse(lost.IsTrustworthy, "確からしさ 0 が信用されている");
+
+            var f = Room();
+            // 信用できるとき: 領域がカバレッジになる
+            f.Ingest(new L0Sample(1, 1, 0.3f, 1.6f, 0.3f, 1f,
+                L0Coverage.ScannedRoom, L0Label.Measured, trusted.Confidence));
+            Assert.Greater(f.CoveredCells, 0);
+
+            // 信用できないとき: 空集合（**位置は残っていても使わない**）
+            f.Ingest(new L0Sample(1, 2, 0f, 0f, 0f, 0f,
+                L0Coverage.None, L0Label.TrackingLost, lost.Confidence));
+            Assert.AreEqual(0, f.CoveredCells, "確からしさが割れてもカバレッジが残っている");
+        }
+
+        /// <summary>恒等変換は生値をそのまま返す（段1 の頭位置プロデューサ）。</summary>
+        [Test]
+        public void TheIdentityTransformPassesThroughAndHasAStableHash()
+        {
+            var t = L0Transform.Identity;
+            t.Apply(1.5f, -0.25f, 3f, out float x, out float y, out float z);
+            Assert.AreEqual(1.5f, x, 1e-6f);
+            Assert.AreEqual(-0.25f, y, 1e-6f);
+            Assert.AreEqual(3f, z, 1e-6f);
+
+            // **どの校正を使ったかをログに残す**ための識別子
+            Assert.AreEqual(t.Hash(), L0Transform.Identity.Hash(), "同じ変換のハッシュが違う");
+            var moved = new L0Transform(1f, 0f, 0f, 0.5f, 0f, 1f, 0f, 0f, 0f, 0f, 1f, 0f);
+            Assert.AreNotEqual(t.Hash(), moved.Hash(), "違う変換のハッシュが同じ");
+        }
+
+        /// <summary>**確からしさがログを往復すること**（当時の解釈をやり直すため）。</summary>
+        [Test]
+        public void TheConfidenceSurvivesTheLogRoundTrip()
+        {
+            var s = new L0Sample(1, 42, 1f, 2f, 3f, 1f,
+                L0Coverage.ScannedRoom, L0Label.Measured, 0.75f);
+            Assert.IsTrue(L0LogFormat.TryParse(L0LogFormat.Format(s), out var back));
+            Assert.AreEqual(0.75f, back.Confidence, 1e-3f, "確からしさが失われている");
+
+            // 旧形式（conf 無し）も読める。確からしさ 1 とみなす
+            Assert.IsTrue(L0LogFormat.TryParse(
+                "[L0] t=1 p=1 pos=0.0,0.0,0.0 v=1.0 cov=1 label=0", out var old));
+            Assert.AreEqual(1f, old.Confidence, 1e-6f, "旧形式の既定値が 1 でない");
+        }
+
+        /// <summary>**L1 が領域からラスタライズする**（L0 は領域で出す）。</summary>
+        [Test]
+        public void TheFieldRasterizesTheRegionItself()
+        {
+            var region = new L0Region(
+                new[] { 0.5f, 0.5f, 2.5f, 0.5f, 2.5f, 2.5f, 0.5f, 2.5f }, -0.8f);
+            var grid = new RoomGridSpec(0f, 0f, 24, 24, 0.125f);
+
+            var f = new PresenceField(grid, region);
+
+            Assert.AreEqual(24 * 24, f.CellCount);
+            Assert.AreEqual(4.0f, f.ScannedCells * 0.125f * 0.125f, 0.05f,
+                "ラスタライズした面積がポリゴンと合わない");
+            Assert.IsTrue(f.IsScanned(f.Index(12, 12)), "部屋の中央が走査外");
+            Assert.IsFalse(f.IsScanned(f.Index(2, 2)), "壁の外側が走査済み");
+            Assert.AreEqual(-0.8f, f.FloorY(f.Index(12, 12)), 1e-6f, "床の高さが入っていない");
+        }
+
         // ================= 固定ティック =================
 
         /// <summary>**20Hz 固定。フレーム駆動にしない。**</summary>

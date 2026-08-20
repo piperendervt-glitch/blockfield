@@ -85,6 +85,8 @@ namespace BlockField.Watch
                 $"測れている床 {f.CoveredCells} セル / 部屋の床 {f.ScannedCells} セル" +
                 $" = {m_Field.FloorArea:F1} m2\n" +
                 $"段[左グリップ] {m_View?.CurrentName}   描画 {draw}\n" +
+                $"格子 {m_Field.GridSource} {m_Field.Grid.Width}x{m_Field.Grid.Depth}" +
+                $"   L0b の確からしさ {(m_Head != null ? m_Head.LastConfidence : 0f):F2}\n" +
                 $"凡例 黄=足元 / 青=測れている床 / 灰=測れていない床 / 何も無い=部屋の外\n" +
                 $"{(m_Field.Replaying ? $"**再生中** {m_Field.ReplayCursor}/{m_Field.ReplayCount}" : "実時間")}" +
                 $"  [右A で切替]  再生元 {m_Field.ReplaySource}  記録 {m_Field.RecordState}";

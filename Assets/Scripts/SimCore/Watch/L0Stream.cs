@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Globalization;
 
 namespace BlockField.SimCore.Watch
@@ -48,12 +48,20 @@ namespace BlockField.SimCore.Watch
         public readonly L0Coverage Coverage;
         public readonly L0Label Label;
 
+        /// <summary>
+        /// **L0b が出した確からしさ**（0〜1）。これが閾値を割ったら
+        /// L0c がカバレッジを空集合にする。ログに残すのは、
+        /// **当時の解釈をやり直せるようにする**ため。
+        /// </summary>
+        public readonly float Confidence;
+
         public L0Sample(int producerId, int tick, float x, float y, float z,
-            float value, L0Coverage coverage, L0Label label)
+            float value, L0Coverage coverage, L0Label label, float confidence = 1f)
         {
             ProducerId = producerId; Tick = tick;
             X = x; Y = y; Z = z;
             Value = value; Coverage = coverage; Label = label;
+            Confidence = confidence;
         }
     }
 
@@ -79,12 +87,17 @@ namespace BlockField.SimCore.Watch
     /// </summary>
     public static class L0LogFormat
     {
+        // 【生のポーズを残す】セル番号だけだと、**格子を変えた瞬間に過去の記録が
+        // 使えなくなる**。セルサイズは段1b で変わる可能性がある。
+        // 旧形式（conf 無し）も読めるようにしてある（確からしさ 1 とみなす）。
+
         public const string Tag = "[L0]";
 
         public static string Format(in L0Sample s) =>
             string.Format(CultureInfo.InvariantCulture,
-                "{0} t={1} p={2} pos={3:F4},{4:F4},{5:F4} v={6:F4} cov={7} label={8}",
-                Tag, s.Tick, s.ProducerId, s.X, s.Y, s.Z, s.Value, (int)s.Coverage, (int)s.Label);
+                "{0} t={1} p={2} pos={3:F4},{4:F4},{5:F4} v={6:F4} cov={7} label={8} conf={9:F3}",
+                Tag, s.Tick, s.ProducerId, s.X, s.Y, s.Z, s.Value, (int)s.Coverage, (int)s.Label,
+                s.Confidence);
 
         public static bool TryParse(string line, out L0Sample sample)
         {
@@ -94,7 +107,7 @@ namespace BlockField.SimCore.Watch
             if (at < 0) return false;
 
             int tick = 0, producer = 0, cov = 0, label = 0;
-            float x = 0, y = 0, z = 0, v = 0;
+            float x = 0, y = 0, z = 0, v = 0, conf = 1f;   // 旧形式に conf は無い
             bool hasTick = false, hasPos = false;
 
             foreach (string token in line.Substring(at + Tag.Length).Split(' '))
@@ -110,6 +123,7 @@ namespace BlockField.SimCore.Watch
                     case "v": float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out v); break;
                     case "cov": int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out cov); break;
                     case "label": int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out label); break;
+                    case "conf": float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out conf); break;
                     case "pos":
                         string[] p = val.Split(',');
                         hasPos = p.Length == 3
@@ -120,7 +134,7 @@ namespace BlockField.SimCore.Watch
                 }
             }
             if (!hasTick || !hasPos) return false;
-            sample = new L0Sample(producer, tick, x, y, z, v, (L0Coverage)cov, (L0Label)label);
+            sample = new L0Sample(producer, tick, x, y, z, v, (L0Coverage)cov, (L0Label)label, conf);
             return true;
         }
     }

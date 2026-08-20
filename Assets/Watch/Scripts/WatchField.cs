@@ -72,6 +72,7 @@ namespace BlockField.Watch
 
         readonly List<L0Sample> m_Replayed = new List<L0Sample>();
         StreamWriter m_Recorder;
+        bool m_PlanesLogged;
 
         /// <summary>
         /// 今回のセッションの記録の置き場。**次回のセッションで再生する材料**になる。
@@ -104,27 +105,49 @@ namespace BlockField.Watch
                 Status = why;
                 return false;
             }
+            m_Region = new L0Region(polygon, floorHeight);
 
-            int w = grid.Width, d = grid.Depth;
-            int n = PolygonMask.Build(polygon, w, d, grid.CellSize,
-                grid.OriginX, grid.OriginZ, floorHeight, out var scanned, out var floorY);
-
-            if (n == 0)
+            // **格子はアンカー GUID に紐づけて固定する。** 焼き込みを毎回やり直すと
+            // 同じ部屋でも起動ごとに格子が変わり（実測 34x43 → 34x42）、
+            // **場の対応が崩れる**（roadmap の未解決）。セルサイズの値は変えていない
+            string guid = AnchorIdentity();
+            if (RoomGridStore.TryLoad(Application.persistentDataPath, guid, out var spec))
             {
-                Status = "床ポリゴンが格子と重ならない";
-                return false;
+                GridSource = "保存値";
             }
+            else
+            {
+                spec = new RoomGridSpec(grid.OriginX, grid.OriginZ,
+                    grid.Width, grid.Depth, grid.CellSize);
+                RoomGridStore.Save(Application.persistentDataPath, guid, spec);
+                GridSource = "新規作成";
+                // **黙って切り替えない。** 別のアンカーの場を引き継ぐと意味が壊れる
+                Debug.LogWarning($"[Watch] 格子を新規作成した（GUID={guid}）: {spec}");
+            }
+            Grid = spec;
 
-            Field = new PresenceField(w, d, grid.CellSize, grid.OriginX, grid.OriginZ,
-                scanned, floorY);
-            FloorArea = n * grid.CellSize * grid.CellSize;
-            Status = $"床 {n} セル = {FloorArea:F2} m²（格子 {w}x{d}）";
+            // **ラスタライズは L1 の仕事。** L0 は領域で出す
+            Field = new PresenceField(spec, m_Region);
+            FloorArea = Field.ScannedCells * spec.CellSize * spec.CellSize;
+            Status = $"床 {Field.ScannedCells} セル = {FloorArea:F2} m²（格子 {spec.Width}x{spec.Depth}）";
 
             LoadReplay();       // 再生元は**前回**の記録。上書きする前に読む
             OpenRecorder();
+
+            // **どの格子を使ったかをログ先頭に出す。** 再生時に同じ解釈をやり直せる必要がある
+            Debug.Log($"[Watch] 格子: GUID={guid} {spec} 出所={GridSource}");
             Debug.Log($"[Watch] 場を作った: {Status}  床高={floorHeight:F2}m  再生元={ReplaySource}");
             return true;
         }
+
+        /// <summary>いま使っている格子（アンカー GUID に紐づく固定値）。</summary>
+        public RoomGridSpec Grid { get; private set; }
+
+        /// <summary>格子が保存値か新規作成か。**黙って切り替えないための表示。**</summary>
+        public string GridSource { get; private set; } = "(未決定)";
+
+        /// <summary>L0 が出すカバレッジの**領域**（床の境界ポリゴン）。</summary>
+        L0Region m_Region;
 
         /// <summary>走査済み領域の面積 (m²)。実部屋の広さと突き合わせるために出す。</summary>
         public float FloorArea { get; private set; }
@@ -147,21 +170,35 @@ namespace BlockField.Watch
 
             ARPlane floor = null;
             int seen = 0;
-            var labels = new List<string>();
+            var inventory = new List<string>();
             foreach (var plane in m_Planes.trackables)
             {
                 seen++;
-                if (labels.Count < 12) labels.Add(plane.classifications.ToString());
+                // 分類・点数・法線の向き。段2 の幾何照合の材料になる
+                var n = plane.transform.up;
+                inventory.Add($"分類={plane.classifications} 点数={plane.boundary.Length} " +
+                    $"法線=({n.x:F2},{n.y:F2},{n.z:F2}) 大きさ=({plane.size.x:F2}x{plane.size.y:F2})");
+
                 if ((plane.classifications & PlaneClassifications.Floor) == 0) continue;
                 if (floor == null || plane.size.x * plane.size.y > floor.size.x * floor.size.y)
                     floor = plane;
             }
 
+            // **成功時も一覧を出す。** 床が見つからなかったときにだけ出す形では、
+            // 成功したときに何も分からない（「空の検証」の変種）。
+            // **段2 の幾何照合は平行でない壁2枚を使う**ので、
+            // 壁が残っているかが未確認のままだと段2 の設計が決まらない
+            if (!m_PlanesLogged && seen > 0)
+            {
+                m_PlanesLogged = true;
+                foreach (string line in inventory)
+                    Debug.Log($"[Watch] 平面: {line}");
+                Debug.Log($"[Watch] 平面の一覧: {seen} 件");
+            }
+
             if (floor == null)
             {
                 why = $"床の面が未取得（面 {seen} 件）";
-                if (Time.frameCount % 120 == 0)
-                    Debug.Log($"[Watch] 床ポリゴン待ち: 面 {seen} 件 分類=[{string.Join(", ", labels)}]");
                 return false;
             }
 
@@ -185,6 +222,12 @@ namespace BlockField.Watch
             return true;
         }
 
+        /// <summary>
+        /// **L0c: 記録。** L0a の観測に L0b の変換を掛け、レコードにして場へ渡し、記録する。
+        ///
+        /// **確からしさが閾値を割ったらカバレッジを空集合にする。**
+        /// 古い変換に静かに落とさない（roadmap v14.1）。
+        /// </summary>
         void Step()
         {
             L0Sample sample;
@@ -193,24 +236,44 @@ namespace BlockField.Watch
                 sample = m_Replayed[ReplayCursor % m_Replayed.Count];
                 ReplayCursor++;
             }
-            else if (m_Head == null || !m_Head.TryRead(Ticker.Tick, out sample))
+            else if (m_Head == null)
             {
                 return;
+            }
+            else
+            {
+                // L0a: 観測（デバイス座標。加工なし）
+                bool observed = m_Head.TryObserve(out var raw, out var label);
+
+                // L0b: 定位（変換＋確からしさ）
+                var loc = m_Head.Localize();
+
+                if (!observed || !loc.IsTrustworthy)
+                {
+                    // **空集合。** 直前値保持もゼロ埋めもしない
+                    sample = new L0Sample(m_Head.ProducerId, Ticker.Tick, 0f, 0f, 0f, 0f,
+                        L0Coverage.None,
+                        label == L0Label.Measured ? L0Label.TrackingLost : label,
+                        loc.Confidence);
+                }
+                else
+                {
+                    loc.Transform.Apply(raw.x, raw.y, raw.z, out float rx, out float ry, out float rz);
+                    sample = new L0Sample(m_Head.ProducerId, Ticker.Tick, rx, ry, rz, 1f,
+                        L0Coverage.ScannedRoom, L0Label.Measured, loc.Confidence);
+                }
             }
 
             Field.Ingest(sample);
 
             // 【記録は毎ティック】再生で同じ絵になる必要があるので間引かない。
             // **ファイルへ書く。** logcat へ毎ティック流すと 20Hz を維持できない
-            // （2026-08-19 の実機で 57% のティックを落とした）
             if (!Replaying && m_Recorder != null) m_Recorder.WriteLine(L0LogFormat.Format(sample));
 
             // 【パネルの値はログにも出す】1秒に1回
             if (Ticker.Tick % L0Ticker.HzDefault == 0)
             {
                 LogStatus();
-                // 【定期的に流す】アプリは force-stop で落とされるので、
-                // OnDestroy を当てにするとバッファごと失う
                 m_Recorder?.Flush();
             }
         }
@@ -311,6 +374,7 @@ namespace BlockField.Watch
                 $"{(m_View != null && m_View.Truncated ? " **切り捨て**" : "")} " +
                 $"{(Replaying ? $"再生 {ReplayCursor}/{ReplayCount}" : "実時間")} " +
                 $"再生元={ReplaySource} 記録={RecordState} " +
+                $"格子={GridSource}({Grid.Width}x{Grid.Depth}) 確からしさ={(m_Head != null ? m_Head.LastConfidence : 0f):F2} " +
                 $"刻印={BuildStamp.Text} アンカー={AnchorIdentity()}");
         }
 

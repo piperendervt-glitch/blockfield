@@ -5,22 +5,23 @@ using UnityEngine.XR;
 namespace BlockField.Watch
 {
     /// <summary>
-    /// Quest 3 の頭位置を L0 のレコードとして書くプロデューサ。
+    /// Quest 3 の頭位置のプロデューサ。**L0a（観測）と L0b（定位）を持つ。**
+    /// 変換を掛けて記録するのは L0c（<see cref="WatchField"/>）の仕事である。
     ///
-    /// 【これはソースの1つにすぎない】L0 はセンサではなく**ストリーム形式**である。
-    /// このクラスは「その形を書く実装」であって、L0 そのものではない。
-    /// **L1 以上はプロデューサの種類を知らない。**
+    /// 【L0a は座標系に依存しない】<see cref="TryObserve"/> は
+    /// **デバイス座標の生の観測**を返す。部屋座標が成立していなくても記録できる
+    /// （段0 のゲートが落ちたときの保険。roadmap v14.1）。
     ///
-    /// 【変換は恒等】<see cref="WatchSpaceRenderer.TryGetHeadInRoom"/> がすでに
-    /// 部屋座標で返すので、このプロデューサの「部屋座標への変換」は恒等である。
-    /// 将来 外部センサを足すときは、そのプロデューサが自分の変換を1つ持つ。
+    /// 【L0b はプロデューサごとに独立】<see cref="Localize"/> は
+    /// **変換と、その確からしさ**を返す。頭位置は Meta の SLAM が部屋座標まで
+    /// 面倒を見るので**変換は恒等**、確からしさは追跡状態から導出する。
+    /// 固定カメラはマーカー＋幾何照合、機体は点群位置合わせで同じ形を返す。
+    /// **同じ出力を出す限り、上は区別しない。**
     ///
-    /// 【カバレッジの主張】トラッキングが生きていれば、カバレッジは
-    /// **走査済みの部屋領域全体**になる。自分の位置が分かるなら、
-    /// **自分がどこに居ないかも分かる**からである。
-    /// トラッキングを失う・未装着なら**空集合**にする。推定で埋めない。
+    /// 【確からしさの出力口は最初から持つ】段1 では恒等を返すだけだが、
+    /// 口が無いと後から足すときに上の層を触ることになる。
     /// </summary>
-    public sealed class HeadPoseProducer : MonoBehaviour, IL0Producer
+    public sealed class HeadPoseProducer : MonoBehaviour
     {
         public const int HeadProducerId = 1;
 
@@ -30,38 +31,51 @@ namespace BlockField.Watch
 
         public int ProducerId => HeadProducerId;
 
-        /// <summary>直近に読めた部屋座標（診断・描画用）。</summary>
+        /// <summary>直近に読めた位置（診断・描画用）。</summary>
         public Vector3 LastRoomPosition { get; private set; }
 
         /// <summary>直近のラベル。パネルとログに出す。</summary>
         public L0Label LastLabel { get; private set; } = L0Label.NotWorn;
 
-        /// <summary>**頭位置は恒等変換。** 生値がすでに部屋座標で来る。</summary>
-        public void ToRoom(float x, float y, float z, out float rx, out float ry, out float rz)
+        /// <summary>直近の確からしさ（L0b）。パネルとログに出す。</summary>
+        public float LastConfidence { get; private set; }
+
+        /// <summary>
+        /// **L0a: 観測。** デバイス座標の生の位置を返す。加工しない。
+        ///
+        /// 頭位置の場合、Meta の SLAM が返すのは既にワールド座標なので、
+        /// **アンカーへ落とすところまでを「観測」とみなす**
+        /// （アンカーの適用は <see cref="WatchSpaceRenderer"/> に閉じている）。
+        /// アンカーが未確定・ヘッド未取得なら false。**0 を返さない。**
+        /// </summary>
+        public bool TryObserve(out Vector3 position, out L0Label label)
         {
-            rx = x; ry = y; rz = z;
+            label = CurrentLabel();
+            LastLabel = label;
+            position = default;
+
+            if (label != L0Label.Measured || m_Space == null) return false;
+            if (!m_Space.TryGetHeadInRoom(out position)) return false;
+
+            LastRoomPosition = position;
+            return true;
         }
 
-        public bool TryRead(int tick, out L0Sample sample)
+        /// <summary>
+        /// **L0b: 定位。** 部屋座標への変換と、その確からしさを返す。
+        ///
+        /// 段1 は恒等変換。確からしさは追跡状態から導出する
+        /// （追跡中 1、喪失・未装着・アンカー未確定 0）。
+        /// **変換は時間の関数であってよい** — 頭位置が定数なのは特殊例にすぎない。
+        /// </summary>
+        public L0Localization Localize()
         {
-            L0Label label = CurrentLabel();
-            LastLabel = label;
-
-            if (label != L0Label.Measured || m_Space == null
-                || !m_Space.TryGetHeadInRoom(out var head))
-            {
-                // **空集合。** 直前値保持もゼロ埋めもしない
-                sample = new L0Sample(ProducerId, tick, 0f, 0f, 0f, 0f,
-                    L0Coverage.None, label == L0Label.Measured ? L0Label.TrackingLost : label);
-                LastLabel = sample.Label;
-                return true;
-            }
-
-            ToRoom(head.x, head.y, head.z, out float rx, out float ry, out float rz);
-            LastRoomPosition = new Vector3(rx, ry, rz);
-            sample = new L0Sample(ProducerId, tick, rx, ry, rz, 1f,
-                L0Coverage.ScannedRoom, L0Label.Measured);
-            return true;
+            float confidence =
+                m_Space == null || !m_Space.IsReady ? 0f
+                : LastLabel == L0Label.Measured ? 1f
+                : 0f;
+            LastConfidence = confidence;
+            return L0Localization.Identity(ProducerId, confidence);
         }
 
         /// <summary>
