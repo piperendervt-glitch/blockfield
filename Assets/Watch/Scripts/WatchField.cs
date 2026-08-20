@@ -140,6 +140,12 @@ namespace BlockField.Watch
             return true;
         }
 
+        /// <summary>
+        /// 直近のフレーム時間 (ms)。**パネルから消した値をログへ移した**もの
+        /// （パネルは 5行に絞ったが、**ログ側は減らさない**）。
+        /// </summary>
+        public float FrameMs { get; set; }
+
         /// <summary>いま使っている格子（アンカー GUID に紐づく固定値）。</summary>
         public RoomGridSpec Grid { get; private set; }
 
@@ -364,7 +370,8 @@ namespace BlockField.Watch
         {
             var f = Field;
             var pos = m_Head != null ? m_Head.LastRoomPosition : Vector3.zero;
-            Debug.Log($"[Watch] Tick={Ticker.Tick} 遅延={Ticker.Backlog * 1000f:F1}ms " +
+            Debug.Log($"[Watch] Tick={Ticker.Tick} FPS={(FrameMs > 0.01f ? 1000f / FrameMs : 0f):F1} " +
+                $"フレーム={FrameMs:F1}ms 遅延={Ticker.Backlog * 1000f:F1}ms " +
                 $"落し={Ticker.DroppedTicks} 歩進={Ticker.StepsLastFrame} " +
                 $"頭=({pos.x:F2},{pos.y:F2},{pos.z:F2}) 状態={m_Head?.LastLabel} " +
                 $"カバレッジ={f.CoveredCells} 欠測={f.MissingCells} " +

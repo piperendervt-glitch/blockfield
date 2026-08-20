@@ -40,7 +40,10 @@ namespace BlockField.Tests.EditMode
                     referenced.Add(member.Groups[1].Value);
                 }
             }
-            Assert.Greater(referenced.Count, 8,
+            // 【空の検証の防止】走査が壊れて 0 件になったら通ってしまうので下限を置く。
+            // **パネルは 5行に絞ったので、この下限も下げた**（9行時代は 8）。
+            // 下げたのは判定が落ちたからではなく、**守る対象が意図して小さくなった**ため
+            Assert.GreaterOrEqual(referenced.Count, 4,
                 $"パネルから拾えたメンバが {referenced.Count} 個しかない。走査が壊れている");
 
             var missing = new List<string>();
@@ -119,8 +122,12 @@ namespace BlockField.Tests.EditMode
             Assert.IsTrue(view.Contains("Truncated"), "切り捨ての旗が無い");
             Assert.IsTrue(view.Contains("WantedCells"), "描くつもりだった数を持っていない");
 
-            Assert.IsTrue(panel.Contains("Truncated"), "パネルに切り捨てを出していない");
-            Assert.IsTrue(panel.Contains("WantedCells"), "パネルに描くつもりだった数を出していない");
+            // **パネルは数を出さず、警告行で知らせる**（5行に絞ったため）。
+            // 「黙って切り捨てない」という要件は満たしたまま、行数を増やさない形にした
+            Assert.IsTrue(panel.Contains("Truncated"), "パネルが切り捨てを見ていない");
+            Assert.IsTrue(panel.Contains("描画を切り捨て"), "パネルの警告行に切り捨てが出ない");
+
+            // **ログ側は減らさない。** 数はここに残る
             Assert.IsTrue(log.Contains("Truncated"), "ログに切り捨てを出していない");
             Assert.IsTrue(log.Contains("WantedCells"), "ログに描くつもりだった数を出していない");
         }
