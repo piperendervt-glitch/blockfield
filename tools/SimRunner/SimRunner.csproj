@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    SimCore のソースを直接コンパイルする。asmdef で UnityEngine 非依存を強制してあるので
+    （CLAUDE.md アーキテクチャ）、そのまま .NET コンソールアプリに取り込める。
+    DLL を経由しないのは、Unity のビルド成果物に依存させると
+    「Unity Editor を開かないと検証できない」ことになるため。
+    NuGet パッケージは一切使わない（PNG も自前）。回線の細いリモートでも
+    dotnet restore で詰まらないようにするため。
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>SimRunner</AssemblyName>
+    <RootNamespace>SimRunner</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!--
+      SimCore は Unity 側で書かれており null 許容注釈を付けていない。
+      その警告がここで13件出ると、SimRunner 自身の本当の警告が埋もれる。
+      SimCore 由来の null 許容警告だけ黙らせる（SimRunner のコードは enable のまま検査される）。
+    -->
+    <NoWarn>$(NoWarn);CS8618;CS8625;CS8603;CS8601;CS8765</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../Assets/Scripts/SimCore/**/*.cs" />
+    <Compile Include="*.cs" />
+  </ItemGroup>
+
+</Project>

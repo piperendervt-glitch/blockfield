@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    jelly_1 J2 の掃引・計測用ハーネス。
+
+    EditMode テストは「期待値が決まっているものを固定する」ための道具で、
+    掃引（境界がどこに来るかをまず測る）には向かない。SimRunner は
+    生態系の条件を回すもので、こちらとは対象が違う。
+    LongrunProbe と同じ形で SimCore のソースを直接コンパイルする。
+
+    ここで測った値を期待値として EditMode テストへ固定する、という順序。
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>JellyProbe</AssemblyName>
+    <RootNamespace>JellyProbe</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="..\..\Assets\Scripts\SimCore\Excitable\**\*.cs" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    系列2 Phase B の流れ場を計測するハーネス。
+    実機ログには最大流速しか出ていないため、分布と境界付近の挙動は
+    ここで測る（ログに何を出すべきかを決めるための材料でもある）。
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>FlowProbe</AssemblyName>
+    <RootNamespace>FlowProbe</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="..\..\Assets\Scripts\SimCore\Fluid\**\*.cs" />
+    <Compile Include="..\..\Assets\Scripts\SimCore\Excitable\**\*.cs" />
+  </ItemGroup>
+
+</Project>

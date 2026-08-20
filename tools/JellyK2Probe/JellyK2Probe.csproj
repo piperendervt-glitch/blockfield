@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    jelly_2 K2 の掃引ハーネス。復元トルクを上げていったとき M-K2b が
+    どこで落ちるかを測る（その境界が K4 の探索上限になる）。
+    EditMode テストは「期待値が決まっているものを固定する」道具で、
+    掃引には向かない（jelly_1 の JellyProbe と同じ分担）。
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>JellyK2Probe</AssemblyName>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="..\..\Assets\Scripts\SimCore\Fluid\**\*.cs" />
+    <Compile Include="..\..\Assets\Scripts\SimCore\Excitable\**\*.cs" />
+    <Compile Include="..\..\Assets\Scripts\SimCore\Rng\**\*.cs" />
+  </ItemGroup>
+</Project>

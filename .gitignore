@@ -129,3 +129,8 @@ __pycache__/
 # 一致しない刻印は、刻印が無いのより悪い（間違ったものを信じさせる）。
 Assets/Resources/BuildStamp.txt
 Assets/Resources/BuildStamp.txt.meta
+
+# tools/ 以下の csproj は**手書き**であり Unity の生成物ではない。
+# ignore したままだと、クローンから測定ツールを再ビルドできない
+# （引き継ぎで持ち出せない）。2026-08-20 に L0aProbe で気づいた。
+!tools/**/*.csproj

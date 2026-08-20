@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    longrun の結果を「毎ティック」の分解能で追うための使い捨てプローブ。
+
+    SimRunner の系列は1ランあたり2,000点に間引かれるため（10万ティックなら
+    50ティック間隔）、それより短い一過性の事象が落ちる。実際 longrun で
+    guildExtinct=1/5 が出たのに系列上の最小値はどのシードも2で、
+    「50ティック未満のゼロ」が疑われた。それを直接確かめる。
+
+    SimRunner と同一の世界生成・同一のティック順を使うため、
+    Runner.MakeSeeds / MakeWorld と同じ手順をここでも踏む。
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>LongrunProbe</AssemblyName>
+    <RootNamespace>LongrunProbe</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="..\..\Assets\Scripts\SimCore\**\*.cs" />
+  </ItemGroup>
+
+</Project>
